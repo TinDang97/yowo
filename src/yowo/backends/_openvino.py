@@ -30,8 +30,7 @@ class OpenVinoBackend:
     """OpenVINO backend using ``openvino.Core``.
 
     Supports ``.xml`` files directly or a directory that contains a single
-    ``.xml`` file (e.g. the ``_openvino_model/`` export directory produced
-    by ultralytics).
+    ``.xml`` file (e.g. the ``_openvino_model/`` export directory).
 
     Compiled for ``"GPU"`` when an Intel GPU appears in
     ``Core.available_devices``, otherwise ``"CPU"``.

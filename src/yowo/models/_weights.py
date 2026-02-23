@@ -53,7 +53,7 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
     meta = get(spec.family, spec.size)
 
     root = cache_dir or Path(os.environ.get("YOWO_CACHE_DIR", str(_CACHE_DIR)))
-    dest = root / spec.family.value / spec.size.value / f"{meta.ultralytics_name}.pt"
+    dest = root / spec.family.value / spec.size.value / f"{meta.weight_stem}.pt"
 
     if dest.exists():
         return dest

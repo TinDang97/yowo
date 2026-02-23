@@ -24,8 +24,7 @@ class ModelMeta:
         input_height: Default spatial input height (pixels).
         input_width: Default spatial input width (pixels).
         num_classes: Number of output classes (80 for COCO).
-        ultralytics_name: Name stem passed to ``ultralytics.YOLO()``
-            (e.g. ``"yolo12n"``).
+        weight_stem: Name stem for weight files (e.g. ``"yolo11n"``).
         default_weights_url: HTTPS URL to the canonical ``.pt`` weights file.
     """
 
@@ -34,7 +33,7 @@ class ModelMeta:
     input_height: int
     input_width: int
     num_classes: int
-    ultralytics_name: str
+    weight_stem: str
     default_weights_url: str
 
 
@@ -70,7 +69,7 @@ def list_available() -> list[ModelMeta]:
 
 
 # ---------------------------------------------------------------------------
-# Built-in registrations -- 15 variants: YOLO11/12/26 x n/s/m/l/x
+# Built-in registrations -- 10 variants: YOLO11/26 x n/s/m/l/x
 # ---------------------------------------------------------------------------
 
 
@@ -82,13 +81,13 @@ def _make_meta(family: ModelFamily, size: ModelSize) -> ModelMeta:
         input_height=640,
         input_width=640,
         num_classes=80,
-        ultralytics_name=name,
+        weight_stem=name,
         default_weights_url=f"{_ASSETS_BASE}{name}.pt",
     )
 
 
 def _register_builtins() -> None:
-    for family in (ModelFamily.YOLO11, ModelFamily.YOLO12, ModelFamily.YOLO26):
+    for family in (ModelFamily.YOLO11, ModelFamily.YOLO26):
         for size in (
             ModelSize.NANO,
             ModelSize.SMALL,

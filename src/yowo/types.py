@@ -61,7 +61,6 @@ class ModelFamily(enum.StrEnum):
     """YOLO model family."""
 
     YOLO11 = "yolo11"
-    YOLO12 = "yolo12"
     YOLO26 = "yolo26"
 
 
@@ -101,7 +100,7 @@ class ModelSpec:
     """Fully qualified model identity.
 
     Attributes:
-        family: YOLO model family (YOLO11, YOLO12, YOLO26).
+        family: YOLO model family (YOLO11 or YOLO26).
         size: Size variant (nano … xlarge).
         task: Ultralytics task string; "detect" for object detection.
         weights_path: Path to a pre-downloaded .pt file, or None to use

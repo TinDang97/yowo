@@ -72,7 +72,9 @@ class InferenceEngine:
             precision_override=precision.value if precision else None,
         )
 
-        self._backend: InferenceBackend = create_backend(self._selection.backend, self._hw)
+        self._backend: InferenceBackend = create_backend(
+            self._selection.backend, self._hw, model_spec=self._spec
+        )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
 
@@ -100,7 +102,7 @@ class InferenceEngine:
                         self._selection.backend.value,
                         bt.value,
                     )
-                    self._backend = create_backend(bt, self._hw)
+                    self._backend = create_backend(bt, self._hw, model_spec=self._spec)
 
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)

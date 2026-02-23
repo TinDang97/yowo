@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendType, PreprocessedTensor
+from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
@@ -88,6 +88,8 @@ class InferenceBackend(Protocol):
 def create_backend(
     backend_type: BackendType,
     hw_profile: HardwareProfile,
+    *,
+    model_spec: ModelSpec | None = None,
 ) -> InferenceBackend:
     """Instantiate a backend (does not load a model).
 
@@ -98,6 +100,8 @@ def create_backend(
     Args:
         backend_type: Which backend implementation to create.
         hw_profile: Hardware snapshot used for device validation.
+        model_spec: Model specification (required for PyTorch backend to build
+            the native architecture).
 
     Returns:
         An unloaded ``InferenceBackend`` instance.
@@ -110,7 +114,7 @@ def create_backend(
         case BackendType.PYTORCH:
             from yowo.backends._pytorch import PyTorchBackend
 
-            return PyTorchBackend(hw_profile)
+            return PyTorchBackend(hw_profile, model_spec=model_spec)
         case BackendType.ONNX:
             from yowo.backends._onnx import OnnxBackend
 

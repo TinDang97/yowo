@@ -45,7 +45,7 @@ def _make_tensor_meta(
     )
 
 
-def _make_model_spec(family: ModelFamily = ModelFamily.YOLO12) -> ModelSpec:
+def _make_model_spec(family: ModelFamily = ModelFamily.YOLO11) -> ModelSpec:
     return ModelSpec(family=family, size=ModelSize.NANO)
 
 

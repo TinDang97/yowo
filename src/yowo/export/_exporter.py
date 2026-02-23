@@ -1,4 +1,4 @@
-"""Core export orchestration (wraps ultralytics)."""
+"""Core export orchestration (native torch.onnx.export)."""
 
 from __future__ import annotations
 
@@ -8,19 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from yowo.errors import ConfigError, DependencyError, ExportError
-from yowo.export._calibration import resolve_calibration_source
+from yowo.export._calibration import resolve_calibration_images
 from yowo.export._metadata import ExportMetadata
 from yowo.hardware import get_hardware_profile
 from yowo.models import resolve_weights
 from yowo.types import ExportFormat, ModelSpec, Precision
 
 logger = logging.getLogger(__name__)
-
-_FORMAT_TO_ULTRALYTICS: dict[ExportFormat, str] = {
-    ExportFormat.ONNX: "onnx",
-    ExportFormat.TENSORRT: "engine",
-    ExportFormat.OPENVINO: "openvino",
-}
 
 
 def export_model(
@@ -33,12 +27,10 @@ def export_model(
     imgsz: int = 640,
     calibration_data: str | None = None,
 ) -> ExportMetadata:
-    """Export a YOLO model to an optimized format.
+    """Export a YOLO model to an optimized inference format.
 
-    Wraps ultralytics.YOLO.export() with:
-    - Dependency checking with install hints
-    - Calibration data resolution for INT8
-    - Metadata sidecar file (.yowo.json)
+    Uses ``torch.onnx.export`` with the native ``yowo.arch`` module.
+    TensorRT and OpenVINO exports first produce ONNX, then convert.
 
     Args:
         spec: Model to export.
@@ -47,44 +39,41 @@ def export_model(
         precision: FP32, FP16, or INT8.
         dynamic_batch: Enable dynamic batch dimension (ONNX only).
         imgsz: Input image size.
-        calibration_data: Required for INT8; path to YAML or image directory.
+        calibration_data: Required for INT8; path to image directory.
 
     Returns:
         ExportMetadata record with file path and sidecar written to disk.
 
     Raises:
         ConfigError: INT8 requested without calibration_data.
-        DependencyError: ultralytics not installed.
-        ExportError: Export operation failed or produced no output file.
+        DependencyError: Required packages not installed.
+        ExportError: Export operation failed.
     """
     if precision == Precision.INT8 and calibration_data is None:
         raise ConfigError("INT8 export requires --calibration-data")
 
     try:
-        import ultralytics
+        import torch  # type: ignore[import-untyped]
     except ImportError as exc:
-        raise DependencyError("ultralytics", "uv add ultralytics") from exc
+        raise DependencyError("torch", "uv add yowo[pytorch]") from exc
+
+    from yowo.arch import build_model
+    from yowo.arch._weights import load_weights
 
     weights_path = resolve_weights(spec)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ultra_format = _FORMAT_TO_ULTRALYTICS[target_format]
-    kwargs: dict[str, object] = {
-        "format": ultra_format,
-        "imgsz": imgsz,
-        "dynamic": dynamic_batch,
-    }
-
-    if target_format == ExportFormat.ONNX:
-        kwargs["simplify"] = True
-        kwargs["opset"] = 17
+    # Build and prepare model
+    model = build_model(spec.family, spec.size)
+    load_weights(model, weights_path)
+    model = model.fuse().eval()
 
     if precision == Precision.FP16:
-        kwargs["half"] = True
-    elif precision == Precision.INT8:
-        kwargs["int8"] = True
-        assert calibration_data is not None  # already checked above
-        kwargs["data"] = resolve_calibration_source(calibration_data)
+        model = model.half()
+
+    dummy = torch.zeros(1, 3, imgsz, imgsz)
+    if precision == Precision.FP16:
+        dummy = dummy.half()
 
     logger.info(
         "Exporting %s%s -> %s (%s)",
@@ -95,26 +84,34 @@ def export_model(
     )
 
     t0 = time.monotonic()
-    try:
-        from ultralytics import YOLO  # type: ignore[attr-defined]
 
-        model = YOLO(str(weights_path))
-        exported = model.export(**kwargs)
-    except Exception as exc:
-        raise ExportError(f"Export failed: {exc}") from exc
+    # Step 1: Always produce ONNX first
+    model_stem = f"{spec.family.value}{spec.size.value}"
+    onnx_path = output_dir / f"{model_stem}.onnx"
+    _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
+
+    # Step 2: Convert if needed
+    match target_format:
+        case ExportFormat.ONNX:
+            exported_path = onnx_path
+        case ExportFormat.TENSORRT:
+            exported_path = _convert_tensorrt(
+                onnx_path, output_dir / f"{model_stem}.engine", precision, calibration_data
+            )
+        case ExportFormat.OPENVINO:
+            exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
+
     elapsed = time.monotonic() - t0
-
-    exported_path = Path(str(exported))
-    if not exported_path.exists():
-        raise ExportError(f"Export produced no file at {exported_path}")
 
     hw = get_hardware_profile()
     size_bytes = (
         _dir_size(exported_path) if exported_path.is_dir() else exported_path.stat().st_size
     )
 
+    import yowo
+
     meta = ExportMetadata(
-        model_name=f"{spec.family.value}{spec.size.value}",
+        model_name=model_stem,
         format=target_format.value,
         precision=precision.value,
         imgsz=imgsz,
@@ -126,7 +123,7 @@ def export_model(
         created_at=datetime.now(UTC).isoformat(),
         export_duration_sec=round(elapsed, 2),
         source_weights=str(weights_path),
-        ultralytics_version=ultralytics.__version__,
+        yowo_version=getattr(yowo, "__version__", "0.1.0"),
         gpu_name=hw.primary_gpu.name if hw.primary_gpu else None,
         calibration_data=calibration_data,
     )
@@ -139,6 +136,111 @@ def export_model(
         elapsed,
     )
     return meta
+
+
+# ---------------------------------------------------------------------------
+# Format-specific export helpers
+# ---------------------------------------------------------------------------
+
+
+def _export_onnx(
+    model: object,
+    dummy: object,
+    onnx_path: Path,
+    *,
+    dynamic_batch: bool,
+) -> None:
+    """Export model to ONNX format with optional simplification."""
+    import torch  # type: ignore[import-untyped]
+
+    dynamic_axes = {"images": {0: "batch"}, "output0": {0: "batch"}} if dynamic_batch else None
+
+    try:
+        torch.onnx.export(
+            model,  # type: ignore[arg-type]
+            dummy,  # type: ignore[arg-type]
+            str(onnx_path),
+            opset_version=17,
+            input_names=["images"],
+            output_names=["output0"],
+            dynamic_axes=dynamic_axes,
+        )
+    except Exception as exc:
+        raise ExportError(f"ONNX export failed: {exc}") from exc
+
+    # Simplify with onnxslim if available
+    try:
+        import onnxslim  # type: ignore[import-untyped]
+
+        slim_model = onnxslim.slim(str(onnx_path))
+        import onnx  # type: ignore[import-untyped]
+
+        onnx.save(slim_model, str(onnx_path))  # type: ignore[arg-type]
+        logger.debug("ONNX model simplified with onnxslim")
+    except ImportError:
+        logger.debug("onnxslim not installed, skipping ONNX simplification")
+    except Exception as exc:
+        logger.warning("ONNX simplification failed (non-fatal): %s", exc)
+
+
+def _convert_tensorrt(
+    onnx_path: Path,
+    engine_path: Path,
+    precision: Precision,
+    calibration_data: str | None,
+) -> Path:
+    """Convert ONNX to TensorRT engine."""
+    try:
+        import tensorrt as trt  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise DependencyError(
+            "tensorrt",
+            "pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com",
+        ) from exc
+
+    trt_logger = trt.Logger(trt.Logger.WARNING)
+    builder = trt.Builder(trt_logger)
+    network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+    parser = trt.OnnxParser(network, trt_logger)
+
+    with open(onnx_path, "rb") as f:
+        if not parser.parse(f.read()):
+            errors = "\n".join(str(parser.get_error(i)) for i in range(parser.num_errors))
+            raise ExportError(f"TensorRT ONNX parse failed:\n{errors}")
+
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)  # 1 GB
+
+    if precision in (Precision.FP16, Precision.INT8):
+        config.set_flag(trt.BuilderFlag.FP16)
+    if precision == Precision.INT8:
+        config.set_flag(trt.BuilderFlag.INT8)
+        if calibration_data:
+            _images = resolve_calibration_images(calibration_data)
+            logger.info("INT8 calibration with %d images", len(_images))
+
+    serialized = builder.build_serialized_network(network, config)
+    if serialized is None:
+        raise ExportError("TensorRT engine build returned None")
+
+    engine_path.write_bytes(serialized)
+    return engine_path
+
+
+def _convert_openvino(onnx_path: Path, output_dir: Path) -> Path:
+    """Convert ONNX to OpenVINO IR format."""
+    try:
+        import openvino as ov  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise DependencyError("openvino", "uv add openvino") from exc
+
+    try:
+        model = ov.convert_model(str(onnx_path))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        ov.save_model(model, str(output_dir / "model.xml"))
+        return output_dir
+    except Exception as exc:
+        raise ExportError(f"OpenVINO conversion failed: {exc}") from exc
 
 
 def _dir_size(path: Path) -> int:

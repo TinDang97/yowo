@@ -1,7 +1,7 @@
 """Model export pipeline.
 
-Wraps ultralytics.YOLO.export() with validation, calibration handling,
-and metadata sidecar files.
+Exports YOLO models to ONNX, TensorRT, and OpenVINO formats using
+native ``torch.onnx.export`` with calibration handling and metadata sidecars.
 
 Usage::
 

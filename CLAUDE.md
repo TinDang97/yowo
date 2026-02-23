@@ -33,18 +33,18 @@ Pre-commit hooks run ruff (fix+format), pyright, and `pytest tests/unit -x -q --
 
 ## Architecture
 
-**yowo** wraps [ultralytics](https://github.com/ultralytics/ultralytics) for YOLO inference and export, adding hardware auto-detection, backend fallback chains, stream resilience, and production CLI/Python API.
+**yowo** implements native YOLO11 and YOLO26 architectures for inference and export, with hardware auto-detection, backend fallback chains, stream resilience, and production CLI/Python API. No ultralytics dependency.
 
 ### Module dependency graph (no circular deps)
 
 ```
 types.py  errors.py          ← leaf nodes
     ↓
-hardware/  models/  io/  postprocess/   ← depend only on types + errors
+hardware/  models/  io/  postprocess/  arch/   ← depend only on types + errors
+    ↓                                    ↓
+backends/   ← depends on hardware + types + arch (PyTorch backend)
     ↓
-backends/   ← depends on hardware + types
-    ↓
-export/     ← depends on models + hardware
+export/     ← depends on models + hardware + arch
     ↓
 engine.py   ← wires all modules (InferenceEngine)
     ↓
@@ -64,7 +64,9 @@ cli/        ← Click entry point (yowo.cli._main:cli)
 | `src/yowo/io/_decode.py` | `preprocess()` — letterbox + normalize → `PreprocessedTensor` (BCHW float32). |
 | `src/yowo/postprocess/_nms.py` | `postprocess()` — decodes raw backend tensors → `Detection` objects; applies NMS for backends with raw proposals. |
 | `src/yowo/hardware/_detect.py` | One-time hardware detection, result cached for session lifetime. |
-| `src/yowo/export/_exporter.py` | `export_model()` — wraps ultralytics export with calibration support and `.yowo.json` sidecar. |
+| `src/yowo/arch/_yolo.py` | `YOLOModel(nn.Module)` — assembles backbone + neck + head. `build_model()` factory + `fuse()` for inference. |
+| `src/yowo/arch/_weights.py` | `load_weights()` — loads `.pt` checkpoint weights into native `YOLOModel`, maps state_dict keys. |
+| `src/yowo/export/_exporter.py` | `export_model()` — `torch.onnx.export` with fused native model, TensorRT/OpenVINO conversion, `.yowo.json` sidecar. |
 | `src/yowo/config.py` | `InferenceConfig`, `ExportConfig`, `load_config()` (YAML + env var override). |
 
 ### Data flow

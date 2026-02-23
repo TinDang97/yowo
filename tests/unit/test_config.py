@@ -107,7 +107,7 @@ class TestLoadConfigFromYaml:
 
     def test_full_yaml_round_trip(self, tmp_path: Path) -> None:
         content = textwrap.dedent("""\
-            model_family: yolo12
+            model_family: yolo11
             model_size: s
             backend: pytorch
             device: cuda:0
@@ -121,7 +121,7 @@ class TestLoadConfigFromYaml:
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text(content)
         cfg = load_config(path=cfg_file)
-        assert cfg.model_family == ModelFamily.YOLO12
+        assert cfg.model_family == ModelFamily.YOLO11
         assert cfg.model_size == ModelSize.SMALL
         assert cfg.backend == BackendType.PYTORCH
         assert cfg.device == "cuda:0"
@@ -251,10 +251,10 @@ class TestLoadConfigEnvOverrides:
     ) -> None:
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text("model_family: yolo11\n")
-        monkeypatch.setenv("YOWO_MODEL_FAMILY", "yolo12")
+        monkeypatch.setenv("YOWO_MODEL_FAMILY", "yolo26")
         cfg = load_config(path=cfg_file)
         # env var wins
-        assert cfg.model_family == ModelFamily.YOLO12
+        assert cfg.model_family == ModelFamily.YOLO26
 
     def test_env_confidence_out_of_range_raises_config_error(
         self, monkeypatch: pytest.MonkeyPatch

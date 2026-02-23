@@ -145,7 +145,6 @@ class TestEnumRoundTrips:
         "value,expected",
         [
             ("yolo11", ModelFamily.YOLO11),
-            ("yolo12", ModelFamily.YOLO12),
             ("yolo26", ModelFamily.YOLO26),
         ],
     )
@@ -261,7 +260,7 @@ class TestModelSpec:
 
     def test_custom_task(self) -> None:
         spec = ModelSpec(
-            family=ModelFamily.YOLO12,
+            family=ModelFamily.YOLO11,
             size=ModelSize.MEDIUM,
             task="segment",
         )

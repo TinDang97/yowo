@@ -1,7 +1,7 @@
 """Detection postprocessing: decode raw model output -> Detection objects.
 
 Handles two output formats:
-- Standard YOLO (YOLO11, YOLO12): (B, 4+num_classes, num_anchors)
+- Standard YOLO (YOLO11): (B, 4+num_classes, num_anchors)
 - NMS-free YOLO26: (B, num_detections, 6) - [x1,y1,x2,y2,confidence,class_id]
 
 NMS uses ``cv2.dnn.NMSBoxes`` (C++ implementation) with the offset trick

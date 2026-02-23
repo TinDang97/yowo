@@ -404,7 +404,7 @@ class TestFallback:
 
         create_calls: list[BackendType] = []
 
-        def fake_create(bt: BackendType, hw_profile: HardwareProfile) -> MagicMock:
+        def fake_create(bt: BackendType, hw_profile: HardwareProfile, **_kw: object) -> MagicMock:
             create_calls.append(bt)
             if bt == BackendType.PYTORCH:
                 return fallback_backend

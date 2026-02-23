@@ -18,7 +18,7 @@ def cli() -> None:
 
 @cli.command("detect")
 @click.argument("source")
-@click.option("--model", "-m", default="yolo26n", help="Model name, e.g. yolo12n")
+@click.option("--model", "-m", default="yolo26n", help="Model name, e.g. yolo26n")
 @click.option(
     "--weights",
     "-w",
@@ -216,7 +216,7 @@ def models_command(family: str | None) -> None:
 
 
 def _parse_model_spec(model_name: str) -> ModelSpec:
-    """Parse 'yolo12n' -> ModelSpec(YOLO12, NANO).
+    """Parse 'yolo26n' -> ModelSpec(YOLO26, NANO).
 
     Raises:
         click.BadParameter: On unknown model name format.
@@ -230,7 +230,6 @@ def _parse_model_spec(model_name: str) -> ModelSpec:
     }
     family_map: dict[str, ModelFamily] = {
         "yolo11": ModelFamily.YOLO11,
-        "yolo12": ModelFamily.YOLO12,
         "yolo26": ModelFamily.YOLO26,
     }
 
@@ -241,8 +240,7 @@ def _parse_model_spec(model_name: str) -> ModelSpec:
                 return ModelSpec(family, size_map[suffix])
 
     raise click.BadParameter(
-        f"Unknown model: {model_name!r}. "
-        f"Expected format: yolo{{11|12|26}}{{n|s|m|l|x}}, e.g. yolo26n"
+        f"Unknown model: {model_name!r}. Expected format: yolo{{11|26}}{{n|s|m|l|x}}, e.g. yolo26n"
     )
 
 

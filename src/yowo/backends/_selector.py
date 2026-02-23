@@ -57,11 +57,11 @@ _FALLBACK_CHAIN: dict[BackendType, list[BackendType]] = {
 
 _INSTALL_HINTS = (
     "Install at least one inference backend:\n"
-    "  PyTorch (fallback):  uv add torch ultralytics\n"
-    "  ONNX (CPU):          uv add onnxruntime\n"
-    "  ONNX (CUDA):         uv add onnxruntime-gpu\n"
+    "  PyTorch (fallback):  uv add yowo[pytorch]\n"
+    "  ONNX (CPU):          uv add yowo[onnx]\n"
+    "  ONNX (CUDA):         uv add yowo[onnx-gpu]\n"
     "  TensorRT:            uv add tensorrt\n"
-    "  OpenVINO:            uv add openvino"
+    "  OpenVINO:            uv add yowo[openvino]"
 )
 
 
@@ -318,7 +318,7 @@ def _check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
         case BackendType.PYTORCH:
             if not libs.torch_version:
                 raise BackendError(
-                    "PyTorch (torch) is not installed. Install with: uv add torch ultralytics"
+                    "PyTorch (torch) is not installed. Install with: uv add yowo[pytorch]"
                 )
         case BackendType.ONNX:
             if not libs.onnxruntime_version:

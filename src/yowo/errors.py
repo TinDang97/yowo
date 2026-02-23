@@ -130,7 +130,7 @@ class ModelLoadError(ModelError):
     """The model file exists but cannot be loaded.
 
     Raised when a .pt file is found but is corrupt, truncated, or was
-    saved with an incompatible version of PyTorch / ultralytics.
+    saved with an incompatible version of PyTorch.
     """
 
 

@@ -28,7 +28,7 @@ class ExportMetadata:
     created_at: str
     export_duration_sec: float
     source_weights: str
-    ultralytics_version: str
+    yowo_version: str
     python_version: str = field(default_factory=platform.python_version)
     platform_system: str = field(default_factory=platform.system)
     platform_machine: str = field(default_factory=platform.machine)

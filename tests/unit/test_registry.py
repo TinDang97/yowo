@@ -10,68 +10,45 @@ from yowo.types import ModelFamily, ModelSize
 
 
 class TestGet:
-    def test_returns_correct_meta_for_yolo12_nano(self) -> None:
-        meta = get(ModelFamily.YOLO12, ModelSize.NANO)
+    def test_returns_correct_meta_for_yolo11_nano(self) -> None:
+        meta = get(ModelFamily.YOLO11, ModelSize.NANO)
 
-        assert meta.family == ModelFamily.YOLO12
+        assert meta.family == ModelFamily.YOLO11
         assert meta.size == ModelSize.NANO
         assert meta.input_height == 640
         assert meta.input_width == 640
         assert meta.num_classes == 80
-        assert meta.ultralytics_name == "yolo12n"
-        assert "yolo12n.pt" in meta.default_weights_url
+        assert meta.weight_stem == "yolo11n"
+        assert "yolo11n.pt" in meta.default_weights_url
 
     def test_raises_model_not_found_for_unknown_combo(self) -> None:
-        # Use a non-existent family value via raw ModelFamily creation.
-        # We test with a valid family but we monkey-patch a fake size tuple.
-        fake_size = ModelSize.XLARGE  # valid, but we delete it temporarily below.
+        from yowo.models import _registry as reg
 
-        # Remove from registry temporarily and verify KeyError-like behaviour.
-        with pytest.raises(ModelNotFoundError, match="not found in registry"):
-            # "yolo999" family won't be in the registry; simulate by passing
-            # an unregistered (family, size) combo not registered.
-            # We create a fresh ModelFamily-like value — instead, use a
-            # registered family but deliberately break lookup via a wrapper.
-            get.__wrapped__ if hasattr(get, "__wrapped__") else None  # no-op
-
-            # Directly manipulate by importing and testing the raw dict.
-            from yowo.models import _registry as reg
-
-            # Temporarily insert and then check a clearly unregistered key.
-            fake_meta = ModelMeta(
-                family=ModelFamily.YOLO11,
-                size=fake_size,
-                input_height=640,
-                input_width=640,
-                num_classes=10,
-                ultralytics_name="fake",
-                default_weights_url="https://example.com/fake.pt",
-            )
-            original = reg._REGISTRY.pop((ModelFamily.YOLO11, ModelSize.XLARGE), None)
-            try:
-                reg.get(ModelFamily.YOLO11, ModelSize.XLARGE)
-            finally:
-                if original is not None:
-                    reg._REGISTRY[(ModelFamily.YOLO11, ModelSize.XLARGE)] = original
-                _ = fake_meta  # reference to silence warning
+        fake_size = ModelSize.XLARGE
+        original = reg._REGISTRY.pop((ModelFamily.YOLO11, fake_size), None)
+        try:
+            with pytest.raises(ModelNotFoundError, match="not found in registry"):
+                reg.get(ModelFamily.YOLO11, fake_size)
+        finally:
+            if original is not None:
+                reg._REGISTRY[(ModelFamily.YOLO11, fake_size)] = original
 
     def test_raises_model_not_found_with_helpful_message(self) -> None:
         from yowo.models import _registry as reg
 
-        # Remove YOLO12/NANO temporarily and verify message content.
-        saved = reg._REGISTRY.pop((ModelFamily.YOLO12, ModelSize.NANO), None)
+        saved = reg._REGISTRY.pop((ModelFamily.YOLO26, ModelSize.NANO), None)
         try:
-            with pytest.raises(ModelNotFoundError, match="yolo12/n"):
-                reg.get(ModelFamily.YOLO12, ModelSize.NANO)
+            with pytest.raises(ModelNotFoundError, match="yolo26/n"):
+                reg.get(ModelFamily.YOLO26, ModelSize.NANO)
         finally:
             if saved is not None:
-                reg._REGISTRY[(ModelFamily.YOLO12, ModelSize.NANO)] = saved
+                reg._REGISTRY[(ModelFamily.YOLO26, ModelSize.NANO)] = saved
 
 
 class TestListAvailable:
-    def test_returns_15_variants(self) -> None:
+    def test_returns_10_variants(self) -> None:
         available = list_available()
-        assert len(available) == 15
+        assert len(available) == 10
 
     def test_all_entries_are_model_meta(self) -> None:
         for meta in list_available():
@@ -82,9 +59,9 @@ class TestListAvailable:
         keys = [(m.family, m.size) for m in available]
         assert keys == sorted(keys)
 
-    def test_covers_all_three_families(self) -> None:
+    def test_covers_both_families(self) -> None:
         families = {m.family for m in list_available()}
-        assert families == {ModelFamily.YOLO11, ModelFamily.YOLO12, ModelFamily.YOLO26}
+        assert families == {ModelFamily.YOLO11, ModelFamily.YOLO26}
 
     def test_covers_all_five_sizes(self) -> None:
         sizes = {m.size for m in list_available()}
@@ -99,10 +76,9 @@ class TestListAvailable:
 
 class TestRegister:
     def test_adds_new_variant(self) -> None:
-        custom_family = ModelFamily.YOLO11  # reuse existing enum value
+        custom_family = ModelFamily.YOLO11
         custom_size = ModelSize.NANO
 
-        # Save any existing entry.
         from yowo.models import _registry as reg
 
         saved = reg._REGISTRY.get((custom_family, custom_size))
@@ -113,7 +89,7 @@ class TestRegister:
             input_height=320,
             input_width=320,
             num_classes=10,
-            ultralytics_name="custom11n",
+            weight_stem="custom11n",
             default_weights_url="https://example.com/custom11n.pt",
         )
 
@@ -124,7 +100,6 @@ class TestRegister:
             assert retrieved.input_height == 320
             assert retrieved.num_classes == 10
         finally:
-            # Restore original state.
             if saved is not None:
                 reg._REGISTRY[(custom_family, custom_size)] = saved
             else:
@@ -141,7 +116,7 @@ class TestRegister:
             input_height=512,
             input_width=512,
             num_classes=90,
-            ultralytics_name="yolo26s_custom",
+            weight_stem="yolo26s_custom",
             default_weights_url="https://example.com/yolo26s_custom.pt",
         )
 
