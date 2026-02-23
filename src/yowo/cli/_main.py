@@ -19,6 +19,8 @@ def cli() -> None:
 @cli.command("detect")
 @click.argument("source")
 @click.option("--model", "-m", default="yolo26n", help="Model name, e.g. yolo12n")
+@click.option("--weights", "-w", default=None, type=click.Path(exists=True),
+              help="Path to local .pt weights file (skips download)")
 @click.option(
     "--backend",
     default="auto",
@@ -38,6 +40,7 @@ def cli() -> None:
 def detect_command(
     source: str,
     model: str,
+    weights: str | None,
     backend: str,
     device: str,
     precision: str,
@@ -52,6 +55,8 @@ def detect_command(
     from yowo.io._source import open_source
 
     spec = _parse_model_spec(model)
+    if weights:
+        spec = ModelSpec(spec.family, spec.size, spec.task, Path(weights))
 
     engine_kwargs: dict[str, object] = dict(
         batch_size=batch,
@@ -88,6 +93,8 @@ def detect_command(
 
 @cli.command("export")
 @click.argument("model")
+@click.option("--weights", "-w", default=None, type=click.Path(exists=True),
+              help="Path to local .pt weights file (skips download)")
 @click.option(
     "--format",
     "-f",
@@ -107,6 +114,7 @@ def detect_command(
 @click.option("--imgsz", default=640, type=int)
 def export_command(
     model: str,
+    weights: str | None,
     fmt: str,
     precision: str,
     calibration_data: str | None,
@@ -118,6 +126,8 @@ def export_command(
     from yowo.export import export_model
 
     spec = _parse_model_spec(model)
+    if weights:
+        spec = ModelSpec(spec.family, spec.size, spec.task, Path(weights))
     out_dir = (
         Path(output_dir)
         if output_dir
