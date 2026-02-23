@@ -145,7 +145,7 @@ class PyTorchBackend:
         try:
             torch = self._torch
 
-            t = torch.from_numpy(tensor.data).to(self._device_str)
+            t = torch.from_numpy(tensor.data).to(self._device_str, non_blocking=True)
 
             # Channels-last input on GPU
             if self._device_str.startswith("cuda"):
@@ -154,7 +154,7 @@ class PyTorchBackend:
             with torch.inference_mode():
                 output = self._model(t)
 
-            return output.cpu().numpy().astype(np.float32)
+            return output.cpu().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 

@@ -12,9 +12,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from yowo.arch._blocks import Conv
+from yowo.arch._blocks import Bottleneck, Conv
 
-__all__ = ["C2PSA", "Attention", "PSABlock"]
+__all__ = ["C2PSA", "Attention", "C3k2PSA", "PSABlock"]
 
 
 # ---------------------------------------------------------------------------
@@ -129,3 +129,41 @@ class C2PSA(nn.Module):
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
         b = self.m(b)
         return self.cv2(torch.cat([a, b], dim=1))
+
+
+# ---------------------------------------------------------------------------
+# C3k2PSA — C2f with Sequential(Bottleneck, PSABlock) inner blocks
+# ---------------------------------------------------------------------------
+
+
+class C3k2PSA(nn.Module):
+    """C2f-style block with Bottleneck + PSABlock inner modules.
+
+    Used in YOLO26 neck layer 22: same outer structure as C3k2 (C2f) but
+    inner modules are ``Sequential(Bottleneck, PSABlock)`` instead of C3k.
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        e: float = 0.5,
+        shortcut: bool = False,
+    ) -> None:
+        super().__init__()
+        self.c = int(c2 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1, 1)
+        self.m = nn.ModuleList(
+            nn.Sequential(
+                Bottleneck(self.c, self.c, shortcut),
+                PSABlock(self.c),
+            )
+            for _ in range(n)
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))

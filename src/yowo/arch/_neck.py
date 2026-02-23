@@ -13,6 +13,7 @@ from __future__ import annotations
 import torch.nn as nn
 from torch import Tensor
 
+from yowo.arch._attention import C3k2PSA
 from yowo.arch._blocks import C3k2, Concat, Conv
 from yowo.arch._config import ModelConfig, scale_channels, scale_repeats
 
@@ -73,9 +74,12 @@ class FPNPANNeck(nn.Module):
         # Layer 21: Concat (handled in forward)
         self.concat4 = Concat(dim=1)
         # Layer 22: C3k2 on [downsampled_P4'' + P5] → P5''
-        # YOLO26: n=1, e=0.5 for this layer; YOLO11: standard n2
+        # YOLO26: n=1, Sequential(Bottleneck, PSABlock); YOLO11: standard C3k2
         n_last = 1 if config.end2end else n2
-        self.c3k2_pan2 = C3k2(c4 + c5, c5, n=n_last, c3k=True, shortcut=False)
+        if config.end2end:
+            self.c3k2_pan2 = C3k2PSA(c4 + c5, c5, n=n_last, shortcut=False)
+        else:
+            self.c3k2_pan2 = C3k2(c4 + c5, c5, n=n_last, c3k=True, shortcut=False)
 
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor]:
         """Enhance multi-scale features.

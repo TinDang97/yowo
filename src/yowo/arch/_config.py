@@ -25,7 +25,10 @@ class ModelConfig:
         reg_max: DFL distribution bins per box side (16 for YOLO11, 1 for YOLO26).
         end2end: True for NMS-free inference (YOLO26).
         sppf_shortcut: True to add residual in SPPF (YOLO26).
-        neck_c3k: True to use C3k blocks in neck C3k2 layers (YOLO26).
+        neck_c3k: True to use C3k in neck C3k2 layers (layers 13, 16, 19).
+            True for m/l/x (both families) and all YOLO26 sizes.
+        backbone_c3k: True to use C3k in backbone C3k2 layers (layers 2, 4).
+            True for m/l/x (both families); False for n/s uses plain Bottleneck.
         max_det: Maximum detections for end2end top-k selection.
         input_size: Default input spatial size (height, width).
     """
@@ -40,6 +43,7 @@ class ModelConfig:
     end2end: bool = False
     sppf_shortcut: bool = False
     neck_c3k: bool = False
+    backbone_c3k: bool = False
     max_det: int = 300
     input_size: tuple[int, int] = (640, 640)
 
@@ -63,13 +67,12 @@ _FAMILY_DEFAULTS: dict[ModelFamily, dict[str, object]] = {
         "reg_max": 16,
         "end2end": False,
         "sppf_shortcut": False,
-        "neck_c3k": False,
     },
     ModelFamily.YOLO26: {
         "reg_max": 1,
         "end2end": True,
         "sppf_shortcut": True,
-        "neck_c3k": True,
+        "neck_c3k_force": True,  # YOLO26 uses C3k in neck even for n/s sizes
     },
 }
 
@@ -89,6 +92,12 @@ def get_config(family: ModelFamily, size: ModelSize) -> ModelConfig:
     depth, width, max_ch = _SCALE[size]
     overrides = _FAMILY_DEFAULTS[family]
 
+    # backbone and neck C3k2 layers use C3k (not plain Bottleneck) for m/l/x in both families.
+    # YOLO26 additionally forces neck_c3k=True for n/s (all sizes use C3k in neck).
+    large_size = size in (ModelSize.MEDIUM, ModelSize.LARGE, ModelSize.XLARGE)
+    backbone_c3k = large_size
+    neck_c3k = large_size or bool(overrides.get("neck_c3k_force", False))
+
     return ModelConfig(
         family=family,
         size=size,
@@ -98,7 +107,8 @@ def get_config(family: ModelFamily, size: ModelSize) -> ModelConfig:
         reg_max=int(overrides["reg_max"]),  # type: ignore[arg-type]
         end2end=bool(overrides["end2end"]),
         sppf_shortcut=bool(overrides["sppf_shortcut"]),
-        neck_c3k=bool(overrides["neck_c3k"]),
+        neck_c3k=neck_c3k,
+        backbone_c3k=backbone_c3k,
     )
 
 

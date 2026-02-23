@@ -39,14 +39,15 @@ class Backbone(nn.Module):
         # Layer 1: P2/4 — c1→c2, stride 2
         self.conv1 = Conv(c1, c2, 3, 2)
 
-        # Layer 2: c2→c3, C3k2 block (c3k=False for all sizes)
-        self.c3k2_1 = C3k2(c2, c3, n=n2, c3k=False, e=0.25, shortcut=True)
+        # Layer 2: c2→c3, C3k2 block
+        # YOLO26: c3k=True (all layers use C3k); YOLO11: c3k=False
+        self.c3k2_1 = C3k2(c2, c3, n=n2, c3k=config.backbone_c3k, e=0.25, shortcut=True)
 
         # Layer 3: P3/8 — c3→c3, stride 2
         self.conv2 = Conv(c3, c3, 3, 2)
 
-        # Layer 4: c3→c4, C3k2 block (c3k=False for all sizes)
-        self.c3k2_2 = C3k2(c3, c4, n=n2, c3k=False, e=0.25, shortcut=True)
+        # Layer 4: c3→c4, C3k2 block (same c3k flag as layer 2)
+        self.c3k2_2 = C3k2(c3, c4, n=n2, c3k=config.backbone_c3k, e=0.25, shortcut=True)
 
         # Layer 5: P4/16 — c4→c4, stride 2
         self.conv3 = Conv(c4, c4, 3, 2)

@@ -39,7 +39,9 @@ class DFL(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         b, _, a = x.shape
         # (B,4*c1,A) -> view -> transpose -> softmax(c1) -> conv -> (B,4,A)
-        return self.conv(x.view(b, 4, self.c1, a).transpose(1, 2).softmax(1)).view(b, 4, a)
+        return self.conv(x.view(b, 4, self.c1, a).transpose(1, 2).contiguous().softmax(1)).view(
+            b, 4, a
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -177,13 +179,13 @@ class Detect(nn.Module):
 
     def _forward_standard(self, x: list[Tensor]) -> Tensor:
         """Standard detection: returns raw concatenated predictions."""
-        feats = self._extract_features(x, self.cv2, self.cv3)
-        return self._decode(feats, x)
+        box_feats, cls_feats = self._extract_features(x, self.cv2, self.cv3)
+        return self._decode(box_feats, cls_feats, x)
 
     def _forward_end2end(self, x: list[Tensor]) -> Tensor:
         """End-to-end (NMS-free) detection: uses one-to-one heads + top-k."""
-        feats = self._extract_features(x, self.one2one_cv2, self.one2one_cv3)
-        decoded = self._decode(feats, x)
+        box_feats, cls_feats = self._extract_features(x, self.one2one_cv2, self.one2one_cv3)
+        decoded = self._decode(box_feats, cls_feats, x)
         # decoded: (B, 4+nc, total_anchors)
         return self._postprocess_end2end(decoded)
 
@@ -192,32 +194,43 @@ class Detect(nn.Module):
         x: list[Tensor],
         cv2: nn.ModuleList,
         cv3: nn.ModuleList,
-    ) -> dict[str, list[Tensor]]:
+    ) -> tuple[list[Tensor], list[Tensor]]:
         """Run box and class heads on each scale."""
         box_feats: list[Tensor] = []
         cls_feats: list[Tensor] = []
         for i in range(self.nl):
             box_feats.append(cv2[i](x[i]))
             cls_feats.append(cv3[i](x[i]))
-        return {"boxes": box_feats, "classes": cls_feats, "feats": x}
+        return box_feats, cls_feats
 
-    def _decode(self, feats: dict[str, list[Tensor]], x: list[Tensor]) -> Tensor:
+    def _decode(
+        self,
+        box_feats: list[Tensor],
+        cls_feats: list[Tensor],
+        x: list[Tensor],
+    ) -> Tensor:
         """Decode box distances and class scores into predictions."""
         # Flatten spatial dims: (B, C, H, W) → (B, C, H*W)
-        box_cat = torch.cat([b.flatten(2) for b in feats["boxes"]], dim=2)
-        cls_cat = torch.cat([c.flatten(2) for c in feats["classes"]], dim=2)
+        box_cat = torch.cat([b.flatten(2) for b in box_feats], dim=2)
+        cls_cat = torch.cat([c.flatten(2) for c in cls_feats], dim=2)
 
         # Generate anchors on first pass or shape change
         if self.stride.device != x[0].device or self.stride.sum() == 0:
             self._init_strides(x)
 
-        anchors, strides = make_anchors(x, self.stride)
+        # Cache anchors — regenerate only when feature map shapes change
+        shape_key = tuple(xi.shape[2:] for xi in x)
+        if not hasattr(self, "_anchor_cache_key") or self._anchor_cache_key != shape_key:
+            self._cached_anchors, self._cached_strides = make_anchors(x, self.stride)
+            self._anchor_cache_key = shape_key
 
         # DFL decode: (B, 4*reg_max, N) → (B, 4, N)
         dfl_out = self.dfl(box_cat)
 
         # Decode to bounding boxes in pixel coords
-        dbox = dist2bbox(dfl_out, anchors, xywh=not self.end2end) * strides.transpose(0, 1)
+        dbox = dist2bbox(
+            dfl_out, self._cached_anchors, xywh=not self.end2end
+        ) * self._cached_strides.transpose(0, 1)
 
         # Class scores via sigmoid
         scores = cls_cat.sigmoid()

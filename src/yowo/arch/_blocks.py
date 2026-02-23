@@ -48,17 +48,19 @@ def fuse_conv_and_bn(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
         bias=True,
     ).requires_grad_(False)
 
-    # Fuse weights:  w_fused = w_conv * (gamma / sqrt(var + eps))
-    w_conv = conv.weight.clone().view(conv.out_channels, -1)
-    w_bn = torch.diag(bn.weight.div(torch.sqrt(bn.running_var + bn.eps)))  # type: ignore[arg-type]
-    fused.weight.copy_(torch.mm(w_bn, w_conv).view(fused.weight.shape))
+    # Per-channel scale: gamma / sqrt(var + eps)  — O(N) instead of O(N^2) diag
+    scale = bn.weight.div(torch.sqrt(bn.running_var + bn.eps))  # type: ignore[arg-type]
 
-    # Fuse bias:  b_fused = gamma * (b_conv - mean) / sqrt(var + eps) + beta
+    # Fuse weights:  w_fused = w_conv * scale (element-wise broadcast)
+    w_conv = conv.weight.clone().view(conv.out_channels, -1)
+    fused.weight.copy_((w_conv * scale.unsqueeze(1)).view(fused.weight.shape))
+
+    # Fuse bias:  b_fused = scale * b_conv + (beta - gamma * mean / sqrt(var + eps))
     b_conv = conv.bias if conv.bias is not None else torch.zeros(conv.out_channels)
     b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(  # type: ignore[union-attr]
         torch.sqrt(bn.running_var + bn.eps)  # type: ignore[arg-type]
     )
-    fused.bias.copy_(torch.mm(w_bn, b_conv.reshape(-1, 1)).reshape(-1) + b_bn)  # type: ignore[union-attr]
+    fused.bias.copy_(scale * b_conv + b_bn)  # type: ignore[union-attr]
     return fused
 
 
@@ -189,12 +191,52 @@ class C2f(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# C3 — CSP Bottleneck with 3 convolutions
+# ---------------------------------------------------------------------------
+
+
+class C3(nn.Module):
+    """Cross-Stage Partial bottleneck with 3 convolutions.
+
+    Two branches: ``cv1`` passes through sequential bottleneck blocks,
+    ``cv2`` is a skip connection. Both are concatenated and projected
+    through ``cv3``.
+
+    This is the base class for ``C3k``.
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        shortcut: bool = True,
+        g: int = 1,
+        e: float = 0.5,
+    ) -> None:
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c1, c_, 1, 1)
+        self.cv3 = Conv(2 * c_, c2, 1)
+        self.m = nn.Sequential(
+            *(Bottleneck(c_, c_, shortcut, g, k=(3, 3), e=1.0) for _ in range(n))
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+
+
+# ---------------------------------------------------------------------------
 # C3k — CSP Bottleneck with customisable kernel size
 # ---------------------------------------------------------------------------
 
 
-class C3k(C2f):
-    """C2f variant where each bottleneck uses *k*x*k* kernels."""
+class C3k(C3):
+    """C3 variant where each bottleneck uses k x k kernels.
+
+    Used inside ``C3k2`` when ``c3k=True``.
+    """
 
     def __init__(
         self,
@@ -207,8 +249,9 @@ class C3k(C2f):
         k: int = 3,
     ) -> None:
         super().__init__(c1, c2, n, shortcut, g, e)
-        self.m = nn.ModuleList(
-            Bottleneck(self.c, self.c, shortcut, g, k=(k, k), e=1.0) for _ in range(n)
+        c_ = int(c2 * e)
+        self.m = nn.Sequential(
+            *(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n))
         )
 
 
@@ -294,6 +337,7 @@ class Concat(nn.Module):
 
 
 __all__ = [
+    "C3",
     "SPPF",
     "Bottleneck",
     "C2f",
