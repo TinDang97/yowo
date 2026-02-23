@@ -4,11 +4,13 @@ Handles two output formats:
 - Standard YOLO (YOLO11, YOLO12): (B, 4+num_classes, num_anchors)
 - NMS-free YOLO26: (B, num_detections, 6) - [x1,y1,x2,y2,confidence,class_id]
 
-All NMS is implemented in pure numpy — no torch dependency.
+NMS uses ``cv2.dnn.NMSBoxes`` (C++ implementation) with the offset trick
+for class-aware suppression — no torch dependency.
 """
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -107,70 +109,17 @@ COCO_CLASSES: list[str] = [
 ]
 
 
-def _iou(box: NDArray[np.float32], boxes: NDArray[np.float32]) -> NDArray[np.float32]:
-    """Vectorized IoU of one box against N boxes.
-
-    Args:
-        box: Shape (4,) in xyxy format.
-        boxes: Shape (N, 4) in xyxy format.
-
-    Returns:
-        Shape (N,) float32 IoU values.
-    """
-    inter_x1 = np.maximum(box[0], boxes[:, 0])
-    inter_y1 = np.maximum(box[1], boxes[:, 1])
-    inter_x2 = np.minimum(box[2], boxes[:, 2])
-    inter_y2 = np.minimum(box[3], boxes[:, 3])
-
-    inter_w = np.maximum(0.0, inter_x2 - inter_x1)
-    inter_h = np.maximum(0.0, inter_y2 - inter_y1)
-    inter_area = inter_w * inter_h
-
-    box_area = (box[2] - box[0]) * (box[3] - box[1])
-    boxes_area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    union_area = box_area + boxes_area - inter_area + 1e-6
-
-    return (inter_area / union_area).astype(np.float32)
-
-
-def _greedy_nms(
-    boxes: NDArray[np.float32],
-    scores: NDArray[np.float32],
-    iou_threshold: float,
-) -> NDArray[np.intp]:
-    """Greedy NMS for a single class.
-
-    Args:
-        boxes: (N, 4) xyxy float32.
-        scores: (N,) float32 confidence scores.
-        iou_threshold: Suppress boxes with IoU >= this value.
-
-    Returns:
-        Indices of surviving boxes (sorted by descending score).
-    """
-    order = np.argsort(scores)[::-1]
-    keep: list[int] = []
-
-    while order.size > 0:
-        idx = int(order[0])
-        keep.append(idx)
-        if order.size == 1:
-            break
-        rest = order[1:]
-        iou_vals = _iou(boxes[idx], boxes[rest])
-        suppressed = iou_vals >= iou_threshold
-        order = rest[~suppressed]
-
-    return np.array(keep, dtype=np.intp)
-
-
 def _class_aware_nms(
     boxes_xyxy: NDArray[np.float32],
     scores: NDArray[np.float32],
     class_ids: NDArray[np.intp],
     iou_threshold: float,
 ) -> NDArray[np.intp]:
-    """Apply NMS independently for each class and return surviving indices.
+    """Apply class-aware NMS via ``cv2.dnn.NMSBoxes`` with the offset trick.
+
+    Shifts box coordinates by ``class_id * (max_coord + 1)`` so boxes from
+    different classes never overlap spatially, then runs a single C++
+    ``NMSBoxes`` call instead of per-class Python loops.
 
     Args:
         boxes_xyxy: (N, 4) xyxy float32.
@@ -181,17 +130,33 @@ def _class_aware_nms(
     Returns:
         Sorted (ascending) indices of kept boxes.
     """
-    kept: list[int] = []
-    for cls in np.unique(class_ids):
-        mask = class_ids == cls
-        indices = np.where(mask)[0]
-        surviving = _greedy_nms(
-            boxes_xyxy[mask],
-            scores[mask],
-            iou_threshold,
-        )
-        kept.extend(indices[surviving].tolist())
-    return np.array(sorted(kept), dtype=np.intp)
+    if len(boxes_xyxy) == 0:
+        return np.array([], dtype=np.intp)
+
+    # Offset trick: shift coordinates by class so different classes
+    # never overlap. This lets us run a single NMS pass.
+    max_coord = float(boxes_xyxy.max())
+    offsets = class_ids.astype(np.float32) * np.float32(max_coord + 1.0)
+
+    # Convert xyxy -> xywh (required by cv2.dnn.NMSBoxes) with offsets.
+    shifted_xywh = np.empty_like(boxes_xyxy)
+    shifted_xywh[:, 0] = boxes_xyxy[:, 0] + offsets  # x + offset
+    shifted_xywh[:, 1] = boxes_xyxy[:, 1] + offsets  # y + offset
+    shifted_xywh[:, 2] = boxes_xyxy[:, 2] - boxes_xyxy[:, 0]  # w = x2 - x1
+    shifted_xywh[:, 3] = boxes_xyxy[:, 3] - boxes_xyxy[:, 1]  # h = y2 - y1
+
+    indices = cv2.dnn.NMSBoxes(
+        shifted_xywh.tolist(),
+        scores.tolist(),
+        score_threshold=0.0,  # already pre-filtered by confidence
+        nms_threshold=iou_threshold,
+    )
+
+    # cv2.dnn.NMSBoxes returns () when empty, Sequence[int] otherwise.
+    if isinstance(indices, tuple) or len(indices) == 0:
+        return np.array([], dtype=np.intp)
+
+    return np.sort(np.asarray(indices, dtype=np.intp).ravel())
 
 
 def _inverse_letterbox(
@@ -204,6 +169,9 @@ def _inverse_letterbox(
 ) -> NDArray[np.float32]:
     """Map boxes from tensor space back to original frame pixel coordinates.
 
+    Uses in-place numpy operations (``out=`` parameter) to avoid creating
+    temporary arrays. Each column reuses the output buffer directly.
+
     Args:
         boxes_xyxy: (N, 4) in tensor pixel space.
         scale: Uniform scale applied during letterbox resize.
@@ -215,16 +183,36 @@ def _inverse_letterbox(
     Returns:
         (N, 4) clipped to [0, orig_w] / [0, orig_h].
     """
-    out = boxes_xyxy.copy()
-    out[:, 0] = (boxes_xyxy[:, 0] - pad_left) / scale  # x1
-    out[:, 1] = (boxes_xyxy[:, 1] - pad_top) / scale  # y1
-    out[:, 2] = (boxes_xyxy[:, 2] - pad_left) / scale  # x2
-    out[:, 3] = (boxes_xyxy[:, 3] - pad_top) / scale  # y2
+    # Cast to float32 to prevent float64 promotion in ufunc chains.
+    inv_scale = np.float32(1.0 / scale)
+    w = np.float32(orig_w)
+    h = np.float32(orig_h)
+    pad_l = np.float32(pad_left)
+    pad_t = np.float32(pad_top)
 
-    out[:, 0] = np.clip(out[:, 0], 0.0, float(orig_w))
-    out[:, 2] = np.clip(out[:, 2], 0.0, float(orig_w))
-    out[:, 1] = np.clip(out[:, 1], 0.0, float(orig_h))
-    out[:, 3] = np.clip(out[:, 3], 0.0, float(orig_h))
+    # Use explicit shape/dtype (not empty_like) to always produce C-contiguous
+    # output regardless of the input's memory layout.
+    out = np.empty(boxes_xyxy.shape, dtype=np.float32)
+
+    # x1: subtract pad, multiply inv_scale, clip — all in-place into out[:, 0].
+    np.subtract(boxes_xyxy[:, 0], pad_l, out=out[:, 0])
+    np.multiply(out[:, 0], inv_scale, out=out[:, 0])
+    np.clip(out[:, 0], 0.0, w, out=out[:, 0])
+
+    # y1
+    np.subtract(boxes_xyxy[:, 1], pad_t, out=out[:, 1])
+    np.multiply(out[:, 1], inv_scale, out=out[:, 1])
+    np.clip(out[:, 1], 0.0, h, out=out[:, 1])
+
+    # x2
+    np.subtract(boxes_xyxy[:, 2], pad_l, out=out[:, 2])
+    np.multiply(out[:, 2], inv_scale, out=out[:, 2])
+    np.clip(out[:, 2], 0.0, w, out=out[:, 2])
+
+    # y2
+    np.subtract(boxes_xyxy[:, 3], pad_t, out=out[:, 3])
+    np.multiply(out[:, 3], inv_scale, out=out[:, 3])
+    np.clip(out[:, 3], 0.0, h, out=out[:, 3])
 
     return out
 
@@ -265,21 +253,21 @@ def _decode_standard(
         return ()
 
     filtered = raw[mask]
-    class_scores = class_scores_all[mask]
     max_scores = max_class_score[mask]
 
-    # xywh -> xyxy in tensor space.
-    cx = filtered[:, 0]
-    cy = filtered[:, 1]
-    w = filtered[:, 2]
-    h = filtered[:, 3]
-    x1 = cx - w / 2.0
-    y1 = cy - h / 2.0
-    x2 = cx + w / 2.0
-    y2 = cy + h / 2.0
-    boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1).astype(np.float32)
+    # xywh -> xyxy in tensor space: pre-allocate once, write columns in-place.
+    # Avoids 4 intermediate scalar arrays + np.stack allocation.
+    boxes_xyxy = np.empty((len(filtered), 4), dtype=np.float32)
+    half_w = filtered[:, 2] * 0.5
+    half_h = filtered[:, 3] * 0.5
+    boxes_xyxy[:, 0] = filtered[:, 0] - half_w  # x1
+    boxes_xyxy[:, 1] = filtered[:, 1] - half_h  # y1
+    boxes_xyxy[:, 2] = filtered[:, 0] + half_w  # x2
+    boxes_xyxy[:, 3] = filtered[:, 1] + half_h  # y2
 
-    class_ids = np.argmax(class_scores, axis=1).astype(np.intp)
+    # Use filtered[:, 4:] (view) instead of class_scores_all[mask] (copy)
+    # to avoid a redundant (N, num_classes) allocation.
+    class_ids = np.argmax(filtered[:, 4:], axis=1).astype(np.intp)
 
     # Inverse letterbox transform.
     boxes_orig = _inverse_letterbox(boxes_xyxy, scale, pad_top, pad_left, orig_h, orig_w)
@@ -338,7 +326,9 @@ def _decode_yolo26(
         return ()
 
     filtered = raw[mask]
-    boxes_xyxy = filtered[:, :4].copy().astype(np.float32)
+    # astype(copy=False): avoids an extra allocation when data is already
+    # float32; the preceding .copy() was redundant since astype copies anyway.
+    boxes_xyxy = filtered[:, :4].astype(np.float32, copy=False)
     conf = filtered[:, 4]
     class_ids = filtered[:, 5].astype(np.intp)
 

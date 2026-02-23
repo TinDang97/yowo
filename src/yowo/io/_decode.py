@@ -48,12 +48,12 @@ def preprocess(
     Steps per frame:
     1. Compute ``scale = min(target_h / frame_h, target_w / frame_w)``.
     2. Compute ``new_h = int(frame_h * scale)``, ``new_w = int(frame_w * scale)``.
-    3. Resize with ``cv2.INTER_LINEAR``.
+    3. Ensure C-contiguous memory layout, then resize with ``cv2.INTER_LINEAR``.
     4. Pad to *target_size* with (114, 114, 114) gray fill.
        ``pad_y = (target_h - new_h) // 2``, ``pad_x = (target_w - new_w) // 2``.
-    5. Convert BGR -> RGB.
-    6. Transpose HWC -> CHW.
-    7. Normalize: divide by 255.0, dtype float32.
+    5. Batch-convert BGR -> RGB, HWC -> BCHW, normalize to float32 in one
+       ``cv2.dnn.blobFromImages`` C++ call (replaces per-frame cvtColor +
+       transpose + divide).
 
     All frames stacked on axis 0 -> shape ``(B, 3, H_target, W_target)``.
 
@@ -69,7 +69,7 @@ def preprocess(
         raise ValueError("frames list must not be empty")
 
     target_h, target_w = target_size
-    processed: list[NDArray[np.float32]] = []
+    padded_frames: list[cv2.typing.MatLike] = []
     scale_factors: list[tuple[float, float]] = []
     pad_offsets: list[tuple[int, int]] = []
     original_shapes: list[tuple[int, int]] = []
@@ -82,7 +82,15 @@ def preprocess(
         new_h = int(frame_h * scale)
         new_w = int(frame_w * scale)
 
-        resized = cv2.resize(frame.pixels, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        # Ensure C-contiguous input before cv2.resize. Guard the fast path:
+        # cv2.VideoCapture and cv2.imdecode always return contiguous arrays, so
+        # the check is a no-op overhead on the common case.
+        pixels = (
+            frame.pixels
+            if frame.pixels.flags["C_CONTIGUOUS"]
+            else np.ascontiguousarray(frame.pixels)
+        )
+        resized = cv2.resize(pixels, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
         pad_y = (target_h - new_h) // 2
         pad_x = (target_w - new_w) // 2
@@ -99,15 +107,16 @@ def preprocess(
             value=_LETTERBOX_FILL,
         )
 
-        # BGR -> RGB, HWC -> CHW, normalize.
-        rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
-        chw = np.transpose(rgb, (2, 0, 1)).astype(np.float32) / 255.0
-
-        processed.append(chw)
+        padded_frames.append(padded)  # type: ignore[arg-type]
         scale_factors.append((scale, scale))
         pad_offsets.append((pad_y, pad_x))
 
-    batch: NDArray[np.float32] = np.stack(processed, axis=0)
+    # BGR -> RGB, HWC -> BCHW, normalize: single C++ call replaces per-frame
+    # cvtColor + np.transpose + astype + /255.0 + np.stack.
+    # type: ignore is needed because cv2 stubs return MatLike, not NDArray.
+    batch: NDArray[np.float32] = cv2.dnn.blobFromImages(  # type: ignore[assignment]
+        padded_frames, scalefactor=1.0 / 255.0, swapRB=True
+    )
 
     return PreprocessedTensor(
         data=batch,

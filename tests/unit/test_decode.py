@@ -163,3 +163,94 @@ class TestPreprocessNormalization:
 
         center_val = float(tensor.data[0, :, 50, 50].mean())
         assert center_val == pytest.approx(0.0, abs=1e-3)
+
+
+class TestPreprocessOptimizations:
+    """Regression tests for the blobFromImages + contiguity-guard optimization."""
+
+    def test_non_contiguous_input_does_not_crash(self) -> None:
+        # Simulate a non-C-contiguous array (e.g. a transposed view).
+        raw = np.zeros((3, 100, 100), dtype=np.uint8)
+        non_contig = np.ascontiguousarray(raw.transpose(1, 2, 0))
+        # Flip channel dim to make it non-contiguous in memory.
+        non_contig_view = non_contig[:, :, ::-1]
+        assert not non_contig_view.flags["C_CONTIGUOUS"]
+        frame = Frame(
+            pixels=non_contig_view,
+            source_id="test",
+            frame_index=0,
+            timestamp_ms=0.0,
+        )
+        # Must not raise; ascontiguousarray guard handles non-contiguous input.
+        result = preprocess([frame], (64, 64))
+        assert result.data.shape == (1, 3, 64, 64)
+
+    def test_output_numerical_accuracy(self) -> None:
+        # Reference: manual BGR->RGB, transpose, normalize matches blobFromImages.
+        rng = np.random.default_rng(42)
+        pixels = rng.integers(0, 256, (120, 160, 3), dtype=np.uint8)
+        frame = Frame(pixels=pixels, source_id="test", frame_index=0, timestamp_ms=0.0)
+        result = preprocess([frame], (120, 160))
+
+        # Reference computation (original manual path).
+        import cv2 as _cv2
+
+        rgb = _cv2.cvtColor(pixels, _cv2.COLOR_BGR2RGB)
+        ref = np.transpose(rgb, (2, 0, 1)).astype(np.float32) / 255.0
+
+        assert np.allclose(result.data[0], ref, atol=1e-5), (
+            f"max delta: {np.abs(result.data[0] - ref).max()}"
+        )
+
+    def test_output_is_c_contiguous(self) -> None:
+        frame = _make_frame(100, 100)
+        result = preprocess([frame], (64, 64))
+        assert result.data.flags["C_CONTIGUOUS"]
+
+    def test_contiguous_input_fast_path_correct_output(self) -> None:
+        # C-contiguous pixels must bypass ascontiguousarray and still produce
+        # numerically correct output — verifies the if-branch isn't inverted.
+        rng = np.random.default_rng(7)
+        pixels = rng.integers(0, 256, (60, 80, 3), dtype=np.uint8)
+        assert pixels.flags["C_CONTIGUOUS"]
+        frame = Frame(pixels=pixels, source_id="test", frame_index=0, timestamp_ms=0.0)
+        result = preprocess([frame], (60, 80))
+
+        import cv2 as _cv2
+
+        ref = (
+            np.transpose(_cv2.cvtColor(pixels, _cv2.COLOR_BGR2RGB), (2, 0, 1)).astype(np.float32)
+            / 255.0
+        )
+        assert np.allclose(result.data[0], ref, atol=1e-5)
+
+    def test_non_contiguous_input_correct_pixel_values(self) -> None:
+        # Non-contiguous path must produce numerically identical output to
+        # the manual reference (not just the right shape).
+        rng = np.random.default_rng(13)
+        pixels = rng.integers(0, 256, (60, 80, 3), dtype=np.uint8)
+        non_contig = pixels[:, :, ::-1]
+        assert not non_contig.flags["C_CONTIGUOUS"]
+        frame = Frame(pixels=non_contig, source_id="test", frame_index=0, timestamp_ms=0.0)
+        result = preprocess([frame], (60, 80))
+
+        import cv2 as _cv2
+
+        contiguous = np.ascontiguousarray(non_contig)
+        ref = (
+            np.transpose(_cv2.cvtColor(contiguous, _cv2.COLOR_BGR2RGB), (2, 0, 1)).astype(
+                np.float32
+            )
+            / 255.0
+        )
+        assert np.allclose(result.data[0], ref, atol=1e-5)
+
+    def test_letterbox_padded_region_fill_value(self) -> None:
+        # Padded pixels (114, 114, 114) must normalize to 114/255 in the tensor.
+        # 100x200 wide frame into 100x100: scale=0.5, new_h=50, pad_top=25.
+        frame = _make_frame(100, 200, fill=0)
+        result = preprocess([frame], (100, 100))
+
+        expected_fill = pytest.approx(114.0 / 255.0, abs=2e-3)
+        # Top row is entirely in the top padding band.
+        assert float(result.data[0, 0, 0, 0]) == expected_fill

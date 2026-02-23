@@ -231,10 +231,12 @@ class RTSPStreamSource:
         *,
         reconnect_timeout_s: float = 30.0,
         max_frames: int | None = None,
+        frame_skip: int = 0,
     ) -> None:
         self._url = url
         self._reconnect_timeout_s = reconnect_timeout_s
         self._max_frames = max_frames
+        self._frame_skip = frame_skip
 
     @property
     def is_live(self) -> bool:
@@ -255,6 +257,7 @@ class RTSPStreamSource:
         frame_index = 0
         yielded = 0
         retry_count = 0
+        skip_mod = self._frame_skip + 1
 
         try:
             while True:
@@ -264,14 +267,17 @@ class RTSPStreamSource:
                 ok, bgr = cap.read()
                 if ok:
                     retry_count = 0
-                    yield Frame(
-                        pixels=bgr.astype(np.uint8),
-                        source_id=self._url,
-                        frame_index=frame_index,
-                        timestamp_ms=0.0,
-                    )
+                    # Always drain the buffer (cap.read) to avoid RTSP lag,
+                    # but only yield every (frame_skip+1)th frame.
+                    if frame_index % skip_mod == 0:
+                        yield Frame(
+                            pixels=bgr.astype(np.uint8),
+                            source_id=self._url,
+                            frame_index=frame_index,
+                            timestamp_ms=0.0,
+                        )
+                        yielded += 1
                     frame_index += 1
-                    yielded += 1
                 else:
                     cap.release()
                     # Reset deadline on each disconnect so the timeout measures
@@ -311,9 +317,11 @@ class WebcamSource:
         device_index: int,
         *,
         max_frames: int | None = None,
+        frame_skip: int = 0,
     ) -> None:
         self._device_index = device_index
         self._max_frames = max_frames
+        self._frame_skip = frame_skip
         # Eagerly validate device availability.
         cap = cv2.VideoCapture(device_index)
         if not cap.isOpened():
@@ -336,6 +344,8 @@ class WebcamSource:
             raise SourceError(f"Cannot open webcam device index: {self._device_index}")
 
         yielded = 0
+        read_index = 0
+        skip_mod = self._frame_skip + 1
         try:
             while True:
                 if self._max_frames is not None and yielded >= self._max_frames:
@@ -343,13 +353,15 @@ class WebcamSource:
                 ok, bgr = cap.read()
                 if not ok:
                     break
-                yield Frame(
-                    pixels=bgr.astype(np.uint8),
-                    source_id=f"webcam:{self._device_index}",
-                    frame_index=yielded,
-                    timestamp_ms=0.0,
-                )
-                yielded += 1
+                if read_index % skip_mod == 0:
+                    yield Frame(
+                        pixels=bgr.astype(np.uint8),
+                        source_id=f"webcam:{self._device_index}",
+                        frame_index=yielded,
+                        timestamp_ms=0.0,
+                    )
+                    yielded += 1
+                read_index += 1
         finally:
             cap.release()
 
@@ -403,7 +415,7 @@ def open_source(
 
     # Webcam: pure digit string.
     if isinstance(source, str) and source.isdigit():
-        return WebcamSource(int(source), max_frames=max_frames)
+        return WebcamSource(int(source), max_frames=max_frames, frame_skip=frame_skip)
 
     # RTSP stream.
     if source_str.startswith(_RTSP_SCHEMES):
@@ -411,6 +423,7 @@ def open_source(
             source_str,
             reconnect_timeout_s=reconnect_timeout_s,
             max_frames=max_frames,
+            frame_skip=frame_skip,
         )
 
     path = Path(source_str)

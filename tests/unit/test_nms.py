@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from yowo.postprocess._nms import COCO_CLASSES, _iou, postprocess
+from yowo.postprocess._nms import COCO_CLASSES, _class_aware_nms, postprocess
 from yowo.types import (
     BackendType,
     Detection,
@@ -59,53 +59,103 @@ def _make_raw_standard(
 
 
 # ---------------------------------------------------------------------------
-# Tests for _iou()
+# Tests for _class_aware_nms()
 # ---------------------------------------------------------------------------
 
 
-class TestIou:
-    def test_identical_boxes_iou_is_one(self) -> None:
-        box = np.array([0.0, 0.0, 10.0, 10.0], dtype=np.float32)
-        boxes = np.array([[0.0, 0.0, 10.0, 10.0]], dtype=np.float32)
-        result = _iou(box, boxes)
-        assert result[0] == pytest.approx(1.0, abs=1e-5)
+class TestClassAwareNms:
+    """Tests for _class_aware_nms using cv2.dnn.NMSBoxes + offset trick."""
 
-    def test_non_overlapping_boxes_iou_is_zero(self) -> None:
-        box = np.array([0.0, 0.0, 5.0, 5.0], dtype=np.float32)
-        boxes = np.array([[10.0, 10.0, 20.0, 20.0]], dtype=np.float32)
-        result = _iou(box, boxes)
-        assert result[0] == pytest.approx(0.0, abs=1e-5)
+    def test_empty_input_returns_empty(self) -> None:
+        boxes = np.empty((0, 4), dtype=np.float32)
+        scores = np.empty(0, dtype=np.float32)
+        class_ids = np.empty(0, dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert len(result) == 0
+        assert result.dtype == np.intp
 
-    def test_half_overlap_iou(self) -> None:
-        # box: [0,0,10,10], area=100
-        # other: [5,0,15,10], area=100
-        # intersection: [5,0,10,10], area=50
-        # union: 100+100-50=150; iou=50/150≈0.333
-        box = np.array([0.0, 0.0, 10.0, 10.0], dtype=np.float32)
-        boxes = np.array([[5.0, 0.0, 15.0, 10.0]], dtype=np.float32)
-        result = _iou(box, boxes)
-        assert result[0] == pytest.approx(50.0 / 150.0, rel=1e-4)
+    def test_single_box_kept(self) -> None:
+        boxes = np.array([[10.0, 10.0, 50.0, 50.0]], dtype=np.float32)
+        scores = np.array([0.9], dtype=np.float32)
+        class_ids = np.array([0], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert result.tolist() == [0]
 
-    def test_vectorized_multiple_boxes(self) -> None:
-        box = np.array([0.0, 0.0, 10.0, 10.0], dtype=np.float32)
+    def test_overlapping_same_class_suppressed(self) -> None:
+        boxes = np.array(
+            [[0.0, 0.0, 10.0, 10.0], [0.5, 0.5, 10.5, 10.5]],
+            dtype=np.float32,
+        )
+        scores = np.array([0.9, 0.8], dtype=np.float32)
+        class_ids = np.array([0, 0], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert result.tolist() == [0]
+
+    def test_overlapping_different_classes_both_kept(self) -> None:
+        boxes = np.array(
+            [[0.0, 0.0, 10.0, 10.0], [0.5, 0.5, 10.5, 10.5]],
+            dtype=np.float32,
+        )
+        scores = np.array([0.9, 0.8], dtype=np.float32)
+        class_ids = np.array([0, 1], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert sorted(result.tolist()) == [0, 1]
+
+    def test_non_overlapping_same_class_both_kept(self) -> None:
+        boxes = np.array(
+            [[0.0, 0.0, 10.0, 10.0], [100.0, 100.0, 110.0, 110.0]],
+            dtype=np.float32,
+        )
+        scores = np.array([0.9, 0.8], dtype=np.float32)
+        class_ids = np.array([0, 0], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert sorted(result.tolist()) == [0, 1]
+
+    def test_result_sorted_ascending(self) -> None:
         boxes = np.array(
             [
-                [0.0, 0.0, 10.0, 10.0],  # iou = 1.0
-                [10.0, 10.0, 20.0, 20.0],  # iou = 0.0
-                [5.0, 0.0, 15.0, 10.0],  # iou ≈ 0.333
+                [0.0, 0.0, 10.0, 10.0],
+                [100.0, 100.0, 110.0, 110.0],
+                [200.0, 200.0, 210.0, 210.0],
             ],
             dtype=np.float32,
         )
-        result = _iou(box, boxes)
-        assert result.shape == (3,)
-        assert result[0] == pytest.approx(1.0, abs=1e-5)
-        assert result[1] == pytest.approx(0.0, abs=1e-5)
-        assert result[2] == pytest.approx(50.0 / 150.0, rel=1e-4)
+        scores = np.array([0.7, 0.9, 0.8], dtype=np.float32)
+        class_ids = np.array([0, 1, 2], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert list(result) == sorted(result.tolist())
 
-    def test_output_dtype_is_float32(self) -> None:
-        box = np.array([0.0, 0.0, 5.0, 5.0], dtype=np.float32)
-        boxes = np.array([[0.0, 0.0, 5.0, 5.0]], dtype=np.float32)
-        assert _iou(box, boxes).dtype == np.float32
+    def test_result_dtype_is_intp(self) -> None:
+        boxes = np.array([[10.0, 10.0, 50.0, 50.0]], dtype=np.float32)
+        scores = np.array([0.9], dtype=np.float32)
+        class_ids = np.array([0], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert result.dtype == np.intp
+
+    def test_nmsboxes_empty_tuple_return_handled(self) -> None:
+        """When cv2.dnn.NMSBoxes returns () internally, result is empty."""
+        from unittest.mock import patch
+
+        boxes = np.array([[10.0, 10.0, 50.0, 50.0]], dtype=np.float32)
+        scores = np.array([0.9], dtype=np.float32)
+        class_ids = np.array([0], dtype=np.intp)
+
+        with patch("yowo.postprocess._nms.cv2.dnn.NMSBoxes", return_value=()):
+            result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+
+        assert len(result) == 0
+        assert result.dtype == np.intp
+
+    def test_high_class_id_offset_trick(self) -> None:
+        """Large class IDs produce correct offsets without cross-class suppression."""
+        boxes = np.array(
+            [[0.0, 0.0, 10.0, 10.0], [0.5, 0.5, 10.5, 10.5]],
+            dtype=np.float32,
+        )
+        scores = np.array([0.9, 0.8], dtype=np.float32)
+        class_ids = np.array([0, 79], dtype=np.intp)
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        assert sorted(result.tolist()) == [0, 1]
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +477,26 @@ class TestPostprocessYolo26:
         assert results[0].num_boxes == 1
         assert results[0].boxes[0].class_id == 0
 
+    def test_yolo26_transposed_input_handled(self) -> None:
+        """YOLO26 output with shape (B, 6, num_detections) is auto-transposed."""
+        raw = np.zeros((1, 6, 100), dtype=np.float32)
+        raw[0, :, 0] = [100.0, 100.0, 200.0, 200.0, 0.85, 2.0]
+
+        tensor_meta = _make_tensor_meta(batch=1, scale=1.0)
+        spec = ModelSpec(family=ModelFamily.YOLO26, size=ModelSize.NANO)
+
+        results = postprocess(
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
+            confidence_threshold=0.25,
+        )
+
+        assert results[0].num_boxes == 1
+        assert results[0].boxes[0].class_id == 2
+
 
 class TestCocoClasses:
     def test_has_80_classes(self) -> None:
@@ -440,3 +510,190 @@ class TestCocoClasses:
 
     def test_car_is_class_2(self) -> None:
         assert COCO_CLASSES[2] == "car"
+
+
+class TestNmsOptimizations:
+    """Regression tests for NMS hot-path allocation and contiguity optimizations."""
+
+    def test_inverse_letterbox_numerical_identity(self) -> None:
+        from yowo.postprocess._nms import _inverse_letterbox
+
+        boxes = np.array(
+            [[160.0, 0.0, 480.0, 320.0], [0.0, 160.0, 640.0, 480.0]],
+            dtype=np.float32,
+        )
+        # Reference: original algorithm (copy + separate subtract/divide).
+        scale, pad_top, pad_left, orig_h, orig_w = 0.5, 10, 20, 480, 640
+        ref = boxes.copy()
+        ref[:, 0] = (boxes[:, 0] - pad_left) / scale
+        ref[:, 1] = (boxes[:, 1] - pad_top) / scale
+        ref[:, 2] = (boxes[:, 2] - pad_left) / scale
+        ref[:, 3] = (boxes[:, 3] - pad_top) / scale
+        ref[:, 0] = np.clip(ref[:, 0], 0.0, float(orig_w))
+        ref[:, 2] = np.clip(ref[:, 2], 0.0, float(orig_w))
+        ref[:, 1] = np.clip(ref[:, 1], 0.0, float(orig_h))
+        ref[:, 3] = np.clip(ref[:, 3], 0.0, float(orig_h))
+
+        result = _inverse_letterbox(boxes, scale, pad_top, pad_left, orig_h, orig_w)
+        assert np.allclose(result, ref, atol=1e-6), f"max delta: {np.abs(result - ref).max()}"
+
+    def test_decode_standard_boxes_unchanged(self) -> None:
+        from yowo.postprocess._nms import _decode_standard
+
+        # 3 anchors: 2 above confidence threshold, 1 below.
+        # Format: cx, cy, w, h, class0, class1
+        raw = np.array(
+            [
+                [320.0, 240.0, 100.0, 80.0, 0.9, 0.1],  # high confidence
+                [200.0, 150.0, 50.0, 40.0, 0.05, 0.1],  # below threshold
+                [400.0, 300.0, 60.0, 50.0, 0.1, 0.85],  # high confidence
+            ],
+            dtype=np.float32,
+        )
+        boxes = _decode_standard(
+            raw,
+            confidence_threshold=0.25,
+            iou_threshold=0.45,
+            scale=1.0,
+            pad_top=0,
+            pad_left=0,
+            orig_h=480,
+            orig_w=640,
+            names=["cat", "dog"],
+        )
+        # 2 boxes should survive; low-confidence row filtered out.
+        assert len(boxes) == 2
+        confidences = [b.confidence for b in boxes]
+        assert all(c >= 0.25 for c in confidences)
+
+    def test_decode_yolo26_no_redundant_copy(self) -> None:
+        from yowo.postprocess._nms import _decode_yolo26
+
+        # Verify the function returns correct boxes without crashing.
+        raw = np.array(
+            [
+                [10.0, 10.0, 50.0, 50.0, 0.9, 0.0],
+                [100.0, 100.0, 200.0, 200.0, 0.1, 1.0],  # below threshold
+            ],
+            dtype=np.float32,
+        )
+        boxes = _decode_yolo26(
+            raw,
+            confidence_threshold=0.5,
+            scale=1.0,
+            pad_top=0,
+            pad_left=0,
+            orig_h=480,
+            orig_w=640,
+            names=["cat"],
+        )
+        assert len(boxes) == 1
+        assert boxes[0].confidence == pytest.approx(0.9, abs=1e-5)
+
+    def test_inverse_letterbox_output_is_c_contiguous(self) -> None:
+        from yowo.postprocess._nms import _inverse_letterbox
+
+        boxes = np.array([[50.0, 50.0, 150.0, 150.0]], dtype=np.float32)
+        result = _inverse_letterbox(
+            boxes, scale=0.5, pad_top=10, pad_left=20, orig_h=480, orig_w=640
+        )
+        assert result.flags["C_CONTIGUOUS"]
+
+    def test_inverse_letterbox_non_contiguous_input_c_contiguous_output(self) -> None:
+        from yowo.postprocess._nms import _inverse_letterbox
+
+        # Build a non-C-contiguous 2D array via Fortran order (requires >=2 rows).
+        data = np.asfortranarray(
+            np.array(
+                [[50.0, 50.0, 150.0, 150.0], [10.0, 10.0, 60.0, 60.0]],
+                dtype=np.float32,
+            )
+        )
+        assert not data.flags["C_CONTIGUOUS"]
+        result = _inverse_letterbox(data, scale=1.0, pad_top=0, pad_left=0, orig_h=480, orig_w=640)
+        # np.empty(shape, dtype) must produce C-contiguous output.
+        assert result.flags["C_CONTIGUOUS"]
+        assert np.allclose(result, data, atol=1e-6)
+
+    def test_decode_standard_coordinate_values(self) -> None:
+        from yowo.postprocess._nms import _decode_standard
+
+        # Single anchor: cx=320, cy=240, w=100, h=80 -> x1=270,y1=200,x2=370,y2=280.
+        raw = np.array([[320.0, 240.0, 100.0, 80.0, 0.9, 0.0]], dtype=np.float32)
+        boxes = _decode_standard(
+            raw,
+            confidence_threshold=0.5,
+            iou_threshold=0.5,
+            scale=1.0,
+            pad_top=0,
+            pad_left=0,
+            orig_h=480,
+            orig_w=640,
+            names=["person", "car"],
+        )
+        assert len(boxes) == 1
+        assert boxes[0].x1 == pytest.approx(270.0, abs=1e-3)
+        assert boxes[0].y1 == pytest.approx(200.0, abs=1e-3)
+        assert boxes[0].x2 == pytest.approx(370.0, abs=1e-3)
+        assert boxes[0].y2 == pytest.approx(280.0, abs=1e-3)
+
+    def test_inverse_letterbox_clips_negative_and_overflow(self) -> None:
+        """Coordinates outside [0, orig_w/h] are clipped to bounds."""
+        from yowo.postprocess._nms import _inverse_letterbox
+
+        # After inverse: x1=(50-100)/1=-50 -> 0, x2=(700-100)/1=600 -> 500
+        # y1=(30-50)/1=-20 -> 0, y2=(600-50)/1=550 -> 400
+        boxes = np.array([[50.0, 30.0, 700.0, 600.0]], dtype=np.float32)
+        result = _inverse_letterbox(
+            boxes, scale=1.0, pad_top=50, pad_left=100, orig_h=400, orig_w=500
+        )
+        assert result[0, 0] == pytest.approx(0.0)
+        assert result[0, 1] == pytest.approx(0.0)
+        assert result[0, 2] == pytest.approx(500.0)
+        assert result[0, 3] == pytest.approx(400.0)
+
+    def test_decode_standard_class_id_exceeds_names_fallback(self) -> None:
+        """When class_id >= len(names), class_name falls back to str(class_id)."""
+        from yowo.postprocess._nms import _decode_standard
+
+        # 4 class columns, but names list has only 2 entries. Class 3 highest.
+        raw = np.array(
+            [[320.0, 240.0, 100.0, 80.0, 0.1, 0.1, 0.1, 0.9]],
+            dtype=np.float32,
+        )
+        boxes = _decode_standard(
+            raw,
+            confidence_threshold=0.25,
+            iou_threshold=0.45,
+            scale=1.0,
+            pad_top=0,
+            pad_left=0,
+            orig_h=480,
+            orig_w=640,
+            names=["cat", "dog"],
+        )
+        assert len(boxes) == 1
+        assert boxes[0].class_id == 3
+        assert boxes[0].class_name == "3"
+
+    def test_decode_yolo26_class_id_exceeds_names_fallback(self) -> None:
+        """YOLO26: class_id beyond names list uses str(class_id) as class_name."""
+        from yowo.postprocess._nms import _decode_yolo26
+
+        raw = np.array(
+            [[10.0, 10.0, 50.0, 50.0, 0.9, 5.0]],
+            dtype=np.float32,
+        )
+        boxes = _decode_yolo26(
+            raw,
+            confidence_threshold=0.25,
+            scale=1.0,
+            pad_top=0,
+            pad_left=0,
+            orig_h=480,
+            orig_w=640,
+            names=["cat", "dog"],
+        )
+        assert len(boxes) == 1
+        assert boxes[0].class_id == 5
+        assert boxes[0].class_name == "5"
