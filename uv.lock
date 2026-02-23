@@ -1921,6 +1921,7 @@ openvino = [
 [package.dev-dependencies]
 dev = [
     { name = "onnx" },
+    { name = "onnxruntime" },
     { name = "onnxslim" },
     { name = "pre-commit" },
     { name = "pyright" },
@@ -1949,6 +1950,7 @@ provides-extras = ["onnx", "onnx-gpu", "openvino", "all"]
 [package.metadata.requires-dev]
 dev = [
     { name = "onnx", specifier = ">=1.12.0,<2.0.0" },
+    { name = "onnxruntime", specifier = ">=1.17" },
     { name = "onnxslim", specifier = ">=0.1.85" },
     { name = "pre-commit", specifier = ">=3.8" },
     { name = "pyright", specifier = ">=1.1" },
