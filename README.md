@@ -43,10 +43,13 @@ yowo detect image.jpg
 # Use a specific model
 yowo detect video.mp4 --model yolo12n
 
+# Use a local weights file (skips download)
+yowo detect image.jpg --model yolo26n --weights /path/to/YOLO26.pt
+
 # RTSP stream
 yowo detect rtsp://camera-ip:554/stream --model yolo26n --confidence 0.4
 
-# Save detections to JSON + annotated frames
+# Save detections to JSON
 yowo detect ./images/ --model yolo11s --output detections.json
 
 # Show hardware and installed backends
@@ -67,6 +70,65 @@ with InferenceEngine(spec) as engine:
     for detection in engine.stream(open_source("image.jpg")):
         for box in detection.boxes:
             print(f"{box.class_name}: {box.confidence:.2f} @ {box.as_xyxy()}")
+```
+
+---
+
+## Real-World Example — Hanoi Traffic Surveillance
+
+Detection run on a 965×539 Hanoi traffic surveillance screenshot using YOLO26 on CPU (Apple M4 Pro):
+
+```bash
+yowo detect "Hanoi AI Cameras Traffic Violations.webp" \
+  --model yolo26n \
+  --weights "Ultralytics YOLO26.pt" \
+  --backend pytorch \
+  --confidence 0.25 \
+  --output detections.json
+```
+
+```
+Frame 0: 29 detections (582.2ms)
+Saved detections to detections.json
+```
+
+**Detection results** (sorted by confidence):
+
+| Class | Confidence | Bounding Box (x1,y1,x2,y2) |
+|-------|-----------|----------------------------|
+| car | 0.888 | (387, 422, 622, 537) |
+| car | 0.884 | (418, 151, 567, 300) |
+| car | 0.839 | (250, 190, 402, 339) |
+| car | 0.820 | (415, 269, 598, 447) |
+| car | 0.685 | (427, 89, 555, 197) |
+| motorcycle | 0.680 | (879, 384, 945, 499) |
+| motorcycle | 0.679 | (713, 407, 781, 527) |
+| car | 0.668 | (171, 251, 357, 451) |
+| motorcycle | 0.573 | (777, 373, 839, 476) |
+| motorcycle | 0.525 | (823, 449, 899, 536) |
+| person | 0.500 | (759, 449, 844, 539) |
+| … 18 more | 0.26–0.47 | motorcycles, persons, trucks, bus |
+
+**Summary**: 29 objects — 9 cars, 9 persons, 6 motorcycles, 2 trucks, 1 bus, 2 overlapping detections — in **582ms** on CPU. YOLO26's NMS-free head eliminates the NMS step; detections are post-filtered by confidence only.
+
+The full JSON output per detection:
+
+```json
+{
+  "frame_index": 0,
+  "source_id": "Hanoi AI Cameras Traffic Violations.webp",
+  "inference_time_ms": 582.2,
+  "backend": "pytorch",
+  "model": "yolo26n",
+  "boxes": [
+    {
+      "x1": 387.0, "y1": 422.0, "x2": 622.0, "y2": 537.0,
+      "confidence": 0.888,
+      "class_id": 2,
+      "class_name": "car"
+    }
+  ]
+}
 ```
 
 ---
@@ -175,8 +237,11 @@ Export `.pt` weights to an optimized format for your target hardware.
 ### CLI
 
 ```bash
-# Export to ONNX (FP16)
+# Export to ONNX (FP16) — downloads weights automatically
 yowo export yolo12n --format onnx --precision fp16
+
+# Export using a local weights file (skips download)
+yowo export yolo26n --weights /path/to/YOLO26.pt --format onnx --precision fp32
 
 # Export to TensorRT engine (FP16)
 yowo export yolo26s --format tensorrt --precision fp16 --output-dir ./engines/
