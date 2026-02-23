@@ -319,16 +319,12 @@ def _check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
                 )
         case BackendType.TENSORRT:
             if not libs.tensorrt_version:
-                raise BackendError(
-                    "TensorRT is not installed. Install with: uv add tensorrt"
-                )
+                raise BackendError("TensorRT is not installed. Install with: uv add tensorrt")
             if not hw.has_nvidia_gpu:
                 raise BackendError("TensorRT requires an NVIDIA GPU.")
         case BackendType.OPENVINO:
             if not libs.openvino_version:
-                raise BackendError(
-                    "OpenVINO is not installed. Install with: uv add openvino"
-                )
+                raise BackendError("OpenVINO is not installed. Install with: uv add openvino")
 
 
 def _parse_precision(value: str | None) -> Precision | None:
@@ -339,9 +335,7 @@ def _parse_precision(value: str | None) -> Precision | None:
         return Precision(value.lower())
     except ValueError:
         valid = [p.value for p in Precision]
-        raise BackendError(
-            f"Unknown precision override '{value}'. Valid: {valid}"
-        ) from None
+        raise BackendError(f"Unknown precision override '{value}'. Valid: {valid}") from None
 
 
 def _degrade_from(precision: Precision) -> list[Precision]:

@@ -46,9 +46,7 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
     """
     if spec.weights_path is not None:
         if not spec.weights_path.exists():
-            raise ModelNotFoundError(
-                f"weights_path does not exist: {spec.weights_path}"
-            )
+            raise ModelNotFoundError(f"weights_path does not exist: {spec.weights_path}")
         return spec.weights_path
 
     # Resolve from registry (raises ModelNotFoundError if not registered).

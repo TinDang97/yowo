@@ -125,9 +125,7 @@ class TensorRTBackend:
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
         except Exception as exc:
             self._session = None
-            raise BackendLoadError(
-                f"TensorRTBackend: engine load failed: {exc}"
-            ) from exc
+            raise BackendLoadError(f"TensorRTBackend: engine load failed: {exc}") from exc
 
     def infer(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Run TensorRT inference.

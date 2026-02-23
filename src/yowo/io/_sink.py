@@ -122,9 +122,7 @@ def write_annotated_frames(detections: list[Detection], output_dir: Path) -> Non
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.5
             thickness = 1
-            (text_w, text_h), baseline = cv2.getTextSize(
-                label, font, font_scale, thickness
-            )
+            (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
 
             # Draw filled rectangle behind text for readability.
             label_y = max(y1 - baseline, text_h)

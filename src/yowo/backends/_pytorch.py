@@ -111,7 +111,7 @@ class PyTorchBackend:
                 output = inner_model(t)
 
             # Ultralytics may return a list/tuple; take the first element
-            raw = output[0] if isinstance(output, (list, tuple)) else output
+            raw = output[0] if isinstance(output, list | tuple) else output
 
             if hasattr(raw, "cpu"):
                 return raw.cpu().numpy().astype(np.float32)

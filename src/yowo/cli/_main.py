@@ -19,8 +19,13 @@ def cli() -> None:
 @cli.command("detect")
 @click.argument("source")
 @click.option("--model", "-m", default="yolo26n", help="Model name, e.g. yolo12n")
-@click.option("--weights", "-w", default=None, type=click.Path(exists=True),
-              help="Path to local .pt weights file (skips download)")
+@click.option(
+    "--weights",
+    "-w",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to local .pt weights file (skips download)",
+)
 @click.option(
     "--backend",
     default="auto",
@@ -97,8 +102,13 @@ def detect_command(
 
 @cli.command("export")
 @click.argument("model")
-@click.option("--weights", "-w", default=None, type=click.Path(exists=True),
-              help="Path to local .pt weights file (skips download)")
+@click.option(
+    "--weights",
+    "-w",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to local .pt weights file (skips download)",
+)
 @click.option(
     "--format",
     "-f",

@@ -57,12 +57,9 @@ def get(family: ModelFamily, size: ModelSize) -> ModelMeta:
     """
     key = (family, size)
     if key not in _REGISTRY:
-        available = ", ".join(
-            f"{f.value}/{s.value}" for f, s in sorted(_REGISTRY)
-        )
+        available = ", ".join(f"{f.value}/{s.value}" for f, s in sorted(_REGISTRY))
         raise ModelNotFoundError(
-            f"Model {family.value}/{size.value} not found in registry. "
-            f"Available: {available}"
+            f"Model {family.value}/{size.value} not found in registry. Available: {available}"
         )
     return _REGISTRY[key]
 

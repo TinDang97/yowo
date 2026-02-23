@@ -90,9 +90,9 @@ class TestIou:
         box = np.array([0.0, 0.0, 10.0, 10.0], dtype=np.float32)
         boxes = np.array(
             [
-                [0.0, 0.0, 10.0, 10.0],   # iou = 1.0
-                [10.0, 10.0, 20.0, 20.0], # iou = 0.0
-                [5.0, 0.0, 15.0, 10.0],   # iou ≈ 0.333
+                [0.0, 0.0, 10.0, 10.0],  # iou = 1.0
+                [10.0, 10.0, 20.0, 20.0],  # iou = 0.0
+                [5.0, 0.0, 15.0, 10.0],  # iou ≈ 0.333
             ],
             dtype=np.float32,
         )
@@ -159,8 +159,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         assert results[0].boxes[0].class_id == 0
@@ -172,8 +175,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         assert results[0].boxes[0].confidence == pytest.approx(0.85, rel=1e-4)
@@ -181,11 +187,11 @@ class TestPostprocessStandard:
     def test_confidence_threshold_filters_weak_detections(self) -> None:
         raw = _make_raw_standard()
         # Place two detections at different confidence levels.
-        raw[0, 4, 0] = 0.8   # strong (class 0)
+        raw[0, 4, 0] = 0.8  # strong (class 0)
         raw[0, 0, 0], raw[0, 1, 0] = 320.0, 240.0
         raw[0, 2, 0], raw[0, 3, 0] = 100.0, 80.0
 
-        raw[0, 4, 1] = 0.1   # weak (class 0)
+        raw[0, 4, 1] = 0.1  # weak (class 0)
         raw[0, 0, 1], raw[0, 1, 1] = 100.0, 100.0
         raw[0, 2, 1], raw[0, 3, 1] = 50.0, 50.0
 
@@ -193,13 +199,19 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         high_threshold = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             confidence_threshold=0.5,
         )
         low_threshold = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             confidence_threshold=0.05,
         )
 
@@ -212,8 +224,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             confidence_threshold=0.25,
         )
 
@@ -223,15 +238,16 @@ class TestPostprocessStandard:
     def test_coordinate_inverse_transform_no_padding(self) -> None:
         # Detection centered at (320, 240) with size 100x80 in tensor space.
         # scale=1.0, no padding -> original coords identical.
-        raw = self._make_raw_with_detection(
-            cx=320.0, cy=240.0, w=100.0, h=80.0, score=0.9
-        )
+        raw = self._make_raw_with_detection(cx=320.0, cy=240.0, w=100.0, h=80.0, score=0.9)
         tensor_meta = _make_tensor_meta(batch=1, scale=1.0, pad_top=0, pad_left=0)
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         box = results[0].boxes[0]
@@ -246,18 +262,23 @@ class TestPostprocessStandard:
         # x1_tensor=270, y1_tensor=200, x2_tensor=370, y2_tensor=280
         # x1_orig=(270-160)/0.5=220, y1_orig=(200-80)/0.5=240
         # x2_orig=(370-160)/0.5=420, y2_orig=(280-80)/0.5=400
-        raw = self._make_raw_with_detection(
-            cx=320.0, cy=240.0, w=100.0, h=80.0, score=0.9
-        )
+        raw = self._make_raw_with_detection(cx=320.0, cy=240.0, w=100.0, h=80.0, score=0.9)
         tensor_meta = _make_tensor_meta(
-            batch=1, orig_h=480, orig_w=640,
-            scale=0.5, pad_top=80, pad_left=160,
+            batch=1,
+            orig_h=480,
+            orig_w=640,
+            scale=0.5,
+            pad_top=80,
+            pad_left=160,
         )
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         box = results[0].boxes[0]
@@ -279,8 +300,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, frames,
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            frames,
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         assert len(results) == 2
@@ -294,8 +318,11 @@ class TestPostprocessStandard:
         custom_names = [f"cls_{i}" for i in range(80)]
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             class_names=custom_names,
         )
 
@@ -307,8 +334,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.ONNX,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.ONNX,
         )
 
         assert results[0].backend == BackendType.ONNX
@@ -319,8 +349,11 @@ class TestPostprocessStandard:
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             inference_time_ms=42.5,
         )
 
@@ -329,18 +362,21 @@ class TestPostprocessStandard:
     def test_transposed_input_shape_handled(self) -> None:
         # Input shape (B, num_anchors, 4+num_classes) — already transposed.
         raw = np.zeros((1, 8400, 85), dtype=np.float32)
-        raw[0, 0, 0] = 320.0   # cx
-        raw[0, 0, 1] = 240.0   # cy
-        raw[0, 0, 2] = 100.0   # w
-        raw[0, 0, 3] = 80.0    # h
-        raw[0, 0, 4] = 0.9     # class 0 score
+        raw[0, 0, 0] = 320.0  # cx
+        raw[0, 0, 1] = 240.0  # cy
+        raw[0, 0, 2] = 100.0  # w
+        raw[0, 0, 3] = 80.0  # h
+        raw[0, 0, 4] = 0.9  # class 0 score
 
         tensor_meta = _make_tensor_meta(batch=1, scale=1.0)
         spec = _make_model_spec()
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
         )
 
         assert results[0].num_boxes == 1
@@ -357,8 +393,11 @@ class TestPostprocessYolo26:
         frames = [_make_frame()]
 
         results = postprocess(
-            raw, tensor_meta, frames,
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            frames,
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             confidence_threshold=0.25,
         )
 
@@ -370,15 +409,18 @@ class TestPostprocessYolo26:
 
     def test_yolo26_confidence_filter(self) -> None:
         raw = np.zeros((1, 10, 6), dtype=np.float32)
-        raw[0, 0] = [10.0, 10.0, 50.0, 50.0, 0.9, 0.0]   # above threshold
-        raw[0, 1] = [60.0, 60.0, 100.0, 100.0, 0.1, 1.0] # below threshold
+        raw[0, 0] = [10.0, 10.0, 50.0, 50.0, 0.9, 0.0]  # above threshold
+        raw[0, 1] = [60.0, 60.0, 100.0, 100.0, 0.1, 1.0]  # below threshold
 
         tensor_meta = _make_tensor_meta(batch=1, scale=1.0)
         spec = ModelSpec(family=ModelFamily.YOLO26, size=ModelSize.NANO)
 
         results = postprocess(
-            raw, tensor_meta, [_make_frame()],
-            model_spec=spec, backend=BackendType.PYTORCH,
+            raw,
+            tensor_meta,
+            [_make_frame()],
+            model_spec=spec,
+            backend=BackendType.PYTORCH,
             confidence_threshold=0.5,
         )
 

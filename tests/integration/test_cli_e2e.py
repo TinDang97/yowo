@@ -190,9 +190,7 @@ class TestCLIErrorCases:
     def test_invalid_backend_choice_is_click_error(
         self, runner: CliRunner, sample_image_path: Path
     ) -> None:
-        result = runner.invoke(
-            cli, ["detect", str(sample_image_path), "--backend", "badbackend"]
-        )
+        result = runner.invoke(cli, ["detect", str(sample_image_path), "--backend", "badbackend"])
         assert result.exit_code == 2
 
 
@@ -215,9 +213,12 @@ class TestDetectCommand:
             [
                 "detect",
                 str(sample_image_path),
-                "--model", "yolo26n",
-                "--weights", str(yolo26_weights),
-                "--backend", "pytorch",
+                "--model",
+                "yolo26n",
+                "--weights",
+                str(yolo26_weights),
+                "--backend",
+                "pytorch",
             ],
             catch_exceptions=False,
         )
@@ -238,10 +239,14 @@ class TestDetectCommand:
             [
                 "detect",
                 str(sample_image_path),
-                "--model", "yolo26n",
-                "--weights", str(yolo26_weights),
-                "--backend", "pytorch",
-                "--output", str(out_json),
+                "--model",
+                "yolo26n",
+                "--weights",
+                str(yolo26_weights),
+                "--backend",
+                "pytorch",
+                "--output",
+                str(out_json),
             ],
             catch_exceptions=False,
         )
@@ -275,11 +280,16 @@ class TestDetectCommand:
             [
                 "detect",
                 str(sample_image_path),
-                "--model", "yolo26n",
-                "--weights", str(yolo26_weights),
-                "--backend", "pytorch",
-                "--confidence", "0.25",
-                "--output", str(out_json),
+                "--model",
+                "yolo26n",
+                "--weights",
+                str(yolo26_weights),
+                "--backend",
+                "pytorch",
+                "--confidence",
+                "0.25",
+                "--output",
+                str(out_json),
             ],
             catch_exceptions=False,
         )
@@ -309,10 +319,14 @@ class TestDetectCommand:
             [
                 "detect",
                 str(sample_image_dir),
-                "--model", "yolo26n",
-                "--weights", str(yolo26_weights),
-                "--backend", "pytorch",
-                "--output", str(out_json),
+                "--model",
+                "yolo26n",
+                "--weights",
+                str(yolo26_weights),
+                "--backend",
+                "pytorch",
+                "--output",
+                str(out_json),
             ],
             catch_exceptions=False,
         )
@@ -333,20 +347,25 @@ class TestDetectCommand:
         common_args = [
             "detect",
             str(sample_image_path),
-            "--model", "yolo26n",
-            "--weights", str(yolo26_weights),
-            "--backend", "pytorch",
+            "--model",
+            "yolo26n",
+            "--weights",
+            str(yolo26_weights),
+            "--backend",
+            "pytorch",
         ]
 
         low_json = tmp_path / "low.json"
         high_json = tmp_path / "high.json"
 
         r_low = runner.invoke(
-            cli, [*common_args, "--confidence", "0.01", "--output", str(low_json)],
+            cli,
+            [*common_args, "--confidence", "0.01", "--output", str(low_json)],
             catch_exceptions=False,
         )
         r_high = runner.invoke(
-            cli, [*common_args, "--confidence", "0.99", "--output", str(high_json)],
+            cli,
+            [*common_args, "--confidence", "0.99", "--output", str(high_json)],
             catch_exceptions=False,
         )
 
@@ -392,12 +411,18 @@ class TestExportCommand:
         proc = subprocess.run(
             [
                 str(yowo_bin),
-                "export", "yolo26n",
-                "--weights", str(yolo26_weights),
-                "--format", "onnx",
-                "--precision", "fp32",
-                "--output-dir", str(out_dir),
-                "--imgsz", "640",
+                "export",
+                "yolo26n",
+                "--weights",
+                str(yolo26_weights),
+                "--format",
+                "onnx",
+                "--precision",
+                "fp32",
+                "--output-dir",
+                str(out_dir),
+                "--imgsz",
+                "640",
             ],
             capture_output=True,
             text=True,
@@ -409,9 +434,7 @@ class TestExportCommand:
         assert "Duration:" in combined
 
         # Locate the exported .onnx file (ultralytics places it next to the .pt)
-        onnx_files = list(tmp_path.rglob("*.onnx")) + list(
-            yolo26_weights.parent.glob("*.onnx")
-        )
+        onnx_files = list(tmp_path.rglob("*.onnx")) + list(yolo26_weights.parent.glob("*.onnx"))
         assert len(onnx_files) >= 1, "No .onnx file found after export"
         onnx_path = onnx_files[0]
         assert onnx_path.stat().st_size > 0

@@ -192,24 +192,18 @@ class TestSelectBackendOverride:
 
     def test_device_override_propagates_to_result(self) -> None:
         profile = make_profile(has_torch=True)
-        result = select_backend(
-            profile, "n", backend_override="pytorch", device_override="cpu"
-        )
+        result = select_backend(profile, "n", backend_override="pytorch", device_override="cpu")
         assert result.device_index == 0
 
     def test_precision_override_propagates_to_result(self) -> None:
         profile = make_profile(has_torch=True)
-        result = select_backend(
-            profile, "n", backend_override="pytorch", precision_override="int8"
-        )
+        result = select_backend(profile, "n", backend_override="pytorch", precision_override="int8")
         assert result.precision == Precision.INT8
 
     def test_invalid_precision_override_raises_backend_error(self) -> None:
         profile = make_profile(has_torch=True)
         with pytest.raises(BackendError):
-            select_backend(
-                profile, "n", backend_override="pytorch", precision_override="fp0"
-            )
+            select_backend(profile, "n", backend_override="pytorch", precision_override="fp0")
 
     def test_tensorrt_override_without_gpu_raises_backend_error(self) -> None:
         profile = make_profile(has_gpu=False, has_tensorrt=True)

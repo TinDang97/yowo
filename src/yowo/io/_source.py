@@ -93,13 +93,9 @@ class ImageDirectorySource:
     """Yields frames from all supported image files in a directory, sorted."""
 
     def __init__(self, directory: Path) -> None:
-        files = sorted(
-            p for p in directory.iterdir() if p.suffix.lower() in _IMAGE_EXTS
-        )
+        files = sorted(p for p in directory.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
         if not files:
-            raise SourceError(
-                f"No supported image files found in directory: {directory}"
-            )
+            raise SourceError(f"No supported image files found in directory: {directory}")
         self._files = files
 
     @property
@@ -279,11 +275,10 @@ class RTSPStreamSource:
                     yielded += 1
                 else:
                     cap.release()
-                    wait = min(2 ** retry_count, 10)
+                    wait = min(2**retry_count, 10)
                     if time.monotonic() + wait > deadline:
                         raise SourceTimeoutError(
-                            f"RTSP stream {self._url} timed out after "
-                            f"{self._reconnect_timeout_s}s"
+                            f"RTSP stream {self._url} timed out after {self._reconnect_timeout_s}s"
                         )
                     time.sleep(wait)
                     retry_count += 1
@@ -441,7 +436,7 @@ def open_source(
         f"Cannot determine source type for: {source!r}. "
         f"Supported: image files {sorted(_IMAGE_EXTS)}, "
         f"video files {sorted(_VIDEO_EXTS)}, "
-        f"RTSP URLs (rtsp://), webcam indices (\"0\", \"1\", ...)."
+        f'RTSP URLs (rtsp://), webcam indices ("0", "1", ...).'
     )
 
 

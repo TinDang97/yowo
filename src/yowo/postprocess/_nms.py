@@ -24,18 +24,86 @@ from yowo.types import (
 
 # Standard COCO 80-class names (index 0..79).
 COCO_CLASSES: list[str] = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
-    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
-    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana",
-    "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
-    "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
-    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
-    "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 ]
 
 
@@ -149,9 +217,9 @@ def _inverse_letterbox(
     """
     out = boxes_xyxy.copy()
     out[:, 0] = (boxes_xyxy[:, 0] - pad_left) / scale  # x1
-    out[:, 1] = (boxes_xyxy[:, 1] - pad_top) / scale   # y1
+    out[:, 1] = (boxes_xyxy[:, 1] - pad_top) / scale  # y1
     out[:, 2] = (boxes_xyxy[:, 2] - pad_left) / scale  # x2
-    out[:, 3] = (boxes_xyxy[:, 3] - pad_top) / scale   # y2
+    out[:, 3] = (boxes_xyxy[:, 3] - pad_top) / scale  # y2
 
     out[:, 0] = np.clip(out[:, 0], 0.0, float(orig_w))
     out[:, 2] = np.clip(out[:, 2], 0.0, float(orig_w))
@@ -358,13 +426,25 @@ def postprocess(
             # May arrive as (6, num_detections) — transpose if col count is 6.
             if item.ndim == 2 and item.shape[1] == 6:
                 boxes = _decode_yolo26(
-                    item, confidence_threshold, scale, pad_top, pad_left,
-                    orig_h, orig_w, names,
+                    item,
+                    confidence_threshold,
+                    scale,
+                    pad_top,
+                    pad_left,
+                    orig_h,
+                    orig_w,
+                    names,
                 )
             elif item.ndim == 2 and item.shape[0] == 6:
                 boxes = _decode_yolo26(
-                    item.T, confidence_threshold, scale, pad_top, pad_left,
-                    orig_h, orig_w, names,
+                    item.T,
+                    confidence_threshold,
+                    scale,
+                    pad_top,
+                    pad_left,
+                    orig_h,
+                    orig_w,
+                    names,
                 )
             else:
                 boxes = ()
@@ -380,8 +460,15 @@ def postprocess(
                     # shape is (4+num_classes, num_anchors) -> transpose
                     item = item.T
                 boxes = _decode_standard(
-                    item, confidence_threshold, iou_threshold,
-                    scale, pad_top, pad_left, orig_h, orig_w, names,
+                    item,
+                    confidence_threshold,
+                    iou_threshold,
+                    scale,
+                    pad_top,
+                    pad_left,
+                    orig_h,
+                    orig_w,
+                    names,
                 )
 
         detections.append(

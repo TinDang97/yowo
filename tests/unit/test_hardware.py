@@ -258,9 +258,7 @@ class TestDetectGpuArch:
             (10, 0, GPUArch.UNKNOWN),  # future
         ],
     )
-    def test_compute_capability_mapping(
-        self, major: int, minor: int, expected: GPUArch
-    ) -> None:
+    def test_compute_capability_mapping(self, major: int, minor: int, expected: GPUArch) -> None:
         assert detect_gpu_arch(major, minor) == expected
 
 

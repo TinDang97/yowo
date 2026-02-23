@@ -164,9 +164,7 @@ class OpenVinoBackend:
         if path.is_dir():
             candidates = list(path.glob("*.xml"))
             if not candidates:
-                raise BackendLoadError(
-                    f"OpenVinoBackend: no .xml file found in directory: {path}"
-                )
+                raise BackendLoadError(f"OpenVinoBackend: no .xml file found in directory: {path}")
             return candidates[0]
         return path
 
