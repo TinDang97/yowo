@@ -96,7 +96,7 @@ def export_model(
 
     t0 = time.monotonic()
     try:
-        from ultralytics import YOLO
+        from ultralytics import YOLO  # type: ignore[attr-defined]
 
         model = YOLO(str(weights_path))
         exported = model.export(**kwargs)

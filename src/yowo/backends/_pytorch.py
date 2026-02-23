@@ -9,6 +9,7 @@ never fails on machines without torch or ultralytics.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -35,7 +36,7 @@ class PyTorchBackend:
                 "uv add torch ultralytics",
             )
         self._hw = hw_profile
-        self._model: object | None = None  # ultralytics YOLO instance
+        self._model: Any = None  # ultralytics YOLO instance at runtime
         self._device_str: str = "cpu"
         self._input_shape: tuple[int, int] = (640, 640)
 

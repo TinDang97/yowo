@@ -11,7 +11,7 @@ on machines without TensorRT installed.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,9 +19,6 @@ from numpy.typing import NDArray
 from yowo.errors import BackendError, BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, PreprocessedTensor
-
-if TYPE_CHECKING:
-    import onnxruntime as ort  # type: ignore[import-untyped]
 
 __all__ = ["TensorRTBackend"]
 
@@ -47,7 +44,7 @@ class TensorRTBackend:
             raise BackendError("TensorRTBackend: an NVIDIA GPU is required")
 
         self._hw = hw_profile
-        self._session: ort.InferenceSession | None = None  # type: ignore[name-defined]
+        self._session: Any = None  # ort.InferenceSession at runtime
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
         self._device_index: int = 0

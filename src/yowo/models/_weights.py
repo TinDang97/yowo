@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -110,7 +111,7 @@ def _attempt_download(url: str, tmp_path: Path, *, suppress_progress: bool) -> N
     try:
         from tqdm import tqdm  # type: ignore[import-untyped]
 
-        progress: tqdm[bytes] | None = (
+        progress: tqdm[Any] | None = (
             None
             if suppress_progress
             else tqdm(

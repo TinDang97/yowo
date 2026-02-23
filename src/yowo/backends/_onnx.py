@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,7 +41,7 @@ class OnnxBackend:
                 "uv add onnxruntime  # CPU\nuv add onnxruntime-gpu  # CUDA",
             )
         self._hw = hw_profile
-        self._session: ort.InferenceSession | None = None
+        self._session: Any = None  # ort.InferenceSession at runtime
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
 

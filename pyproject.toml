@@ -29,9 +29,10 @@ dependencies = [
 [project.optional-dependencies]
 onnx = ["onnxruntime>=1.17"]
 onnx-gpu = ["onnxruntime-gpu>=1.17"]
-tensorrt = ["tensorrt>=10.0"]
 openvino = ["openvino>=2024.0"]
-all = ["yowo[onnx-gpu,tensorrt,openvino]"]
+all = ["yowo[onnx-gpu,openvino]"]
+# TensorRT requires manual installation on Linux+NVIDIA GPU:
+# pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 
 [project.scripts]
 yowo = "yowo.cli._main:cli"
@@ -42,8 +43,7 @@ dev = [
     "pytest-cov>=5.0",
     "pytest-mock>=3.14",
     "ruff>=0.8",
-    "mypy>=1.13",
-    "types-pyyaml>=6.0",
+    "pyright>=1.1",
 ]
 
 [build-system]
@@ -62,12 +62,20 @@ src = ["src", "tests"]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["B008"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
+[tool.pyright]
+pythonVersion = "3.11"
+pythonPlatform = "Linux"
+typeCheckingMode = "strict"
+include = ["src"]
+exclude = ["tests"]
+reportMissingModuleSource = false
+reportMissingImports = false
+# Suppress unknowns from untyped external packages (pynvml, onnxruntime, openvino, tqdm)
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportMissingTypeArgument = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
