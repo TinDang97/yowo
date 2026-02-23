@@ -48,19 +48,23 @@ def fuse_conv_and_bn(conv: nn.Conv2d, bn: nn.BatchNorm2d) -> nn.Conv2d:
         bias=True,
     ).requires_grad_(False)
 
-    # Per-channel scale: gamma / sqrt(var + eps)  — O(N) instead of O(N^2) diag
-    scale = bn.weight.div(torch.sqrt(bn.running_var + bn.eps))  # type: ignore[arg-type]
+    # Wrap in no_grad: scale/bias are computed from bn.weight (a Parameter),
+    # so without no_grad the .copy_() creates a CopyBackwards grad_fn making
+    # fused parameters non-leaf, which triggers warnings at load_state_dict.
+    with torch.no_grad():
+        # Per-channel scale: gamma / sqrt(var + eps)  — O(N) instead of O(N^2) diag
+        scale = bn.weight.div(torch.sqrt(bn.running_var + bn.eps))  # type: ignore[arg-type]
 
-    # Fuse weights:  w_fused = w_conv * scale (element-wise broadcast)
-    w_conv = conv.weight.clone().view(conv.out_channels, -1)
-    fused.weight.copy_((w_conv * scale.unsqueeze(1)).view(fused.weight.shape))
+        # Fuse weights:  w_fused = w_conv * scale (element-wise broadcast)
+        w_conv = conv.weight.clone().view(conv.out_channels, -1)
+        fused.weight.copy_((w_conv * scale.unsqueeze(1)).view(fused.weight.shape))
 
-    # Fuse bias:  b_fused = scale * b_conv + (beta - gamma * mean / sqrt(var + eps))
-    b_conv = conv.bias if conv.bias is not None else torch.zeros(conv.out_channels)
-    b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(  # type: ignore[union-attr]
-        torch.sqrt(bn.running_var + bn.eps)  # type: ignore[arg-type]
-    )
-    fused.bias.copy_(scale * b_conv + b_bn)  # type: ignore[union-attr]
+        # Fuse bias:  b_fused = scale * b_conv + (beta - gamma * mean / sqrt(var + eps))
+        b_conv = conv.bias if conv.bias is not None else torch.zeros(conv.out_channels)
+        b_bn = bn.bias - bn.weight.mul(bn.running_mean).div(  # type: ignore[union-attr]
+            torch.sqrt(bn.running_var + bn.eps)  # type: ignore[arg-type]
+        )
+        fused.bias.copy_(scale * b_conv + b_bn)  # type: ignore[union-attr]
     return fused
 
 

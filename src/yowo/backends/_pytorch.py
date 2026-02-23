@@ -101,6 +101,17 @@ class PyTorchBackend:
         self._torch = torch  # cache for hot path
 
         resolved = self._resolve_device(device)
+
+        # Cap CPU thread pool to avoid memory-bandwidth saturation on
+        # machines with many cores (e.g. Apple Silicon M-series).
+        # Use half the logical CPUs for compute threads; keep interop low.
+        if not resolved.startswith("cuda"):
+            import os
+
+            cpu_count = os.cpu_count() or 4
+            torch.set_num_threads(max(1, cpu_count // 2))
+            torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+
         try:
             # Build native model from spec
             model = build_model(self._spec.family, self._spec.size)

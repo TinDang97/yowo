@@ -182,7 +182,10 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
             "Shape mismatches between checkpoint and model:\n" + "\n".join(shape_mismatches)
         )
 
-    model.load_state_dict(mapped, strict=False)
+    # Detach before loading: EMA checkpoint tensors may retain autograd
+    # computation graphs from training (non-leaf), causing PyTorch's
+    # load_state_dict to warn when accessing .grad. Detach breaks the graph.
+    model.load_state_dict({k: v.detach() for k, v in mapped.items()}, strict=False)
     logger.info(
         "Loaded %d/%d parameters from %s",
         len(mapped),
