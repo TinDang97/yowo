@@ -9,12 +9,10 @@ Quick start::
         for detection in engine.stream(open_source("image.jpg")):
             for box in detection.boxes:
                 print(f"{box.class_name}: {box.confidence:.2f}")
-
-At this stage only core types, errors, and config are available.
-InferenceEngine and open_source will be exported here once implemented.
 """
 
 from yowo.config import ExportConfig, InferenceConfig, load_config
+from yowo.engine import InferenceEngine
 from yowo.errors import (
     BackendError,
     BackendLoadError,
@@ -31,6 +29,8 @@ from yowo.errors import (
     SourceTimeoutError,
     YowoError,
 )
+from yowo.export import ExportMetadata, export_model
+from yowo.io._source import open_source
 from yowo.types import (
     BackendSelection,
     BackendType,
@@ -54,7 +54,6 @@ __version__ = "0.1.0"
 __all__ = [
     "BackendError",
     "BackendLoadError",
-    # ---- types ----
     "BackendSelection",
     "BackendType",
     "BoundingBox",
@@ -64,15 +63,16 @@ __all__ = [
     "Detection",
     "DeviceError",
     "DeviceType",
-    # ---- config ----
     "ExportConfig",
     "ExportError",
     "ExportFormat",
+    "ExportMetadata",
     "ExportResult",
     "ExportUnsupportedError",
     "Frame",
     "GPUArch",
     "InferenceConfig",
+    "InferenceEngine",
     "InferenceError",
     "ModelError",
     "ModelFamily",
@@ -84,12 +84,9 @@ __all__ = [
     "PreprocessedTensor",
     "SourceError",
     "SourceTimeoutError",
-    # ---- errors ----
     "YowoError",
-    # Version
     "__version__",
+    "export_model",
     "load_config",
-    # Future exports (not yet implemented):
-    # "InferenceEngine",
-    # "open_source",
+    "open_source",
 ]
