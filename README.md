@@ -400,6 +400,21 @@ except YowoError as e:
 
 ---
 
+## Architecture
+
+| Module | Path | Responsibility |
+|--------|------|----------------|
+| core | [`src/yowo/`](src/yowo/README.md) | `InferenceEngine`, public API surface, `engine.py`, `config.py`, `types.py`, `errors.py` |
+| backends | [`src/yowo/backends/`](src/yowo/backends/README.md) | Inference backend implementations (TensorRT, ONNX, OpenVINO, PyTorch) and automatic priority-chain selection |
+| cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `export`, `info`, `models` commands |
+| export | [`src/yowo/export/`](src/yowo/export/README.md) | Export `.pt` weights to ONNX / TensorRT / OpenVINO with calibration, metadata sidecar, and output validation |
+| hardware | [`src/yowo/hardware/`](src/yowo/hardware/README.md) | One-time hardware detection (GPU, CPU arch, installed libs), cached for session lifetime |
+| io | [`src/yowo/io/`](src/yowo/io/README.md) | Frame sources (image, video, RTSP, directory), batch preprocessing, output sinks |
+| models | [`src/yowo/models/`](src/yowo/models/README.md) | Model family / size registry, weight download, and `~/.cache/yowo/weights/` cache management |
+| postprocess | [`src/yowo/postprocess/`](src/yowo/postprocess/README.md) | Decode raw backend tensors into `Detection` objects; NMS for backends that return raw proposals |
+
+---
+
 ## Development
 
 ```bash
