@@ -437,6 +437,12 @@ Architecture and module contracts are documented in:
 - [`src/yowo/README.md`](src/yowo/README.md) — library architecture overview
 - Each module directory has its own `README.md`
 
+### Experiments
+
+| Report | Summary |
+|--------|---------|
+| [Vehicle Detection Benchmark — YOLO11s](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. ONNX FP16 (CoreML EP) achieves 18.1 FPS at batch=8 — 2.62× PyTorch baseline. |
+
 ---
 
 ## License
