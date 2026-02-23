@@ -1,6 +1,6 @@
 # export — Model Export and Quantization
 
-Converts PyTorch `.pt` weights to optimized inference formats (ONNX, TensorRT, OpenVINO) with optional quantization. Wraps `ultralytics.YOLO.export()` — does not reimplement conversion logic. Adds: weight resolution, calibration data handling, output validation, and metadata sidecar writing.
+Converts PyTorch `.pt` weights to optimized inference formats (ONNX, TensorRT, OpenVINO) with optional quantization. Uses native `yowo.arch` models with `torch.onnx.export()` — no external dependencies beyond PyTorch. Adds: weight resolution, calibration data handling, output validation, and metadata sidecar writing.
 
 ---
 
@@ -12,8 +12,9 @@ The export pipeline has one entry point (`export_model`) and three internal resp
 export_model(spec, target_format, output_dir, precision, dynamic_batch)
     │
     ├── models.resolve_weights(spec)        → .pt path
-    ├── _calibration.resolve_calibration()  → calibration YAML path (INT8 only)
-    ├── _exporter.run_export()              → calls ultralytics, returns output path
+    ├── arch.build_model() + load_weights() → fused native model
+    ├── _exporter.run_export()              → torch.onnx.export, returns output path
+    ├── _calibration.resolve_calibration()  → calibration data (INT8 only)
     └── _metadata.save()                    → writes .yowo.json sidecar
 ```
 
@@ -24,19 +25,17 @@ export_model(spec, target_format, output_dir, precision, dynamic_batch)
 ```
 .pt weights
     │
-    ▼ (always first — ultralytics owns ONNX export)
+    ▼ (build native model, fuse Conv+BN, torch.onnx.export)
   ONNX (.onnx)  ──────────────────────────────► ExportResult
     │
     ├──► TensorRT (.engine)  ────────────────► ExportResult
-    │      (trtexec or tensorrt Python API,
-    │       invoked by ultralytics export)
+    │      (trtexec or tensorrt Python API)
     │
     └──► OpenVINO (_openvino_model/ directory) ► ExportResult
-           (mo command or openvino Python API,
-            invoked by ultralytics export)
+           (openvino.convert_model Python API)
 ```
 
-TensorRT and OpenVINO exports always go through ONNX as an intermediate — this is handled transparently by ultralytics.
+TensorRT and OpenVINO exports always go through ONNX as an intermediate.
 
 ---
 
@@ -45,7 +44,7 @@ TensorRT and OpenVINO exports always go through ONNX as an intermediate — this
 ```
 export/
 ├── __init__.py       — public surface: export_model(), ExportResult
-├── _exporter.py      — ultralytics.YOLO.export() wrapper
+├── _exporter.py      — native torch.onnx.export pipeline
 ├── _calibration.py   — calibration source resolution for INT8
 └── _metadata.py      — ExportMetadata dataclass, sidecar write/read
 ```
@@ -74,20 +73,21 @@ def export_model(
     Raises ExportError if:
       - target_format is not in {"onnx", "tensorrt", "openvino"}
       - precision == INT8 and calibration_data is None
-      - ultralytics export subprocess exits non-zero
+      - torch.onnx.export or downstream conversion fails
       - expected output file is not found after export
     """
 ```
 
 ### `_exporter.py`
 
-Wraps `ultralytics.YOLO.export()`. Responsibilities:
+Uses native `yowo.arch` models with `torch.onnx.export()`. Responsibilities:
 
 - Resolve weights path via `models.resolve_weights(spec)`.
-- Build `export_kwargs` dict from `target_format`, `precision`, `dynamic_batch`, `calibration_data`.
-- Instantiate `ultralytics.YOLO(weights_path)` and call `.export(**export_kwargs)`.
-- Capture and return the output path from ultralytics return value.
-- Wrap any exception from ultralytics in `ExportError`.
+- Build native model via `arch.build_model()`, load weights, fuse Conv+BN.
+- Export to ONNX via `torch.onnx.export()` with opset 17, optional dynamic batch axes.
+- Optionally simplify ONNX graph with `onnxslim`.
+- Convert ONNX to TensorRT (via `trtexec`) or OpenVINO (via `openvino.convert_model`) as needed.
+- Wrap any exception in `ExportError`.
 
 ```python
 def run_export(
@@ -110,15 +110,13 @@ def resolve_calibration_source(
     min_images: int = 300,
 ) -> Path:
     """
-    Return a calibration YAML path suitable for passing to ultralytics.
+    Validate and return a calibration data directory path.
 
-    If source is a .yaml / .yml file: validate it exists and return it.
     If source is a directory:
       - Count supported image files (.jpg, .png, .bmp, .webp).
       - Warn (not raise) if count < min_images.
-      - Generate a temporary YAML file pointing at the directory.
-      - Return path to that temp YAML.
-    Raises InputError if source is neither a file nor a directory.
+      - Return the directory path.
+    Raises InputError if source is not a directory.
     Raises InputError if source directory contains zero supported images.
     """
 ```
@@ -138,7 +136,7 @@ class ExportMetadata:
     file_size_bytes:     int
     created_at:          datetime       # UTC
     export_duration_sec: float
-    ultralytics_version: str
+    yowo_version:        str
     gpu_name:            str | None     # None if CPU export
     calibration_data:    Path | None    # None for FP32/FP16
 
@@ -177,9 +175,9 @@ class ExportMetadata:
 
 2. Call export_model(..., precision=INT8, calibration_data=Path("./calib_images/"))
 
-3. yowo._calibration generates a temp calibration.yaml pointing at the directory.
+3. yowo._calibration validates the directory and image count.
 
-4. ultralytics runs TensorRT calibration:
+4. TensorRT calibration runs during engine build:
    - Feeds images through the network one batch at a time.
    - Collects per-layer activation range statistics.
    - Selects INT8 quantization scales that minimize accuracy loss.
@@ -215,7 +213,7 @@ Example sidecar content:
   "file_size_bytes": 12582912,
   "created_at": "2026-02-23T14:30:00Z",
   "export_duration_sec": 142.3,
-  "ultralytics_version": "8.3.0",
+  "yowo_version": "0.1.0",
   "gpu_name": "NVIDIA GeForce RTX 4090",
   "calibration_data": null
 }
@@ -225,8 +223,9 @@ Example sidecar content:
 
 ## Dependencies
 
-- **ultralytics**: actual model conversion (not imported at module level — imported inside `_exporter.run_export()`)
-- **yowo imports**: `models/` (`resolve_weights`), `hardware/` (`get_hardware_profile`), `types.py`, `errors.py` (`ExportError`, `InputError`)
+- **torch**: model building and `torch.onnx.export()` (not imported at module level — imported inside `_exporter.run_export()`)
+- **onnxslim** (optional): ONNX graph simplification
+- **yowo imports**: `arch/` (`build_model`, `load_weights`), `models/` (`resolve_weights`), `hardware/` (`get_hardware_profile`), `types.py`, `errors.py` (`ExportError`, `InputError`)
 
 ---
 

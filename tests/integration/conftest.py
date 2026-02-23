@@ -39,7 +39,7 @@ def yolo26_weights() -> Path:
 
 @pytest.fixture(scope="session")
 def sample_image_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Download bus.jpg from ultralytics once per session.
+    """Download bus.jpg test image once per session.
 
     This is the standard YOLO test image containing persons and a bus —
     guaranteed to produce real detections at confidence >= 0.25.

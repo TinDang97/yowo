@@ -1,6 +1,6 @@
 # yowo — Library Architecture
 
-Production YOLO inference and export library. Wraps ultralytics to add edge optimization, multi-backend runtime, automatic hardware selection, and production hardening.
+Production YOLO inference and export library. Implements native YOLO11 and YOLO26 architectures with edge optimization, multi-backend runtime, automatic hardware selection, and production hardening.
 
 ---
 
@@ -69,7 +69,7 @@ types.py    errors.py          (leaf modules — no yowo imports)
                      lifecycle management)
                               │
                            export/
-                    (ultralytics wrapper,
+                    (torch.onnx.export,
                      calibration, metadata)
                               │
                             cli/
@@ -188,7 +188,7 @@ YowoError
 ├── HardwareError      — GPU enumeration or memory allocation failure
 ├── ModelNotFoundError — family/size not in registry or weights not resolvable
 ├── BackendError       — load, infer, or unload failure; wraps underlying SDK exception
-├── ExportError        — ultralytics export failure or post-export validation failure
+├── ExportError        — export failure or post-export validation failure
 └── InputError         — source path not found, unreadable stream, unsupported format
 ```
 

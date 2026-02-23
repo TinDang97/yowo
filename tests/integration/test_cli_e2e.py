@@ -120,16 +120,16 @@ class TestInfoCommand:
 
 @pytest.mark.integration
 class TestModelsCommand:
-    _MODEL_PATTERN = re.compile(r"^yolo(11|12|26)(n|s|m|l|x)\s")
+    _MODEL_PATTERN = re.compile(r"^yolo(11|26)(n|s|m|l|x)\s")
 
     def _model_lines(self, output: str) -> list[str]:
         return [ln for ln in output.splitlines() if self._MODEL_PATTERN.match(ln)]
 
-    def test_models_lists_all_15_variants(self, runner: CliRunner) -> None:
+    def test_models_lists_all_10_variants(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["models"])
         assert result.exit_code == 0
         lines = self._model_lines(result.output)
-        assert len(lines) == 15, f"Expected 15 model lines, got {len(lines)}:\n{result.output}"
+        assert len(lines) == 10, f"Expected 10 model lines, got {len(lines)}:\n{result.output}"
 
     def test_models_filter_yolo26_gives_5(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["models", "--family", "yolo26"])
@@ -391,7 +391,7 @@ class TestDetectCommand:
 
 
 # ---------------------------------------------------------------------------
-# TestExportCommand — slow, requires real model + ultralytics export
+# TestExportCommand — slow, requires real model + torch.onnx.export
 # ---------------------------------------------------------------------------
 
 
@@ -404,7 +404,7 @@ class TestExportCommand:
         yolo26_weights: Path,
     ) -> None:
         """Run export as a real subprocess to avoid CliRunner I/O conflicts with
-        ultralytics' logging infrastructure (which writes to sys.stderr directly)."""
+        torch export logging infrastructure (which writes to sys.stderr directly)."""
         out_dir = tmp_path / "export_out"
         # Resolve the yowo script in the same venv as the test runner.
         yowo_bin = Path(sys.executable).parent / "yowo"
@@ -433,7 +433,7 @@ class TestExportCommand:
         assert "MB" in combined
         assert "Duration:" in combined
 
-        # Locate the exported .onnx file (ultralytics places it next to the .pt)
+        # Locate the exported .onnx file
         onnx_files = list(tmp_path.rglob("*.onnx")) + list(yolo26_weights.parent.glob("*.onnx"))
         assert len(onnx_files) >= 1, "No .onnx file found after export"
         onnx_path = onnx_files[0]

@@ -62,7 +62,7 @@ class InferenceBackend(Protocol):
 backends/
 ├── __init__.py      — InferenceBackend Protocol, create_backend() factory
 ├── _selector.py     — auto-selection logic, precision selection, fallback chain
-├── _pytorch.py      — PyTorch fallback backend (ultralytics.YOLO)
+├── _pytorch.py      — PyTorch fallback backend (native yowo.arch)
 ├── _onnx.py         — ONNX Runtime backend (CUDA EP + CPU EP)
 ├── _tensorrt.py     — TensorRT backend (.engine file, async execution)
 └── _openvino.py     — OpenVINO backend (Core.compile_model, InferRequest)
@@ -157,10 +157,10 @@ Precision is selected at `BackendSelection` time (before any model file is loade
 
 ### `_pytorch.py` — PyTorch Backend
 
-- Loads `.pt` via `ultralytics.YOLO(model_path)`.
-- Wraps `ultralytics.YOLO.predict()` output into `NDArray[float32]`.
-- Device: passed directly to `ultralytics.YOLO(..., device=device)`.
-- No warmup needed (ultralytics handles internally).
+- Builds native YOLO model via `yowo.arch.build_model()` and loads `.pt` weights via `yowo.arch.load_weights()`.
+- Applies Conv+BN fusion (`model.fuse()`) and channels-last memory format on GPU for Tensor Core optimization.
+- Inference uses `torch.inference_mode()` with cached `torch` module reference for hot-path performance.
+- CUDA errors map to `DeviceError`; explicit GPU memory release in `unload()` via `torch.cuda.empty_cache()`.
 
 ### `_onnx.py` — ONNX Runtime Backend
 

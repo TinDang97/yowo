@@ -110,7 +110,7 @@ yowo models [--family FAMILY]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--family` | none | Filter to a specific model family: `yolo11 \| yolo12 \| yolo26` |
+| `--family` | none | Filter to a specific model family: `yolo11 \| yolo26` |
 | `--format` | none | Filter to models that have a cached export in this format |
 | `--json` | none | Print as JSON array |
 

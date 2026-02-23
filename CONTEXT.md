@@ -8,13 +8,13 @@
 
 **Name**: yowo
 **Purpose**: A Python library and CLI for deploying YOLO models in production — optimized for edge devices, cloud GPUs, and every platform in between.
-**Tagline**: *Ultralytics inference, production-hardened.*
+**Tagline**: *Native YOLO inference, production-hardened.*
 
 ---
 
 ## Problem Statement
 
-Ultralytics provides excellent training, validation, and basic inference. But in production, it falls short:
+Standard YOLO libraries focus on training and basic inference but fall short in production:
 
 | Problem | Detail |
 |---------|--------|
@@ -24,7 +24,7 @@ Ultralytics provides excellent training, validation, and basic inference. But in
 | **No production stream resilience** | RTSP disconnects crash the inference loop |
 | **No model metadata tracking** | No sidecar JSON describing what was exported, when, and for which hardware |
 
-yowo solves all of these while staying thin — it wraps ultralytics rather than reimplementing it.
+yowo solves all of these with native YOLO11 and YOLO26 architectures, Apache-2.0 licensed.
 
 ---
 
@@ -32,15 +32,15 @@ yowo solves all of these while staying thin — it wraps ultralytics rather than
 
 **In scope:**
 - Multi-backend inference (TensorRT, ONNX Runtime, OpenVINO, PyTorch)
-- Model export pipeline with INT8/FP16 quantization (wraps ultralytics export)
+- Model export pipeline with INT8/FP16 quantization (native torch.onnx.export)
 - Hardware auto-detection and backend auto-selection
 - Production-grade stream processing (images, video files, RTSP, webcam, batch)
 - Python library API + CLI tool
 
 **Out of scope (explicitly):**
-- Model training (use ultralytics directly)
-- Model validation / accuracy benchmarking (use ultralytics `model.val()`)
-- Custom model architectures (YOLO families only)
+- Model training
+- Model validation / accuracy benchmarking
+- Custom model architectures (YOLO11 and YOLO26 families only)
 - Windows support (Linux-first; macOS for development only)
 - Non-YOLO models
 
@@ -60,10 +60,9 @@ yowo solves all of these while staying thin — it wraps ultralytics rather than
 | Family | Sizes | Notes |
 |--------|-------|-------|
 | YOLO11 | n, s, m, l, x | Most stable, best for production baseline |
-| YOLO12 | n, s, m, l, x | Attention-based, better accuracy, slower CPU inference |
-| YOLO26 | n, s, m, l, x | Newest, NMS-free, best CPU speed and INT8 quantization |
+| YOLO26 | n, s, m, l, x | NMS-free, best CPU speed and INT8 quantization |
 
-All models sourced as `.pt` weights from the ultralytics asset registry.
+All models implemented natively in `src/yowo/arch/`. Weights loaded from `.pt` checkpoints.
 Adding a new YOLO family: register in `src/yowo/models/_registry.py` — no other files change.
 
 ---
@@ -89,7 +88,7 @@ Adding a new YOLO family: register in `src/yowo/models/_registry.py` — no othe
 | TensorRT | `.engine` | FP32, FP16, INT8 | `pip install yowo[tensorrt]` |
 | ONNX Runtime | `.onnx` | FP32, FP16 | `pip install yowo[onnx]` or `yowo[onnx-gpu]` |
 | OpenVINO | `_openvino_model/` | FP32, FP16, INT8 | `pip install yowo[openvino]` |
-| PyTorch | `.pt` | FP32 | Installed with ultralytics (core dep) |
+| PyTorch | `.pt` | FP32 | `pip install yowo[pytorch]` |
 
 Backends are **optional extras**. Only the ones you install are loaded. Unused backends never import their SDK — critical for edge devices.
 
@@ -165,13 +164,13 @@ No circular dependencies. To add a feature: find the lowest layer it belongs to,
 |------------|------|--------|
 | `numpy` | Core | Primitive tensor type |
 | `opencv-python-headless` | Core | Frame decoding, letterbox, video IO |
-| `ultralytics>=8.3` | Core | Weight download, export backend, model configs |
 | `click>=8.1` | Core | CLI framework |
 | `pyyaml>=6.0` | Core | Config parsing |
-| `onnxruntime` | Optional extra | CPU inference |
-| `onnxruntime-gpu` | Optional extra | CUDA inference |
+| `torch>=2.0` | Optional extra | PyTorch backend + export (`yowo[pytorch]`) |
+| `onnxruntime` | Optional extra | CPU inference (`yowo[onnx]`) |
+| `onnxruntime-gpu` | Optional extra | CUDA inference (`yowo[onnx-gpu]`) |
 | `tensorrt>=10.0` | Optional extra | TensorRT inference |
-| `openvino>=2024.0` | Optional extra | OpenVINO inference |
+| `openvino>=2024.0` | Optional extra | OpenVINO inference (`yowo[openvino]`) |
 
 Install only what your deployment needs:
 ```bash
@@ -195,7 +194,6 @@ pip install yowo[all]
 | Component | Requirement |
 |-----------|-------------|
 | Python | >=3.11 |
-| ultralytics | >=8.3 |
 | CUDA | >=12.0 (if using GPU) |
 | TensorRT | >=10.0 (if using TensorRT) |
 | OpenVINO | >=2024.0 (if using OpenVINO) |

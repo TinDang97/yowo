@@ -26,13 +26,13 @@ models/
 ```python
 @dataclass(frozen=True, slots=True)
 class ModelMeta:
-    family:               str          # "yolo11" | "yolo12" | "yolo26"
+    family:               str          # "yolo11" | "yolo26"
     size:                 str          # "n" | "s" | "m" | "l" | "x"
     input_height:         int          # default input resolution height (e.g. 640)
     input_width:          int          # default input resolution width  (e.g. 640)
     num_classes:          int          # 80 for COCO
     default_weights_url:  str          # HTTPS URL to canonical .pt file
-    ultralytics_name:     str          # e.g. "yolo11n.pt" — passed to ultralytics.YOLO()
+    weight_stem:          str          # e.g. "yolo11n" — used for weight file resolution
 ```
 
 | Function | Signature | Description |
@@ -71,23 +71,18 @@ Download behavior:
 
 ## Supported Models
 
-| Family | Size | Input (H×W) | Classes | ultralytics name |
-|--------|------|------------|---------|-----------------|
-| yolo11 | n | 640×640 | 80 | yolo11n.pt |
-| yolo11 | s | 640×640 | 80 | yolo11s.pt |
-| yolo11 | m | 640×640 | 80 | yolo11m.pt |
-| yolo11 | l | 640×640 | 80 | yolo11l.pt |
-| yolo11 | x | 640×640 | 80 | yolo11x.pt |
-| yolo12 | n | 640×640 | 80 | yolo12n.pt |
-| yolo12 | s | 640×640 | 80 | yolo12s.pt |
-| yolo12 | m | 640×640 | 80 | yolo12m.pt |
-| yolo12 | l | 640×640 | 80 | yolo12l.pt |
-| yolo12 | x | 640×640 | 80 | yolo12x.pt |
-| yolo26 | n | 640×640 | 80 | yolo26n.pt |
-| yolo26 | s | 640×640 | 80 | yolo26s.pt |
-| yolo26 | m | 640×640 | 80 | yolo26m.pt |
-| yolo26 | l | 640×640 | 80 | yolo26l.pt |
-| yolo26 | x | 640×640 | 80 | yolo26x.pt |
+| Family | Size | Input (H×W) | Classes | Weight stem |
+|--------|------|------------|---------|-------------|
+| yolo11 | n | 640×640 | 80 | yolo11n |
+| yolo11 | s | 640×640 | 80 | yolo11s |
+| yolo11 | m | 640×640 | 80 | yolo11m |
+| yolo11 | l | 640×640 | 80 | yolo11l |
+| yolo11 | x | 640×640 | 80 | yolo11x |
+| yolo26 | n | 640×640 | 80 | yolo26n |
+| yolo26 | s | 640×640 | 80 | yolo26s |
+| yolo26 | m | 640×640 | 80 | yolo26m |
+| yolo26 | l | 640×640 | 80 | yolo26l |
+| yolo26 | x | 640×640 | 80 | yolo26x |
 
 ---
 
@@ -122,7 +117,7 @@ register(ModelMeta(
     input_width=640,
     num_classes=10,
     default_weights_url="https://my-bucket.s3.amazonaws.com/yolo_custom_n.pt",
-    ultralytics_name="yolo_custom_n.pt",
+    weight_stem="yolo_custom_n",
 ))
 ```
 
@@ -160,4 +155,4 @@ Cache directory is configurable via `YOWO_CACHE_DIR` environment variable or `ca
 | Upstream | `types.py` | `ModelSpec` dataclass |
 | Upstream | `errors.py` | `ModelNotFoundError` |
 | Downstream | `engine.py` | calls `resolve_weights()` during `Engine.__init__` |
-| Downstream | `export/_exporter.py` | calls `resolve_weights()` before calling `ultralytics.YOLO.export()` |
+| Downstream | `export/_exporter.py` | calls `resolve_weights()` before running `torch.onnx.export()` |

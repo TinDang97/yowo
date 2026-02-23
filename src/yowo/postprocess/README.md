@@ -50,7 +50,7 @@ def postprocess(
 
 ## Algorithm
 
-### Standard Path (YOLO11, YOLO12)
+### Standard Path (YOLO11)
 
 ```
 raw_output shape: (B, 4 + num_classes, num_anchors)

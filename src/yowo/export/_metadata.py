@@ -49,7 +49,11 @@ class ExportMetadata:
 
     @classmethod
     def load(cls, path: Path) -> ExportMetadata:
-        return cls(**json.loads(path.read_text(encoding="utf-8")))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # Backward compat: remap old sidecar key from pre-0.2 exports
+        if "ultralytics_version" in data and "yowo_version" not in data:
+            data["yowo_version"] = data.pop("ultralytics_version")
+        return cls(**data)
 
 
 __all__ = ["ExportMetadata"]

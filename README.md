@@ -2,7 +2,7 @@
 
 > Production YOLO inference and export — hardware-aware, multi-backend, edge-ready.
 
-yowo wraps [ultralytics](https://github.com/ultralytics/ultralytics) for inference and export while adding what production deployments need: automatic hardware detection, transparent backend selection, graceful degradation, and stream resilience.
+yowo implements native YOLO11 and YOLO26 architectures for inference and export, adding what production deployments need: automatic hardware detection, transparent backend selection, graceful degradation, and stream resilience.
 
 ---
 
@@ -41,7 +41,7 @@ pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 yowo detect image.jpg
 
 # Use a specific model
-yowo detect video.mp4 --model yolo12n
+yowo detect video.mp4 --model yolo26n
 
 # Use a local weights file (skips download)
 yowo detect image.jpg --model yolo26n --weights /path/to/YOLO26.pt
@@ -138,7 +138,6 @@ The full JSON output per detection:
 | Name | Alias | Notes |
 |------|-------|-------|
 | `yolo11n/s/m/l/x` | YOLO11 | Stable, best production baseline |
-| `yolo12n/s/m/l/x` | YOLO12 | Attention-based, better accuracy |
 | `yolo26n/s/m/l/x` | YOLO26 | NMS-free, best CPU and INT8 speed |
 
 Weights are downloaded automatically to `~/.cache/yowo/weights/` on first use.
@@ -170,7 +169,7 @@ If a backend fails to load, yowo falls back to the next in chain and logs a warn
 ```python
 from yowo import InferenceEngine, ModelSpec, ModelFamily, ModelSize, open_source
 
-spec = ModelSpec(ModelFamily.YOLO12, ModelSize.SMALL)
+spec = ModelSpec(ModelFamily.YOLO11, ModelSize.SMALL)
 with InferenceEngine(spec, confidence=0.3) as engine:
     src = open_source("photo.jpg")
     for detection in engine.stream(src):
@@ -238,7 +237,7 @@ Export `.pt` weights to an optimized format for your target hardware.
 
 ```bash
 # Export to ONNX (FP16) — downloads weights automatically
-yowo export yolo12n --format onnx --precision fp16
+yowo export yolo11n --format onnx --precision fp16
 
 # Export using a local weights file (skips download)
 yowo export yolo26n --weights /path/to/YOLO26.pt --format onnx --precision fp32
@@ -250,7 +249,7 @@ yowo export yolo26s --format tensorrt --precision fp16 --output-dir ./engines/
 yowo export yolo11m --format onnx --precision int8 --calibration-data ./cal_images/
 
 # Export with dynamic batch support
-yowo export yolo12n --format onnx --dynamic-batch --imgsz 1280
+yowo export yolo11n --format onnx --dynamic-batch --imgsz 1280
 ```
 
 ### Python API
@@ -260,7 +259,7 @@ from yowo import export_model, ModelSpec, ModelFamily, ModelSize, ExportFormat, 
 from pathlib import Path
 
 meta = export_model(
-    ModelSpec(ModelFamily.YOLO12, ModelSize.NANO),
+    ModelSpec(ModelFamily.YOLO26, ModelSize.NANO),
     ExportFormat.ONNX,
     output_dir=Path("./exported/"),
     precision=Precision.FP16,
