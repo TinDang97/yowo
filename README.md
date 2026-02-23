@@ -441,7 +441,7 @@ Architecture and module contracts are documented in:
 
 | Report | Summary |
 |--------|---------|
-| [Vehicle Detection Benchmark — YOLO11s](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. ONNX FP16 (CoreML EP) achieves 18.1 FPS at batch=8 — 2.62× PyTorch baseline. |
+| [Vehicle Detection Benchmark — YOLO11s vs YOLO26m](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. YOLO11s ONNX FP16 achieves 18.1 FPS (2.62× PyTorch). YOLO26m ONNX FP32 achieves 6.9 FPS. |
 
 ---
 
