@@ -88,7 +88,11 @@ def detect_command(
         _write_json(detections, Path(output))
         click.echo(f"Saved detections to {output}")
     if save_frames:
-        click.echo(f"Annotated frame saving not yet implemented; path: {save_frames}", err=True)
+        from yowo.io._sink import write_annotated_frames
+
+        out_dir = Path(save_frames)
+        write_annotated_frames(detections, out_dir)
+        click.echo(f"Saved {len(detections)} annotated frame(s) to {out_dir}/")
 
 
 @cli.command("export")
