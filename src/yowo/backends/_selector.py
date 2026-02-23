@@ -152,9 +152,17 @@ def select_precision(
     thresholds = _VRAM_THRESHOLDS[safe_size]
 
     gpu = hw.primary_gpu
-    is_gpu_backend = backend in (BackendType.PYTORCH, BackendType.ONNX, BackendType.TENSORRT)
+    # OpenVINO can target an Intel iGPU; treat it as a GPU backend only when
+    # a non-NVIDIA GPU is present (hw.primary_gpu is set but NOT has_nvidia_gpu).
+    is_gpu_backend = backend in (BackendType.PYTORCH, BackendType.ONNX, BackendType.TENSORRT) or (
+        backend == BackendType.OPENVINO and gpu is not None and not hw.has_nvidia_gpu
+    )
 
-    if gpu is None or not hw.has_nvidia_gpu or not is_gpu_backend:
+    if (
+        gpu is None
+        or not is_gpu_backend
+        or (backend != BackendType.OPENVINO and not hw.has_nvidia_gpu)
+    ):
         # CPU path: FP32 default unless INT8 explicitly requested
         if preferred == Precision.INT8:
             return Precision.INT8

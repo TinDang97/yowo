@@ -99,8 +99,17 @@ def _download(url: str, dest: Path) -> None:
     )
 
 
+_CHUNK_STREAM_TIMEOUT_S = 300  # max wall-clock seconds for the full chunk loop
+
+
 def _attempt_download(url: str, tmp_path: Path, *, suppress_progress: bool) -> None:
-    """Single download attempt with optional tqdm progress bar."""
+    """Single download attempt with optional tqdm progress bar.
+
+    A wall-clock deadline of ``_CHUNK_STREAM_TIMEOUT_S`` seconds is enforced
+    across the entire chunk loop so that a stalled connection does not block
+    indefinitely (``timeout=60`` on ``requests.get`` only covers the initial
+    connection and the first byte, not individual chunk reads).
+    """
     response = requests.get(url, stream=True, timeout=60)
     response.raise_for_status()
 
@@ -123,9 +132,14 @@ def _attempt_download(url: str, tmp_path: Path, *, suppress_progress: bool) -> N
     except ImportError:
         progress = None
 
+    chunk_deadline = time.monotonic() + _CHUNK_STREAM_TIMEOUT_S
     try:
         with tmp_path.open("wb") as fh:
             for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
+                if time.monotonic() > chunk_deadline:
+                    raise ModelNotFoundError(
+                        f"Download of {url} stalled: no progress within {_CHUNK_STREAM_TIMEOUT_S}s"
+                    )
                 if chunk:
                     fh.write(chunk)
                     if progress is not None:

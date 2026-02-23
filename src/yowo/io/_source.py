@@ -254,7 +254,6 @@ class RTSPStreamSource:
         cap = self._open_cap()
         frame_index = 0
         yielded = 0
-        deadline = time.monotonic() + self._reconnect_timeout_s
         retry_count = 0
 
         try:
@@ -275,6 +274,9 @@ class RTSPStreamSource:
                     yielded += 1
                 else:
                     cap.release()
+                    # Reset deadline on each disconnect so the timeout measures
+                    # the per-reconnect-attempt window, not the stream lifetime.
+                    deadline = time.monotonic() + self._reconnect_timeout_s
                     wait = min(2**retry_count, 10)
                     if time.monotonic() + wait > deadline:
                         raise SourceTimeoutError(

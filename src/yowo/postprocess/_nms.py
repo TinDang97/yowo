@@ -456,6 +456,7 @@ def postprocess(
                 rows, cols = item.shape
                 # Orient to (num_anchors, 4+num_classes): more rows than cols
                 # means it is already transposed; otherwise transpose.
+                # Valid for standard YOLO anchor grids where num_anchors (>=1000) >> 4+num_classes.
                 if cols > rows:
                     # shape is (4+num_classes, num_anchors) -> transpose
                     item = item.T
@@ -486,6 +487,5 @@ def postprocess(
 
 __all__ = [
     "COCO_CLASSES",
-    "_iou",
     "postprocess",
 ]

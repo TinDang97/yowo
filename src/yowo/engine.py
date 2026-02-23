@@ -107,11 +107,20 @@ class InferenceEngine:
 
                 if bt != self._selection.backend:
                     logger.warning("Using fallback backend: %s", bt.value)
+                    # Re-derive device_type from the actual fallback backend
+                    # and hardware — not from the (now-failed) original selection.
+                    from yowo.backends._selector import select_backend as _select
+
+                    _fallback_sel = _select(
+                        self._hw,
+                        model_size=self._spec.size.value,
+                        backend_override=bt.value,
+                    )
                     self._selection = BackendSelection(
                         backend=bt,
-                        device_type=self._selection.device_type,
-                        precision=self._selection.precision,
-                        device_index=self._selection.device_index,
+                        device_type=_fallback_sel.device_type,
+                        precision=_fallback_sel.precision,
+                        device_index=_fallback_sel.device_index,
                         reason=f"Fallback from {self._selection.backend.value}",
                     )
 

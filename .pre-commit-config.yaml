@@ -12,7 +12,6 @@ repos:
         name: pyright
         entry: uv run pyright
         language: system
-        types: [python]
         pass_filenames: false
 
       - id: pytest
@@ -20,4 +19,4 @@ repos:
         entry: uv run pytest tests/unit -x -q --tb=short
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(src/|tests/)

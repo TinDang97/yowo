@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 from yowo.types import Detection
 
@@ -146,10 +145,6 @@ def write_annotated_frames(detections: list[Detection], output_dir: Path) -> Non
 
         out_path = output_dir / f"{det.frame.frame_index:06d}.jpg"
         cv2.imwrite(str(out_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-    # Ensure the array is valid uint8 before writing.
-    # cv2.imwrite handles this natively; no extra conversion needed.
-    _ = np.uint8(0)  # keep numpy import used
 
 
 __all__ = [
