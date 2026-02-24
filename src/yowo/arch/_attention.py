@@ -217,9 +217,9 @@ class Attention(nn.Module):
                 self._cached_v_spatial = v_spatial.detach()
                 self._cache_shape_key = shape_key
 
-        # Scaled dot-product attention (auto FlashAttention on GPU)
-        attn_out = F.scaled_dot_product_attention(q, k, v)
-        # attn_out: (B, heads, N, head_dim)
+        # Scaled dot-product attention
+        # MPS bug: F.scaled_dot_product_attention returns wrong shape when key_dim != head_dim
+        attn_out = self._sdpa_onnx(q, k, v) if q.is_mps else F.scaled_dot_product_attention(q, k, v)
 
         # Reshape back to spatial — explicit contiguous() for torch.compile visibility
         attn_out = attn_out.transpose(-2, -1).contiguous().view(B, C, H, W)

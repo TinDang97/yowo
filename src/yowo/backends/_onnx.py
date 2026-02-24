@@ -191,22 +191,29 @@ class OnnxBackend:
     # ------------------------------------------------------------------
 
     def _build_session_options(self, ort: object) -> ort.SessionOptions:  # type: ignore[name-defined]
-        """Build session options with all optimisations and thread parallelism."""
+        """Build session options with all optimisations and thread parallelism.
+
+        Thread counts are capped at half the logical CPUs to avoid
+        scheduling onto slow efficiency cores (Apple Silicon) and
+        memory-bandwidth saturation on many-core machines.
+        """
         import onnxruntime as ort_mod  # type: ignore[import-untyped]
 
         opts = ort_mod.SessionOptions()
         opts.graph_optimization_level = ort_mod.GraphOptimizationLevel.ORT_ENABLE_ALL
         cpu_count = os.cpu_count() or 1
-        opts.intra_op_num_threads = cpu_count
-        opts.inter_op_num_threads = max(1, cpu_count // 2)
+        opts.intra_op_num_threads = max(1, cpu_count // 2)
+        opts.inter_op_num_threads = max(1, cpu_count // 4)
         return opts
 
     def _select_providers(self, device: str) -> list[str]:
         """Return the ordered execution provider list.
 
-        CUDA EP is selected when:
-        - device is "auto" and hardware profile shows GPU + CUDA EP, or
-        - device starts with "cuda"
+        Selection priority:
+        1. CUDA EP — when device is ``"cuda"`` or ``"auto"`` + GPU detected.
+        2. CoreML EP — when device is ``"auto"`` or ``"cpu"`` and CoreML is
+           available (macOS with Apple Silicon).
+        3. CPU EP — universal fallback, always appended.
 
         Args:
             device: Requested device string.
@@ -223,4 +230,10 @@ class OnnxBackend:
 
         if use_cuda:
             return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+        # CoreML EP: 4-5x faster than CPU on Apple Silicon (Neural Engine)
+        libs = self._hw.libraries
+        if libs.onnxruntime_has_coreml:
+            return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+
         return ["CPUExecutionProvider"]

@@ -90,7 +90,14 @@ def detect_command(
         sys.exit(1)
 
     if output:
-        _write_json(detections, Path(output))
+        out_path = Path(output)
+        if out_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+            from yowo.io._sink import write_annotated_frame
+
+            for det in detections:
+                write_annotated_frame(det, out_path)
+        else:
+            _write_json(detections, out_path)
         click.echo(f"Saved detections to {output}")
     if save_frames:
         from yowo.io._sink import write_annotated_frames

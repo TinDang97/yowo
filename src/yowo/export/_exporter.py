@@ -205,6 +205,7 @@ def _export_onnx_kv(
     """Export KV-wrapper to ONNX with K,V as explicit model I/O.
 
     Skips onnxslim: onnxslim may strip I/O nodes it considers unused.
+    Internalizes external tensor data so CoreML EP can load the model.
     """
     import torch  # type: ignore[import-untyped]
     from torch import Tensor
@@ -242,6 +243,21 @@ def _export_onnx_kv(
         )
     except Exception as exc:
         raise ExportError(f"ONNX KV export failed: {exc}") from exc
+
+    # Internalize external tensor data so all runtimes (CoreML EP) can load
+    # the model from a single file without needing the .onnx.data sidecar.
+    try:
+        import onnx  # type: ignore[import-untyped]
+
+        model = onnx.load(str(onnx_path), load_external_data=True)
+        onnx.save(model, str(onnx_path))  # type: ignore[arg-type]
+        # Clean up leftover external data file
+        data_path = onnx_path.with_suffix(".onnx.data")
+        data_path.unlink(missing_ok=True)
+    except ImportError:
+        logger.debug("onnx package not installed, skipping data internalization")
+    except Exception as exc:
+        logger.warning("Failed to internalize ONNX data (non-fatal): %s", exc)
 
     logger.debug("KV-cache ONNX export complete: %s", onnx_path.name)
 

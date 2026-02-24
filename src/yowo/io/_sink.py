@@ -147,6 +147,49 @@ def write_annotated_frames(detections: list[Detection], output_dir: Path) -> Non
         cv2.imwrite(str(out_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
 
+def write_annotated_frame(detection: Detection, output_path: Path) -> None:
+    """Draw bounding boxes on a single frame and save to *output_path*.
+
+    Unlike :func:`write_annotated_frames`, this writes to an explicit file
+    path rather than a directory with auto-generated names.  Suitable for
+    single-image inference where the caller controls the output filename.
+
+    Args:
+        detection: Detection result containing the source frame and boxes.
+        output_path: Destination file path (e.g. ``/tmp/result.jpg``).
+            The parent directory is created if it does not exist.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas = detection.frame.pixels.copy()
+
+    for box in detection.boxes:
+        color = _PALETTE[box.class_id % len(_PALETTE)]
+        x1, y1, x2, y2 = round(box.x1), round(box.y1), round(box.x2), round(box.y2)
+
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, thickness=2)
+
+        label = f"{box.class_name} {box.confidence:.2f}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+        label_y = max(y1 - baseline, text_h)
+        cv2.rectangle(
+            canvas,
+            (x1, label_y - text_h - baseline),
+            (x1 + text_w, label_y + baseline),
+            color,
+            cv2.FILLED,
+        )
+        cv2.putText(
+            canvas, label, (x1, label_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA
+        )
+
+    ext = output_path.suffix.lower()
+    params: list[int] = [cv2.IMWRITE_JPEG_QUALITY, 95] if ext in {".jpg", ".jpeg"} else []
+    cv2.imwrite(str(output_path), canvas, params)
+
+
 __all__ = [
     "write_annotated_frames",
     "write_json",

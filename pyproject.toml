@@ -51,6 +51,7 @@ dev = [
     "onnxslim>=0.1.85",
     "onnxruntime>=1.17",
     "setuptools>=82.0.0",
+    "onnxscript>=0.6.2",
 ]
 
 [build-system]
