@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 import shutil
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class FeatureStore:
         self._cache_dir = cache_dir
         self._mem: dict[str, _Features] = {}
         self._mmap: dict[str, _MmapMeta] = {}
+        self._lock = threading.Lock()
         if cache_dir is not None:
             cache_dir.mkdir(parents=True, exist_ok=True)
             # Only clean up directories matching the expected hash pattern
@@ -66,31 +68,34 @@ class FeatureStore:
             key: Cache key (typically ``source_id``).
             features: Tuple of 3 numpy arrays (P3', P4'', P5'').
         """
-        entries = self._active_entries()
-        while len(entries) >= self._max_entries:
-            self._remove_entry(next(iter(entries)))
+        with self._lock:
+            entries = self._active_entries()
+            while len(entries) >= self._max_entries:
+                self._remove_entry(next(iter(entries)))
 
-        if self._cache_dir is not None:
-            self._store_mmap(key, features)
-        else:
-            self._mem[key] = features
+            if self._cache_dir is not None:
+                self._store_mmap(key, features)
+            else:
+                self._mem[key] = features
 
     def load(self, key: str) -> _Features | None:
         """Load cached feature maps.
 
         Returns None if key is not cached.
         """
-        if self._cache_dir is not None:
-            return self._load_mmap(key)
-        return self._mem.get(key)
+        with self._lock:
+            if self._cache_dir is not None:
+                return self._load_mmap(key)
+            return self._mem.get(key)
 
     def clear(self) -> None:
         """Remove all cached entries."""
-        if self._cache_dir is not None:
-            for key in list(self._mmap):
-                self._remove_entry(key)
-        else:
-            self._mem.clear()
+        with self._lock:
+            if self._cache_dir is not None:
+                for key in list(self._mmap):
+                    self._remove_entry(key)
+            else:
+                self._mem.clear()
 
     @property
     def size(self) -> int:

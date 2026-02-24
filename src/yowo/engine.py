@@ -84,6 +84,7 @@ class InferenceEngine:
             precision_override=precision.value if precision else None,
         )
 
+        self._kv_cache = kv_cache
         self._backend: InferenceBackend = create_backend(
             self._selection.backend,
             self._hw,
@@ -118,7 +119,13 @@ class InferenceEngine:
                         self._selection.backend.value,
                         bt.value,
                     )
-                    self._backend = create_backend(bt, self._hw, model_spec=self._spec)
+                    self._backend = create_backend(
+                        bt,
+                        self._hw,
+                        model_spec=self._spec,
+                        feature_cache=self._feature_cache,
+                        kv_cache=self._kv_cache,
+                    )
 
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)
@@ -188,7 +195,8 @@ class InferenceEngine:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
         # Reset KV state at the start of each new source
-        self._backend.clear_kv_cache()
+        if hasattr(self._backend, "clear_kv_cache"):
+            self._backend.clear_kv_cache()
 
         batch: list[Frame] = []
         try:

@@ -27,6 +27,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -68,6 +69,8 @@ class FeatureCache:
         self._threshold = similarity_threshold
         self._max_entries = max_entries
         self._last_fingerprints: dict[str, NDArray[np.float32]] = {}
+        self._lock = threading.Lock()
+        self._pending_fingerprint: NDArray[np.float32] | None = None
 
     def check_and_load(
         self,
@@ -91,19 +94,22 @@ class FeatureCache:
         """
         import torch
 
-        last_fp = self._last_fingerprints.get(source_id)
-        if last_fp is None:
-            return None
+        with self._lock:
+            # Compute fingerprint once — reused by update() if cache miss
+            current_fp = current_tensor.mean(axis=(2, 3))  # (B, C)
+            self._pending_fingerprint = current_fp
 
-        # Spatial-mean fingerprint comparison (same semantics as block cache)
-        current_fp = current_tensor.mean(axis=(2, 3))  # (B, C)
-        diff = float(np.abs(current_fp - last_fp).mean())
-        if diff >= self._threshold:
-            return None
+            last_fp = self._last_fingerprints.get(source_id)
+            if last_fp is None:
+                return None
 
-        cached = self._store.load(source_id)
-        if cached is None:
-            return None
+            diff = float(np.abs(current_fp - last_fp).mean())
+            if diff >= self._threshold:
+                return None
+
+            cached = self._store.load(source_id)
+            if cached is None:
+                return None
 
         logger.debug(
             "Cache hit for '%s' (diff=%.4f < threshold=%.4f)",
@@ -112,9 +118,9 @@ class FeatureCache:
             self._threshold,
         )
         return (
-            torch.from_numpy(cached[0]).to(device),
-            torch.from_numpy(cached[1]).to(device),
-            torch.from_numpy(cached[2]).to(device),
+            torch.from_numpy(cached[0]).to(device, non_blocking=True),
+            torch.from_numpy(cached[1]).to(device, non_blocking=True),
+            torch.from_numpy(cached[2]).to(device, non_blocking=True),
         )
 
     def update(
@@ -131,19 +137,26 @@ class FeatureCache:
                 stored for similarity comparison on next frame).
             neck_features: Tuple of 3 numpy arrays (P3', P4'', P5'') to cache.
         """
-        # Cap fingerprints to max_entries (prevent unbounded growth)
-        if source_id not in self._last_fingerprints:
-            while len(self._last_fingerprints) >= self._max_entries:
-                oldest = next(iter(self._last_fingerprints))
-                del self._last_fingerprints[oldest]
-        # Store spatial-mean fingerprint (B, C) instead of full BCHW tensor
-        self._last_fingerprints[source_id] = input_tensor.mean(axis=(2, 3))
-        self._store.store(source_id, neck_features)
+        with self._lock:
+            # Cap fingerprints to max_entries (prevent unbounded growth)
+            if source_id not in self._last_fingerprints:
+                while len(self._last_fingerprints) >= self._max_entries:
+                    oldest = next(iter(self._last_fingerprints))
+                    del self._last_fingerprints[oldest]
+            # Reuse fingerprint from check_and_load() if available
+            fp = self._pending_fingerprint
+            self._pending_fingerprint = None
+            if fp is None:
+                fp = input_tensor.mean(axis=(2, 3))
+            self._last_fingerprints[source_id] = fp
+            self._store.store(source_id, neck_features)
 
     def clear(self) -> None:
         """Remove all cached data."""
-        self._store.clear()
-        self._last_fingerprints.clear()
+        with self._lock:
+            self._store.clear()
+            self._last_fingerprints.clear()
+            self._pending_fingerprint = None
 
     @property
     def size(self) -> int:

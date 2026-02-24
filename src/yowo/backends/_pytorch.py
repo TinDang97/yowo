@@ -167,7 +167,8 @@ class PyTorchBackend:
                     _input: Any,
                     output: Any,
                 ) -> None:
-                    self._last_neck_output = tuple(t.detach().cpu().numpy() for t in output)
+                    # Keep as detached GPU tensors — defer D2H to cache update
+                    self._last_neck_output = tuple(t.detach() for t in output)
 
                 self._neck_hook_handle = model.neck.register_forward_hook(
                     _capture_neck,
@@ -232,7 +233,7 @@ class PyTorchBackend:
                 if cached is not None:
                     with torch.inference_mode():
                         output = self._model.forward_head(cached)
-                    return output.cpu().float().numpy()
+                    return output.float().cpu().numpy()
 
             # Full inference path
             t = torch.from_numpy(tensor.data).to(self._device_str, non_blocking=True)
@@ -248,12 +249,13 @@ class PyTorchBackend:
                 else:
                     output = self._model(t)
 
-            # Cache store: save neck features after full inference
+            # Cache store: save neck features after full inference (D2H here)
             if cache is not None and sid and self._last_neck_output is not None:
-                cache.update(sid, tensor.data, self._last_neck_output)
+                neck_np = tuple(t.float().cpu().numpy() for t in self._last_neck_output)
+                cache.update(sid, tensor.data, neck_np)
                 self._last_neck_output = None
 
-            return output.cpu().float().numpy()
+            return output.float().cpu().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 

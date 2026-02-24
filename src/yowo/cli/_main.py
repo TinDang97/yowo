@@ -41,6 +41,12 @@ def cli() -> None:
 @click.option("--iou", default=0.45, type=float)
 @click.option("--batch", default=1, type=int)
 @click.option("--output", "-o", default=None, type=click.Path())
+@click.option(
+    "--output-format",
+    default="auto",
+    type=click.Choice(["auto", "json", "image"]),
+    help="Output format. 'auto' infers from -o file extension.",
+)
 @click.option("--save-frames", default=None, type=click.Path())
 def detect_command(
     source: str,
@@ -53,6 +59,7 @@ def detect_command(
     iou: float,
     batch: int,
     output: str | None,
+    output_format: str,
     save_frames: str | None,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
@@ -91,7 +98,14 @@ def detect_command(
 
     if output:
         out_path = Path(output)
-        if out_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+        fmt = output_format
+        if fmt == "auto":
+            fmt = (
+                "image"
+                if out_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+                else "json"
+            )
+        if fmt == "image":
             from yowo.io._sink import write_annotated_frame
 
             for det in detections:

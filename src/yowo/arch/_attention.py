@@ -68,6 +68,7 @@ class Attention(nn.Module):
         self._cached_v: Tensor | None = None
         self._cached_v_spatial: Tensor | None = None
         self._cache_shape_key: tuple[int, int, int] | None = None  # (B, H, W)
+        self._cached_input_fp: Tensor | None = None  # staleness guard fingerprint
 
         # ONNX export KV I/O state (set by YOLOKVWrapper before tracing)
         self._export_mode: bool = False
@@ -172,6 +173,7 @@ class Attention(nn.Module):
         self._cached_v = None
         self._cached_v_spatial = None
         self._cache_shape_key = None
+        self._cached_input_fp = None
 
     def forward(self, x: Tensor) -> Tensor:
         if self._export_mode:
@@ -187,6 +189,13 @@ class Attention(nn.Module):
             and self._cached_k is not None
             and self._cache_shape_key == shape_key
         )
+
+        # Staleness guard: invalidate KV cache on scene change
+        if cache_hit and self._cached_input_fp is not None:
+            fp = x.mean(dim=(2, 3))
+            diff = (fp - self._cached_input_fp).abs().mean().item()
+            if diff >= _BLOCK_CACHE_THRESHOLD:
+                cache_hit = False
 
         if cache_hit:
             # Cache hit: compute Q from current input, reuse K,V from cache
@@ -220,6 +229,7 @@ class Attention(nn.Module):
                 self._cached_v = v.detach()
                 self._cached_v_spatial = v_spatial.detach()
                 self._cache_shape_key = shape_key
+                self._cached_input_fp = x.mean(dim=(2, 3)).detach()
 
         # Scaled dot-product attention
         # MPS bug: F.scaled_dot_product_attention returns wrong shape when key_dim != head_dim
@@ -313,21 +323,23 @@ class C2PSA(nn.Module):
         self._cached_input_fp = None
 
     def forward(self, x: Tensor) -> Tensor:
-        # Block cache: check fingerprint similarity
-        cached_fp = self._cached_input_fp
-        if self._block_cache_enabled and self._cached_output is not None and cached_fp is not None:
+        # Block cache: check fingerprint similarity (skip during training)
+        fp: Tensor | None = None
+        if self._block_cache_enabled and not self.training:
             fp = x.mean(dim=(2, 3))  # (B, C) spatial-mean fingerprint
-            diff = (fp - cached_fp).abs().mean().item()
-            if diff < _BLOCK_CACHE_THRESHOLD:
-                return self._cached_output
+            cached_fp = self._cached_input_fp
+            if self._cached_output is not None and cached_fp is not None:
+                diff = (fp - cached_fp).abs().mean().item()
+                if diff < _BLOCK_CACHE_THRESHOLD:
+                    return self._cached_output
 
         a, b = self.cv1(x).split((self.c, self.c), dim=1)
         b = self.m(b)
         out = self.cv2(torch.cat([a, b], dim=1))
 
-        if self._block_cache_enabled:
+        if self._block_cache_enabled and not self.training:
             self._cached_output = out.detach()
-            self._cached_input_fp = x.mean(dim=(2, 3)).detach()
+            self._cached_input_fp = (fp if fp is not None else x.mean(dim=(2, 3))).detach()
 
         return out
 
@@ -390,20 +402,22 @@ class C3k2PSA(nn.Module):
         self._cached_input_fp = None
 
     def forward(self, x: Tensor) -> Tensor:
-        # Block cache: check fingerprint similarity
-        cached_fp = self._cached_input_fp
-        if self._block_cache_enabled and self._cached_output is not None and cached_fp is not None:
+        # Block cache: check fingerprint similarity (skip during training)
+        fp: Tensor | None = None
+        if self._block_cache_enabled and not self.training:
             fp = x.mean(dim=(2, 3))  # (B, C) spatial-mean fingerprint
-            diff = (fp - cached_fp).abs().mean().item()
-            if diff < _BLOCK_CACHE_THRESHOLD:
-                return self._cached_output
+            cached_fp = self._cached_input_fp
+            if self._cached_output is not None and cached_fp is not None:
+                diff = (fp - cached_fp).abs().mean().item()
+                if diff < _BLOCK_CACHE_THRESHOLD:
+                    return self._cached_output
 
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
         out = self.cv2(torch.cat(y, 1))
 
-        if self._block_cache_enabled:
+        if self._block_cache_enabled and not self.training:
             self._cached_output = out.detach()
-            self._cached_input_fp = x.mean(dim=(2, 3)).detach()
+            self._cached_input_fp = (fp if fp is not None else x.mean(dim=(2, 3))).detach()
 
         return out
