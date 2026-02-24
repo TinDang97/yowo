@@ -84,13 +84,6 @@ class InferenceBackend(Protocol):
         """
         ...
 
-    def clear_kv_cache(self) -> None:
-        """Reset KV cache state (e.g. on source change during streaming).
-
-        No-op for backends/models without KV cache I/O.
-        """
-        ...
-
 
 def create_backend(
     backend_type: BackendType,

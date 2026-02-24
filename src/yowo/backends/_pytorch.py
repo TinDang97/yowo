@@ -233,7 +233,7 @@ class PyTorchBackend:
                 if cached is not None:
                     with torch.inference_mode():
                         output = self._model.forward_head(cached)
-                    return output.float().cpu().numpy()
+                    return (output.float() if self._fp16 else output).cpu().numpy()
 
             # Full inference path
             t = torch.from_numpy(tensor.data).to(self._device_str, non_blocking=True)
@@ -251,11 +251,13 @@ class PyTorchBackend:
 
             # Cache store: save neck features after full inference (D2H here)
             if cache is not None and sid and self._last_neck_output is not None:
-                neck_np = tuple(t.float().cpu().numpy() for t in self._last_neck_output)
+                neck_np = tuple(
+                    (t.float() if self._fp16 else t).cpu().numpy() for t in self._last_neck_output
+                )
                 cache.update(sid, tensor.data, neck_np)
                 self._last_neck_output = None
 
-            return output.float().cpu().numpy()
+            return (output.float() if self._fp16 else output).cpu().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 
@@ -267,6 +269,8 @@ class PyTorchBackend:
         self._last_neck_output = None
         self._current_source_id = ""
         if self._model is not None:
+            if self._kv_cache:
+                self._model.clear_kv_cache()
             device = self._device_str
             del self._model
             self._model = None

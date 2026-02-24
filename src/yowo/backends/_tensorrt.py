@@ -65,6 +65,10 @@ class TensorRTBackend:
         self._use_cache_warm: NDArray[np.float32] = np.array(1.0, dtype=np.float32)
         self._use_cache_cold_ort: Any = None
         self._use_cache_warm_ort: Any = None
+        # Cached module ref and pre-allocated zero tensors (set in load())
+        self._ort: Any = None
+        self._kv_zeros: dict[str, NDArray[np.float32]] = {}
+        self._kv_zeros_ort: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -100,6 +104,20 @@ class TensorRTBackend:
             DependencyError: ``onnxruntime-gpu`` not installed.
             BackendLoadError: Engine deserialisation or session creation failed.
         """
+        # Reset KV state from any previous model to prevent stale routing
+        self._has_kv_io = False
+        self._kv_state = {}
+        self._kv_input_names = []
+        self._kv_output_names = []
+        self._kv_shapes = {}
+        self._kv_use_ortvalue = False
+        self._kv_output_indices = {}
+        self._use_cache_cold_ort = None
+        self._use_cache_warm_ort = None
+        self._ort = None
+        self._kv_zeros = {}
+        self._kv_zeros_ort = {}
+
         try:
             import onnxruntime as ort_mod  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -108,6 +126,7 @@ class TensorRTBackend:
                 "uv add onnxruntime-gpu",
             ) from exc
 
+        self._ort = ort_mod
         self._device_index = _parse_device_index(device)
 
         providers = [
@@ -156,7 +175,12 @@ class TensorRTBackend:
                 for idx, oname in enumerate(self._output_names):
                     if oname in set(self._kv_output_names):
                         self._kv_output_indices[oname] = idx
-                # Pre-allocate OrtValue scalars for hot-path reuse
+                # Pre-allocate zero tensors for cold-start KV feed
+                self._kv_zeros = {
+                    name: np.zeros(shape, dtype=np.float32)
+                    for name, shape in self._kv_shapes.items()
+                }
+                # Pre-allocate OrtValue scalars and zero OrtValues for hot-path reuse
                 if self._kv_use_ortvalue:
                     self._use_cache_cold_ort = ort_mod.OrtValue.ortvalue_from_numpy(
                         self._use_cache_cold
@@ -164,6 +188,10 @@ class TensorRTBackend:
                     self._use_cache_warm_ort = ort_mod.OrtValue.ortvalue_from_numpy(
                         self._use_cache_warm
                     )
+                    self._kv_zeros_ort = {
+                        name: ort_mod.OrtValue.ortvalue_from_numpy(arr)
+                        for name, arr in self._kv_zeros.items()
+                    }
         except Exception as exc:
             self._session = None
             raise BackendLoadError(f"TensorRTBackend: engine load failed: {exc}") from exc
@@ -202,10 +230,7 @@ class TensorRTBackend:
             "use_cache": self._use_cache_warm if self._kv_state else self._use_cache_cold,
         }
         for name in self._kv_input_names:
-            feed[name] = self._kv_state.get(
-                name,
-                np.zeros(self._kv_shapes[name], dtype=np.float32),
-            )
+            feed[name] = self._kv_state.get(name, self._kv_zeros[name])
         outputs = self._session.run(None, feed)
         for present_name in self._kv_output_names:
             past_name = present_name.replace("present_", "past_")
@@ -214,25 +239,22 @@ class TensorRTBackend:
 
     def _infer_kv_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """KV-cache inference using OrtValue for zero-copy tensor passing."""
-        import onnxruntime as ort  # type: ignore[import-untyped]
-
+        ort = self._ort
         feed: dict[str, Any] = {
             self._input_name: ort.OrtValue.ortvalue_from_numpy(tensor.data),
             "use_cache": self._use_cache_warm_ort if self._kv_state else self._use_cache_cold_ort,
         }
         for name in self._kv_input_names:
-            if name in self._kv_state:
-                feed[name] = self._kv_state[name]  # already OrtValue
-            else:
-                feed[name] = ort.OrtValue.ortvalue_from_numpy(
-                    np.zeros(self._kv_shapes[name], dtype=np.float32)
-                )
+            feed[name] = (
+                self._kv_state[name] if name in self._kv_state else self._kv_zeros_ort[name]
+            )
         ort_outputs = self._session.run_with_ort_values(self._output_names, feed)
         # Store present K,V as OrtValues (zero-copy for next frame)
         for present_name in self._kv_output_names:
             past_name = present_name.replace("present_", "past_")
             self._kv_state[past_name] = ort_outputs[self._kv_output_indices[present_name]]
-        return np.asarray(ort_outputs[0].numpy(), dtype=np.float32)
+        out = ort_outputs[0].numpy()
+        return out if out.dtype == np.float32 else out.astype(np.float32)
 
     def clear_kv_cache(self) -> None:
         """Clear KV state for streaming reset (e.g. new video source)."""

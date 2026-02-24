@@ -196,7 +196,7 @@ class InferenceEngine:
 
         # Reset KV state at the start of each new source
         if hasattr(self._backend, "clear_kv_cache"):
-            self._backend.clear_kv_cache()
+            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
 
         batch: list[Frame] = []
         try:

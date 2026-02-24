@@ -190,9 +190,11 @@ class Attention(nn.Module):
             and self._cache_shape_key == shape_key
         )
 
+        # Compute spatial fingerprint once (reused for staleness guard and cache update)
+        fp = x.mean(dim=(2, 3)) if self._kv_cache_enabled else None
+
         # Staleness guard: invalidate KV cache on scene change
-        if cache_hit and self._cached_input_fp is not None:
-            fp = x.mean(dim=(2, 3))
+        if cache_hit and fp is not None and self._cached_input_fp is not None:
             diff = (fp - self._cached_input_fp).abs().mean().item()
             if diff >= _BLOCK_CACHE_THRESHOLD:
                 cache_hit = False
@@ -223,13 +225,13 @@ class Attention(nn.Module):
             v = v.transpose(-2, -1)
             v_spatial = v.transpose(-2, -1).contiguous().view(B, C, H, W)
 
-            # Store K,V for next frame
+            # Store K,V for next frame — reuse pre-computed fingerprint
             if self._kv_cache_enabled:
                 self._cached_k = k.detach()
                 self._cached_v = v.detach()
                 self._cached_v_spatial = v_spatial.detach()
                 self._cache_shape_key = shape_key
-                self._cached_input_fp = x.mean(dim=(2, 3)).detach()
+                self._cached_input_fp = (fp if fp is not None else x.mean(dim=(2, 3))).detach()
 
         # Scaled dot-product attention
         # MPS bug: F.scaled_dot_product_attention returns wrong shape when key_dim != head_dim

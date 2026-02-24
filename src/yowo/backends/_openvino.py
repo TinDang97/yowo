@@ -54,6 +54,10 @@ class OpenVinoBackend:
         self._kv_input_names: list[str] = []
         self._kv_output_names: list[str] = []
         self._kv_shapes: dict[str, tuple[int, ...]] = {}
+        # Pre-allocated use_cache scalars and zero tensors (set in load())
+        self._use_cache_cold: NDArray[np.float32] = np.array(0.0, dtype=np.float32)
+        self._use_cache_warm: NDArray[np.float32] = np.array(1.0, dtype=np.float32)
+        self._kv_zeros: dict[str, NDArray[np.float32]] = {}
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -87,6 +91,14 @@ class OpenVinoBackend:
             DependencyError: ``openvino`` not installed.
             BackendLoadError: Model load or compilation failed.
         """
+        # Reset KV state from any previous model to prevent stale routing
+        self._has_kv_io = False
+        self._kv_state = {}
+        self._kv_input_names = []
+        self._kv_output_names = []
+        self._kv_shapes = {}
+        self._kv_zeros = {}
+
         try:
             from openvino.runtime import Core  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -127,6 +139,11 @@ class OpenVinoBackend:
                     for n in self._compiled_model.outputs  # type: ignore[attr-defined]
                     if n.get_any_name().startswith("present_")  # type: ignore[attr-defined]
                 ]
+                # Pre-allocate zero tensors for cold-start KV feed
+                self._kv_zeros = {
+                    name: np.zeros(shape, dtype=np.float32)
+                    for name, shape in self._kv_shapes.items()
+                }
         except Exception as exc:
             self._compiled_model = None
             self._infer_request = None
@@ -149,16 +166,12 @@ class OpenVinoBackend:
 
         try:
             if self._has_kv_io:
-                use_cache = np.float32(1.0 if self._kv_state else 0.0)
                 feed: dict[str, NDArray[np.float32]] = {
                     self._input_name: tensor.data,
-                    "use_cache": np.array(use_cache, dtype=np.float32),
+                    "use_cache": self._use_cache_warm if self._kv_state else self._use_cache_cold,
                 }
                 for name in self._kv_input_names:
-                    feed[name] = self._kv_state.get(
-                        name,
-                        np.zeros(self._kv_shapes[name], dtype=np.float32),
-                    )
+                    feed[name] = self._kv_state.get(name, self._kv_zeros[name])
                 results = self._infer_request.infer(feed)  # type: ignore[attr-defined]
                 # Collect present K,V into kv_state for the next frame
                 for present_name in self._kv_output_names:
@@ -169,6 +182,8 @@ class OpenVinoBackend:
             # First output is always the detection tensor
             output = next(iter(results.values()))
             return np.asarray(output, dtype=np.float32)
+        except InferenceError:
+            raise
         except Exception as exc:
             raise InferenceError(f"OpenVinoBackend: inference failed: {exc}") from exc
 
