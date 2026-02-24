@@ -51,12 +51,14 @@ class TensorRTBackend:
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
         self._device_index: int = 0
+        self._output_names: list[str] = []
         # KV cache I/O state (populated in load() when model has KV I/O)
         self._has_kv_io: bool = False
-        self._kv_state: dict[str, NDArray[np.float32]] = {}
+        self._kv_state: dict[str, Any] = {}  # numpy or OrtValue
         self._kv_input_names: list[str] = []
         self._kv_output_names: list[str] = []
         self._kv_shapes: dict[str, tuple[int, ...]] = {}
+        self._kv_use_ortvalue: bool = False
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -132,6 +134,8 @@ class TensorRTBackend:
                 and isinstance(input_shape[3], int)
             ):
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
+            # Cache output names for run_with_ort_values()
+            self._output_names = [o.name for o in self._session.get_outputs()]
             # Detect KV cache I/O by inspecting input names
             kv_inputs = [i for i in inputs if i.name.startswith("past_")]
             if kv_inputs:
@@ -141,6 +145,7 @@ class TensorRTBackend:
                 self._kv_output_names = [
                     o.name for o in self._session.get_outputs() if o.name.startswith("present_")
                 ]
+                self._kv_use_ortvalue = hasattr(self._session, "run_with_ort_values")
         except Exception as exc:
             self._session = None
             raise BackendLoadError(f"TensorRTBackend: engine load failed: {exc}") from exc
@@ -161,26 +166,58 @@ class TensorRTBackend:
             raise InferenceError("TensorRTBackend: no engine loaded — call load() first")
 
         try:
+            if self._has_kv_io and self._kv_use_ortvalue:
+                return self._infer_kv_ortvalue(tensor)
             if self._has_kv_io:
-                use_cache = np.float32(1.0 if self._kv_state else 0.0)
-                feed: dict[str, NDArray[np.float32]] = {
-                    self._input_name: tensor.data,
-                    "use_cache": np.array(use_cache, dtype=np.float32),
-                }
-                for name in self._kv_input_names:
-                    feed[name] = self._kv_state.get(
-                        name,
-                        np.zeros(self._kv_shapes[name], dtype=np.float32),
-                    )
-                outputs = self._session.run(None, feed)
-                for idx, present_name in enumerate(self._kv_output_names):
-                    past_name = present_name.replace("present_", "past_")
-                    self._kv_state[past_name] = outputs[1 + idx]
-            else:
-                outputs = self._session.run(None, {self._input_name: tensor.data})
+                return self._infer_kv_numpy(tensor)
+            outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
+        except InferenceError:
+            raise
         except Exception as exc:
             raise InferenceError(f"TensorRTBackend: inference failed: {exc}") from exc
+
+    def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """KV-cache inference using numpy arrays (fallback path)."""
+        use_cache = np.float32(1.0 if self._kv_state else 0.0)
+        feed: dict[str, NDArray[np.float32]] = {
+            self._input_name: tensor.data,
+            "use_cache": np.array(use_cache, dtype=np.float32),
+        }
+        for name in self._kv_input_names:
+            feed[name] = self._kv_state.get(
+                name,
+                np.zeros(self._kv_shapes[name], dtype=np.float32),
+            )
+        outputs = self._session.run(None, feed)
+        for idx, present_name in enumerate(self._kv_output_names):
+            past_name = present_name.replace("present_", "past_")
+            self._kv_state[past_name] = outputs[1 + idx]
+        return np.asarray(outputs[0], dtype=np.float32)
+
+    def _infer_kv_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """KV-cache inference using OrtValue for zero-copy tensor passing."""
+        import onnxruntime as ort  # type: ignore[import-untyped]
+
+        use_cache_val = 1.0 if self._kv_state else 0.0
+        feed: dict[str, Any] = {
+            self._input_name: ort.OrtValue.ortvalue_from_numpy(tensor.data),
+            "use_cache": ort.OrtValue.ortvalue_from_numpy(
+                np.array(use_cache_val, dtype=np.float32)
+            ),
+        }
+        for name in self._kv_input_names:
+            if name in self._kv_state:
+                feed[name] = self._kv_state[name]  # already OrtValue
+            else:
+                feed[name] = ort.OrtValue.ortvalue_from_numpy(
+                    np.zeros(self._kv_shapes[name], dtype=np.float32)
+                )
+        ort_outputs = self._session.run_with_ort_values(self._output_names, feed)
+        for idx, present_name in enumerate(self._kv_output_names):
+            past_name = present_name.replace("present_", "past_")
+            self._kv_state[past_name] = ort_outputs[1 + idx]
+        return ort_outputs[0].numpy()
 
     def clear_kv_cache(self) -> None:
         """Clear KV state for streaming reset (e.g. new video source)."""

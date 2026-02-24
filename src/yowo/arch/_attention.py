@@ -97,13 +97,13 @@ class Attention(nn.Module):
         """KV-externalized forward for ONNX export.
 
         Reads past K,V from ``_export_past_k/v`` and ``_export_use_cache``
-        (set by ``YOLOKVWrapper`` before tracing). Blends past and fresh
-        K,V via arithmetic (no ONNX ``If`` nodes). Stores present K,V in
-        ``_export_present_k/v`` for the wrapper to collect.
+        (set by ``YOLOKVWrapper`` before tracing). Selects past or fresh
+        K,V via ``torch.where`` (single ONNX ``Where`` node per tensor).
+        Stores present K,V in ``_export_present_k/v`` for the wrapper to
+        collect.
 
         ``use_cache`` must be binary: ``0.0`` (cold — use fresh K,V) or
-        ``1.0`` (warm — use cached K,V). Non-binary values produce
-        undefined soft-blending behaviour.
+        ``1.0`` (warm — use cached K,V). Threshold is ``0.5``.
         """
         assert self._export_past_k is not None
         assert self._export_past_v is not None
@@ -120,10 +120,10 @@ class Attention(nn.Module):
         k_new = k_new.transpose(-2, -1)
         v_new = v_new.transpose(-2, -1)
 
-        # Blend: use_cache=1 → past, use_cache=0 → fresh (no conditional nodes)
-        uc = self._export_use_cache
-        k = self._export_past_k * uc + k_new * (1.0 - uc)
-        v = self._export_past_v * uc + v_new * (1.0 - uc)
+        # Select: use_cache > 0.5 → past, otherwise → fresh (1 Where node each)
+        cond = self._export_use_cache > 0.5
+        k = torch.where(cond, self._export_past_k, k_new)
+        v = torch.where(cond, self._export_past_v, v_new)
 
         # Always output freshly computed K,V for next frame
         self._export_present_k = k_new

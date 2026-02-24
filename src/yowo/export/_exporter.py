@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from yowo.errors import ConfigError, DependencyError, ExportError
 from yowo.export._calibration import resolve_calibration_images
@@ -204,7 +205,7 @@ def _export_onnx_kv(
 ) -> None:
     """Export KV-wrapper to ONNX with K,V as explicit model I/O.
 
-    Skips onnxslim: onnxslim may strip I/O nodes it considers unused.
+    Applies onnxslim simplification with I/O validation guard.
     Internalizes external tensor data so CoreML EP can load the model.
     """
     import torch  # type: ignore[import-untyped]
@@ -246,8 +247,6 @@ def _export_onnx_kv(
 
     # Internalize external tensor data so all runtimes (CoreML EP) can load
     # the model from a single file without needing the .onnx.data sidecar.
-    # Write to a temp file first, then rename on success to avoid leaving
-    # a partially-written model if internalization fails.
     try:
         import onnx  # type: ignore[import-untyped]
 
@@ -255,16 +254,37 @@ def _export_onnx_kv(
         tmp_path = onnx_path.with_suffix(".onnx.tmp")
         onnx.save(model, str(tmp_path))  # type: ignore[arg-type]
         tmp_path.replace(onnx_path)
-        # Clean up leftover external data file
         data_path = onnx_path.with_suffix(".onnx.data")
         data_path.unlink(missing_ok=True)
     except ImportError:
         logger.debug("onnx package not installed, skipping data internalization")
     except Exception as exc:
-        # Clean up temp file on failure; original model remains intact
         tmp_cleanup = onnx_path.with_suffix(".onnx.tmp")
         tmp_cleanup.unlink(missing_ok=True)
         logger.warning("Failed to internalize ONNX data (non-fatal): %s", exc)
+
+    # Simplify with onnxslim — KV I/O nodes have real data dependencies
+    # (consumed by Where/blending ops, produced by QKV split) and survive.
+    try:
+        import onnx  # type: ignore[import-untyped]
+        import onnxslim  # type: ignore[import-untyped]
+
+        slim_model: Any = onnxslim.slim(str(onnx_path))
+        # Validate KV I/O survived simplification
+        slim_ins: set[str] = {i.name for i in slim_model.graph.input}
+        slim_outs: set[str] = {o.name for o in slim_model.graph.output}
+        io_ok = all(n in slim_ins for n in input_names) and all(
+            n in slim_outs for n in output_names
+        )
+        if io_ok:
+            onnx.save(slim_model, str(onnx_path))  # type: ignore[arg-type]
+            logger.debug("KV ONNX model simplified with onnxslim")
+        else:
+            logger.warning("onnxslim stripped KV I/O — keeping unsimplified model")
+    except ImportError:
+        logger.debug("onnxslim not installed, skipping KV ONNX simplification")
+    except Exception as exc:
+        logger.warning("KV ONNX simplification failed (non-fatal): %s", exc)
 
     logger.debug("KV-cache ONNX export complete: %s", onnx_path.name)
 

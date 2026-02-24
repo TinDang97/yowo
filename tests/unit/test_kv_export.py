@@ -138,6 +138,39 @@ class TestForwardKvExport:
         assert pk.shape == (B, attn.num_heads, N, attn.key_dim)
         assert pv.shape == (B, attn.num_heads, N, attn.head_dim)
 
+    def test_where_threshold_selects_past_above_half(self) -> None:
+        """use_cache > 0.5 selects past K,V; <= 0.5 selects fresh."""
+        torch.manual_seed(42)
+        attn = self._make_attn()
+        x = torch.randn(1, 64, 8, 8)
+        B, C, H, W = x.shape
+        N = H * W
+
+        past_k = torch.randn(B, attn.num_heads, N, attn.key_dim)
+        past_v = torch.randn(B, attn.num_heads, N, attn.head_dim)
+
+        # use_cache = 0.7 (> 0.5) → should use past (same as 1.0)
+        attn.set_export_inputs(past_k, past_v, torch.tensor(0.7))
+        with torch.no_grad():
+            out_07 = attn(x)
+
+        attn.set_export_inputs(past_k, past_v, torch.tensor(1.0))
+        with torch.no_grad():
+            out_10 = attn(x)
+
+        assert torch.allclose(out_07, out_10, atol=1e-5)
+
+        # use_cache = 0.3 (<= 0.5) → should use fresh (same as 0.0)
+        attn.set_export_inputs(past_k, past_v, torch.tensor(0.3))
+        with torch.no_grad():
+            out_03 = attn(x)
+
+        attn.set_export_inputs(past_k, past_v, torch.tensor(0.0))
+        with torch.no_grad():
+            out_00 = attn(x)
+
+        assert torch.allclose(out_03, out_00, atol=1e-5)
+
 
 # ---------------------------------------------------------------------------
 # YOLOKVWrapper — module discovery and I/O naming
