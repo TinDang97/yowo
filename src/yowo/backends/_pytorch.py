@@ -122,8 +122,14 @@ class PyTorchBackend:
             import os
 
             cpu_count = os.cpu_count() or 4
-            torch.set_num_threads(max(1, cpu_count // 2))
-            torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+            # set_num_interop_threads() errors if called after parallel work
+            # has started (e.g. a second load() call in the same process).
+            # Silently skip — threads are already configured.
+            try:
+                torch.set_num_threads(max(1, cpu_count // 2))
+                torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+            except RuntimeError:
+                pass
 
         try:
             # Build native model from spec
