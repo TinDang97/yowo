@@ -40,6 +40,7 @@ class InstalledLibraries:
         tensorrt_version: TensorRT version string, or None.
         onnxruntime_version: onnxruntime version string, or None.
         onnxruntime_has_cuda: True when CUDAExecutionProvider is available.
+        onnxruntime_has_coreml: True when CoreMLExecutionProvider is available.
         openvino_version: OpenVINO runtime version string, or None.
     """
 
@@ -49,6 +50,7 @@ class InstalledLibraries:
     tensorrt_version: str | None = None
     onnxruntime_version: str | None = None
     onnxruntime_has_cuda: bool = False
+    onnxruntime_has_coreml: bool = False
     openvino_version: str | None = None
 
 
@@ -93,27 +95,29 @@ def probe_tensorrt() -> str | None:
         return None
 
 
-def probe_onnxruntime() -> tuple[str | None, bool]:
+def probe_onnxruntime() -> tuple[str | None, bool, bool]:
     """Probe onnxruntime installation.
 
     Checks both ``onnxruntime`` and ``onnxruntime-gpu`` packages (same
-    import name). CUDAExecutionProvider availability is queried from
+    import name). Execution provider availability is queried from
     ``onnxruntime.get_available_providers()``.
 
     Returns:
-        Tuple of (version_string_or_None, has_cuda_execution_provider).
+        Tuple of (version_string_or_None, has_cuda_ep, has_coreml_ep).
     """
     if importlib.util.find_spec("onnxruntime") is None:
-        return (None, False)
+        return (None, False, False)
     try:
         import onnxruntime as ort  # type: ignore[import-untyped]
 
         version: str = ort.__version__
-        has_cuda: bool = "CUDAExecutionProvider" in ort.get_available_providers()
-        return (version, has_cuda)
+        providers = ort.get_available_providers()
+        has_cuda: bool = "CUDAExecutionProvider" in providers
+        has_coreml: bool = "CoreMLExecutionProvider" in providers
+        return (version, has_cuda, has_coreml)
     except Exception:
         _log.debug("probe_onnxruntime: import failed", exc_info=True)
-        return (None, False)
+        return (None, False, False)
 
 
 def probe_openvino() -> str | None:
@@ -144,7 +148,7 @@ def detect_libraries() -> InstalledLibraries:
     Never raises — each probe handles its own exceptions internally.
     """
     torch_version, torch_cuda = probe_torch()
-    ort_version, ort_has_cuda = probe_onnxruntime()
+    ort_version, ort_has_cuda, ort_has_coreml = probe_onnxruntime()
 
     # Resolve CUDA version via torch when available
     cuda_version: str | None = None
@@ -163,5 +167,6 @@ def detect_libraries() -> InstalledLibraries:
         tensorrt_version=probe_tensorrt(),
         onnxruntime_version=ort_version,
         onnxruntime_has_cuda=ort_has_cuda,
+        onnxruntime_has_coreml=ort_has_coreml,
         openvino_version=probe_openvino(),
     )

@@ -68,7 +68,7 @@ class ImageFileSource:
         if pixels is None:
             raise SourceError(f"cv2.imread failed for: {self._path}")
         yield Frame(
-            pixels=pixels.astype(np.uint8),
+            pixels=np.asarray(pixels, dtype=np.uint8),
             source_id=str(self._path),
             frame_index=0,
             timestamp_ms=0.0,
@@ -112,7 +112,7 @@ class ImageDirectorySource:
             if pixels is None:
                 raise SourceError(f"cv2.imread failed for: {path}")
             yield Frame(
-                pixels=pixels.astype(np.uint8),
+                pixels=np.asarray(pixels, dtype=np.uint8),
                 source_id=str(path),
                 frame_index=idx,
                 timestamp_ms=0.0,
@@ -194,7 +194,7 @@ class VideoFileSource:
 
                 if read_index % (self._frame_skip + 1) == 0:
                     yield Frame(
-                        pixels=bgr.astype(np.uint8),
+                        pixels=np.asarray(bgr, dtype=np.uint8),
                         source_id=str(self._path),
                         frame_index=yielded,
                         timestamp_ms=ts_ms,
@@ -271,7 +271,7 @@ class RTSPStreamSource:
                     # but only yield every (frame_skip+1)th frame.
                     if frame_index % skip_mod == 0:
                         yield Frame(
-                            pixels=bgr.astype(np.uint8),
+                            pixels=np.asarray(bgr, dtype=np.uint8),
                             source_id=self._url,
                             frame_index=frame_index,
                             timestamp_ms=0.0,
@@ -355,7 +355,7 @@ class WebcamSource:
                     break
                 if read_index % skip_mod == 0:
                     yield Frame(
-                        pixels=bgr.astype(np.uint8),
+                        pixels=np.asarray(bgr, dtype=np.uint8),
                         source_id=f"webcam:{self._device_index}",
                         frame_index=yielded,
                         timestamp_ms=0.0,

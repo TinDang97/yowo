@@ -40,6 +40,8 @@ class PyTorchBackend:
         compile: bool = False,
         compile_mode: str = "reduce-overhead",
         fp16: bool = False,
+        feature_cache: Any | None = None,
+        kv_cache: bool = False,
     ) -> None:
         if not hw_profile.libraries.torch_version:
             raise DependencyError(
@@ -55,6 +57,11 @@ class PyTorchBackend:
         self._compile: bool = compile
         self._compile_mode: str = compile_mode
         self._fp16: bool = fp16
+        self._feature_cache: Any | None = feature_cache
+        self._kv_cache: bool = kv_cache
+        self._neck_hook_handle: Any = None
+        self._last_neck_output: Any = None
+        self._current_source_id: str = ""
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -115,8 +122,14 @@ class PyTorchBackend:
             import os
 
             cpu_count = os.cpu_count() or 4
-            torch.set_num_threads(max(1, cpu_count // 2))
-            torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+            # set_num_interop_threads() errors if called after parallel work
+            # has started (e.g. a second load() call in the same process).
+            # Silently skip — threads are already configured.
+            try:
+                torch.set_num_threads(max(1, cpu_count // 2))
+                torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+            except RuntimeError:
+                pass
 
         try:
             # Build native model from spec
@@ -127,6 +140,11 @@ class PyTorchBackend:
             model = model.fuse()
             model.eval()
             model.to(resolved)
+
+            # KV cache — opt-in attention/block caching for streaming
+            if self._kv_cache:
+                model.enable_kv_cache()
+                logger.info("KV cache enabled for streaming inference")
 
             # Channels-last for GPU Tensor Core optimisation
             if resolved.startswith("cuda"):
@@ -141,6 +159,21 @@ class PyTorchBackend:
                 except Exception as exc:
                     logger.debug("torch.compile failed (falling back to eager): %s", exc)
 
+            # Register neck forward hook to capture features for caching
+            if self._feature_cache is not None:
+
+                def _capture_neck(
+                    _module: Any,
+                    _input: Any,
+                    output: Any,
+                ) -> None:
+                    # Keep as detached GPU tensors — defer D2H to cache update
+                    self._last_neck_output = tuple(t.detach() for t in output)
+
+                self._neck_hook_handle = model.neck.register_forward_hook(
+                    _capture_neck,
+                )
+
             self._model = model
             self._device_str = resolved
         except RuntimeError as exc:
@@ -153,8 +186,29 @@ class PyTorchBackend:
             self._model = None
             raise BackendLoadError(f"PyTorchBackend: failed to load model: {exc}") from exc
 
+    def set_source_id(self, source_id: str) -> None:
+        """Set the source identifier for feature cache keying.
+
+        Called by the engine before ``infer()`` to enable per-source caching.
+        Only effective when ``feature_cache`` was provided at construction.
+        Clears KV cache when source changes to prevent stale cross-attention.
+        """
+        if source_id != self._current_source_id and self._kv_cache and self._model is not None:
+            self._model.clear_kv_cache()
+        self._current_source_id = source_id
+
+    def clear_kv_cache(self) -> None:
+        """Reset KV cache state (e.g. on source change during streaming)."""
+        if self._kv_cache and self._model is not None:
+            self._model.clear_kv_cache()
+
     def infer(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Run inference using the native YOLO model.
+
+        When a feature cache is active and ``set_source_id()`` was called,
+        this method checks for a cache hit first. On hit, only the detection
+        head runs (skipping backbone + neck). On miss, full inference runs
+        and the neck output is stored for future reuse.
 
         Args:
             tensor: BCHW float32 array in [0, 1].
@@ -170,7 +224,18 @@ class PyTorchBackend:
 
         try:
             torch = self._torch
+            cache = self._feature_cache
+            sid = self._current_source_id
 
+            # Cache hit: head-only inference (skip backbone + neck)
+            if cache is not None and sid:
+                cached = cache.check_and_load(sid, tensor.data, self._device_str)
+                if cached is not None:
+                    with torch.inference_mode():
+                        output = self._model.forward_head(cached)
+                    return (output.float() if self._fp16 else output).cpu().numpy()
+
+            # Full inference path
             t = torch.from_numpy(tensor.data).to(self._device_str, non_blocking=True)
 
             # Channels-last input on GPU
@@ -184,13 +249,28 @@ class PyTorchBackend:
                 else:
                     output = self._model(t)
 
-            return output.cpu().float().numpy()
+            # Cache store: save neck features after full inference (D2H here)
+            if cache is not None and sid and self._last_neck_output is not None:
+                neck_np = tuple(
+                    (t.float() if self._fp16 else t).cpu().numpy() for t in self._last_neck_output
+                )
+                cache.update(sid, tensor.data, neck_np)
+                self._last_neck_output = None
+
+            return (output.float() if self._fp16 else output).cpu().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 
     def unload(self) -> None:
         """Release model reference and free device memory."""
+        if self._neck_hook_handle is not None:
+            self._neck_hook_handle.remove()
+            self._neck_hook_handle = None
+        self._last_neck_output = None
+        self._current_source_id = ""
         if self._model is not None:
+            if self._kv_cache:
+                self._model.clear_kv_cache()
             device = self._device_str
             del self._model
             self._model = None

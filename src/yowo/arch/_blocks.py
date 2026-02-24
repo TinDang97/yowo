@@ -111,6 +111,10 @@ class Conv(nn.Module):
         """Forward pass after Conv+BN fusion (no BN layer)."""
         return self.act(self.conv(x))
 
+    def forward_fuse_no_act(self, x: Tensor) -> Tensor:
+        """Forward pass after fusion when activation is Identity (skip no-op)."""
+        return self.conv(x)
+
 
 # ---------------------------------------------------------------------------
 # DWConv — Depthwise Convolution
@@ -157,6 +161,14 @@ class Bottleneck(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+    def _forward_shortcut(self, x: Tensor) -> Tensor:
+        """Specialized forward with residual add (no branch evaluation)."""
+        return x + self.cv2(self.cv1(x))
+
+    def _forward_no_shortcut(self, x: Tensor) -> Tensor:
+        """Specialized forward without residual (no branch evaluation)."""
+        return self.cv2(self.cv1(x))
 
 
 # ---------------------------------------------------------------------------

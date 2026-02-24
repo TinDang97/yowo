@@ -1,6 +1,6 @@
 [project]
 name = "yowo"
-version = "1.0.2"
+version = "1.1.0"
 description = "Production YOLO inference and export library for edge and cloud deployment"
 readme = "README.md"
 license = "Apache-2.0"
@@ -51,6 +51,7 @@ dev = [
     "onnxslim>=0.1.85",
     "onnxruntime>=1.17",
     "setuptools>=82.0.0",
+    "onnxscript>=0.6.2",
 ]
 
 [build-system]

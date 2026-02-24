@@ -41,6 +41,12 @@ def cli() -> None:
 @click.option("--iou", default=0.45, type=float)
 @click.option("--batch", default=1, type=int)
 @click.option("--output", "-o", default=None, type=click.Path())
+@click.option(
+    "--output-format",
+    default="auto",
+    type=click.Choice(["auto", "json", "image"]),
+    help="Output format. 'auto' infers from -o file extension.",
+)
 @click.option("--save-frames", default=None, type=click.Path())
 def detect_command(
     source: str,
@@ -53,6 +59,7 @@ def detect_command(
     iou: float,
     batch: int,
     output: str | None,
+    output_format: str,
     save_frames: str | None,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
@@ -90,7 +97,21 @@ def detect_command(
         sys.exit(1)
 
     if output:
-        _write_json(detections, Path(output))
+        out_path = Path(output)
+        fmt = output_format
+        if fmt == "auto":
+            fmt = (
+                "image"
+                if out_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+                else "json"
+            )
+        if fmt == "image":
+            from yowo.io._sink import write_annotated_frame
+
+            for det in detections:
+                write_annotated_frame(det, out_path)
+        else:
+            _write_json(detections, out_path)
         click.echo(f"Saved detections to {output}")
     if save_frames:
         from yowo.io._sink import write_annotated_frames
@@ -185,7 +206,12 @@ def info_command() -> None:
     click.echo(f"tensorrt:     {libs.tensorrt_version or 'not installed'}")
     ort_line = f"onnxruntime:  {libs.onnxruntime_version or 'not installed'}"
     if libs.onnxruntime_version:
-        ort_line += " (CUDA)" if libs.onnxruntime_has_cuda else " (CPU)"
+        if libs.onnxruntime_has_cuda:
+            ort_line += " (CUDA)"
+        elif libs.onnxruntime_has_coreml:
+            ort_line += " (CoreML)"
+        else:
+            ort_line += " (CPU)"
     click.echo(ort_line)
     click.echo(f"openvino:     {libs.openvino_version or 'not installed'}")
 

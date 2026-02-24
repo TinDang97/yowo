@@ -10,6 +10,7 @@ on machines without TensorRT installed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,8 @@ from numpy.typing import NDArray
 from yowo.errors import BackendError, BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, PreprocessedTensor
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TensorRTBackend"]
 
@@ -48,6 +51,24 @@ class TensorRTBackend:
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
         self._device_index: int = 0
+        self._output_names: list[str] = []
+        # KV cache I/O state (populated in load() when model has KV I/O)
+        self._has_kv_io: bool = False
+        self._kv_state: dict[str, Any] = {}  # numpy or OrtValue
+        self._kv_input_names: list[str] = []
+        self._kv_output_names: list[str] = []
+        self._kv_shapes: dict[str, tuple[int, ...]] = {}
+        self._kv_use_ortvalue: bool = False
+        self._kv_output_indices: dict[str, int] = {}
+        # Pre-allocated use_cache scalars (populated in load() for KV models)
+        self._use_cache_cold: NDArray[np.float32] = np.array(0.0, dtype=np.float32)
+        self._use_cache_warm: NDArray[np.float32] = np.array(1.0, dtype=np.float32)
+        self._use_cache_cold_ort: Any = None
+        self._use_cache_warm_ort: Any = None
+        # Cached module ref and pre-allocated zero tensors (set in load())
+        self._ort: Any = None
+        self._kv_zeros: dict[str, NDArray[np.float32]] = {}
+        self._kv_zeros_ort: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -83,6 +104,20 @@ class TensorRTBackend:
             DependencyError: ``onnxruntime-gpu`` not installed.
             BackendLoadError: Engine deserialisation or session creation failed.
         """
+        # Reset KV state from any previous model to prevent stale routing
+        self._has_kv_io = False
+        self._kv_state = {}
+        self._kv_input_names = []
+        self._kv_output_names = []
+        self._kv_shapes = {}
+        self._kv_use_ortvalue = False
+        self._kv_output_indices = {}
+        self._use_cache_cold_ort = None
+        self._use_cache_warm_ort = None
+        self._ort = None
+        self._kv_zeros = {}
+        self._kv_zeros_ort = {}
+
         try:
             import onnxruntime as ort_mod  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -91,6 +126,7 @@ class TensorRTBackend:
                 "uv add onnxruntime-gpu",
             ) from exc
 
+        self._ort = ort_mod
         self._device_index = _parse_device_index(device)
 
         providers = [
@@ -123,6 +159,39 @@ class TensorRTBackend:
                 and isinstance(input_shape[3], int)
             ):
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
+            # Cache output names for run_with_ort_values()
+            self._output_names = [o.name for o in self._session.get_outputs()]
+            # Detect KV cache I/O by inspecting input names
+            kv_inputs = [i for i in inputs if i.name.startswith("past_")]
+            if kv_inputs:
+                self._has_kv_io = True
+                self._kv_input_names = [i.name for i in kv_inputs]
+                self._kv_shapes = {i.name: tuple(i.shape) for i in kv_inputs}
+                self._kv_output_names = [
+                    o.name for o in self._session.get_outputs() if o.name.startswith("present_")
+                ]
+                self._kv_use_ortvalue = hasattr(self._session, "run_with_ort_values")
+                # Map present output names → indices for named lookup
+                for idx, oname in enumerate(self._output_names):
+                    if oname in set(self._kv_output_names):
+                        self._kv_output_indices[oname] = idx
+                # Pre-allocate zero tensors for cold-start KV feed
+                self._kv_zeros = {
+                    name: np.zeros(shape, dtype=np.float32)
+                    for name, shape in self._kv_shapes.items()
+                }
+                # Pre-allocate OrtValue scalars and zero OrtValues for hot-path reuse
+                if self._kv_use_ortvalue:
+                    self._use_cache_cold_ort = ort_mod.OrtValue.ortvalue_from_numpy(
+                        self._use_cache_cold
+                    )
+                    self._use_cache_warm_ort = ort_mod.OrtValue.ortvalue_from_numpy(
+                        self._use_cache_warm
+                    )
+                    self._kv_zeros_ort = {
+                        name: ort_mod.OrtValue.ortvalue_from_numpy(arr)
+                        for name, arr in self._kv_zeros.items()
+                    }
         except Exception as exc:
             self._session = None
             raise BackendLoadError(f"TensorRTBackend: engine load failed: {exc}") from exc
@@ -143,13 +212,57 @@ class TensorRTBackend:
             raise InferenceError("TensorRTBackend: no engine loaded — call load() first")
 
         try:
+            if self._has_kv_io and self._kv_use_ortvalue:
+                return self._infer_kv_ortvalue(tensor)
+            if self._has_kv_io:
+                return self._infer_kv_numpy(tensor)
             outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
+        except InferenceError:
+            raise
         except Exception as exc:
             raise InferenceError(f"TensorRTBackend: inference failed: {exc}") from exc
 
+    def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """KV-cache inference using numpy arrays (fallback path)."""
+        feed: dict[str, NDArray[np.float32]] = {
+            self._input_name: tensor.data,
+            "use_cache": self._use_cache_warm if self._kv_state else self._use_cache_cold,
+        }
+        for name in self._kv_input_names:
+            feed[name] = self._kv_state.get(name, self._kv_zeros[name])
+        outputs = self._session.run(None, feed)
+        for present_name in self._kv_output_names:
+            past_name = present_name.replace("present_", "past_")
+            self._kv_state[past_name] = outputs[self._kv_output_indices[present_name]]
+        return np.asarray(outputs[0], dtype=np.float32)
+
+    def _infer_kv_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """KV-cache inference using OrtValue for zero-copy tensor passing."""
+        ort = self._ort
+        feed: dict[str, Any] = {
+            self._input_name: ort.OrtValue.ortvalue_from_numpy(tensor.data),
+            "use_cache": self._use_cache_warm_ort if self._kv_state else self._use_cache_cold_ort,
+        }
+        for name in self._kv_input_names:
+            feed[name] = (
+                self._kv_state[name] if name in self._kv_state else self._kv_zeros_ort[name]
+            )
+        ort_outputs = self._session.run_with_ort_values(self._output_names, feed)
+        # Store present K,V as OrtValues (zero-copy for next frame)
+        for present_name in self._kv_output_names:
+            past_name = present_name.replace("present_", "past_")
+            self._kv_state[past_name] = ort_outputs[self._kv_output_indices[present_name]]
+        out = ort_outputs[0].numpy()
+        return out if out.dtype == np.float32 else out.astype(np.float32)
+
+    def clear_kv_cache(self) -> None:
+        """Clear KV state for streaming reset (e.g. new video source)."""
+        self._kv_state = {}
+
     def unload(self) -> None:
         """Release the ONNX Runtime session and free TRT resources."""
+        self._kv_state = {}
         self._session = None
 
     def warmup(self, batch_size: int = 1) -> None:
@@ -164,11 +277,20 @@ class TensorRTBackend:
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
-            for _ in range(3):
-                self._session.run(None, {self._input_name: dummy})
-        except Exception:
-            # Warmup failures are non-fatal
-            pass
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: dummy,
+                    "use_cache": np.array(0.0, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = np.zeros(self._kv_shapes[name], dtype=np.float32)
+                for _ in range(3):
+                    self._session.run(None, feed)
+            else:
+                for _ in range(3):
+                    self._session.run(None, {self._input_name: dummy})
+        except Exception as exc:
+            logger.debug("TensorRTBackend: warmup failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------

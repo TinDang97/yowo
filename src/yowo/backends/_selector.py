@@ -231,7 +231,16 @@ def _run_priority_chain(
             f"NVIDIA GPU detected with ONNX Runtime {libs.onnxruntime_version} (CUDA EP)",
         )
 
-    # Priority 3: OpenVINO (CPU or Intel iGPU)
+    # Priority 3: ONNX with CoreML EP (Apple Silicon Neural Engine)
+    if libs.onnxruntime_version and libs.onnxruntime_has_coreml:
+        return (
+            BackendType.ONNX,
+            DeviceType.CPU,
+            "cpu",
+            f"ONNX Runtime {libs.onnxruntime_version} (CoreML EP — Apple Neural Engine)",
+        )
+
+    # Priority 4: OpenVINO (CPU or Intel iGPU)
     if libs.openvino_version:
         return (
             BackendType.OPENVINO,
@@ -240,7 +249,7 @@ def _run_priority_chain(
             f"OpenVINO {libs.openvino_version} installed",
         )
 
-    # Priority 4: ONNX CPU EP
+    # Priority 5: ONNX CPU EP
     if libs.onnxruntime_version:
         return (
             BackendType.ONNX,
@@ -249,7 +258,7 @@ def _run_priority_chain(
             f"ONNX Runtime {libs.onnxruntime_version} installed (CPU EP)",
         )
 
-    # Priority 5: PyTorch fallback
+    # Priority 6: PyTorch fallback
     if libs.torch_version:
         device_type = DeviceType.CUDA if libs.torch_cuda_available else DeviceType.CPU
         device_str = "cuda:0" if libs.torch_cuda_available else "cpu"
@@ -260,7 +269,7 @@ def _run_priority_chain(
             f"PyTorch {libs.torch_version} installed (fallback)",
         )
 
-    # Priority 6: nothing available
+    # Priority 7: nothing available
     raise DependencyError(
         package="inference backend",
         install_cmd=_INSTALL_HINTS,

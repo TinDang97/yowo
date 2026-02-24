@@ -151,6 +151,60 @@ class TestConcat:
         assert out.shape == (1, 48, 8, 8)
 
 
+class TestConvForwardFuseNoAct:
+    def test_identity_act_skipped(self) -> None:
+        """forward_fuse_no_act produces identical output to forward_fuse with Identity act."""
+        m = Conv(16, 32, 3, 1, act=False)
+        m.eval()
+        fused_conv = fuse_conv_and_bn(m.conv, m.bn)
+        m.conv = fused_conv
+        delattr(m, "bn")
+
+        x = torch.randn(1, 16, 8, 8)
+        with torch.no_grad():
+            expected = m.forward_fuse(x)
+            actual = m.forward_fuse_no_act(x)
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_silu_act_not_affected(self) -> None:
+        """forward_fuse with SiLU differs from forward_fuse_no_act (sanity)."""
+        m = Conv(16, 32, 3, 1, act=True)
+        m.eval()
+        fused_conv = fuse_conv_and_bn(m.conv, m.bn)
+        m.conv = fused_conv
+        delattr(m, "bn")
+
+        x = torch.randn(1, 16, 8, 8)
+        with torch.no_grad():
+            fuse_result = m.forward_fuse(x)
+            no_act_result = m.forward_fuse_no_act(x)
+
+        assert not torch.allclose(fuse_result, no_act_result), (
+            "SiLU forward_fuse should differ from forward_fuse_no_act"
+        )
+
+
+class TestBottleneckSpecialization:
+    def test_forward_shortcut_matches(self) -> None:
+        m = Bottleneck(32, 32, shortcut=True)
+        m.eval()
+        x = torch.randn(1, 32, 16, 16)
+        with torch.no_grad():
+            expected = m.forward(x)
+            actual = m._forward_shortcut(x)
+        torch.testing.assert_close(actual, expected)
+
+    def test_forward_no_shortcut_matches(self) -> None:
+        m = Bottleneck(32, 64, shortcut=False)
+        m.eval()
+        x = torch.randn(1, 32, 16, 16)
+        with torch.no_grad():
+            expected = m.forward(x)
+            actual = m._forward_no_shortcut(x)
+        torch.testing.assert_close(actual, expected)
+
+
 class TestFuseConvAndBn:
     def test_numerically_equivalent(self) -> None:
         conv = nn.Conv2d(3, 16, 3, padding=1, bias=False)

@@ -37,14 +37,14 @@ class DFL(nn.Module):
 
     def __init__(self, c1: int = 16) -> None:
         super().__init__()
-        self.register_buffer("weight", torch.arange(c1, dtype=torch.float))
+        self.register_buffer("weight", torch.arange(c1, dtype=torch.float).view(1, 1, c1, 1))
         self.c1 = c1
 
     def forward(self, x: Tensor) -> Tensor:
         b, _, a = x.shape
         # (B, 4*c1, A) -> (B, 4, c1, A) -> softmax over bins -> weighted sum -> (B, 4, A)
         t = x.view(b, 4, self.c1, a).softmax(2)
-        return (t * self.weight[None, None, :, None]).sum(2)
+        return (t * self.weight).sum(2)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,8 @@ def dist2bbox(
     distance: Tensor,
     anchor_points: Tensor,
     xywh: bool = True,
+    *,
+    anchors_t: Tensor | None = None,
 ) -> Tensor:
     """Convert distance predictions to bounding boxes.
 
@@ -89,11 +91,14 @@ def dist2bbox(
         distance: ``(B, 4, N)`` — left, top, right, bottom distances.
         anchor_points: ``(N, 2)`` — anchor centre coordinates.
         xywh: If True return ``(cx, cy, w, h)``; else ``(x1, y1, x2, y2)``.
+        anchors_t: Optional pre-transposed anchors ``(1, 2, N)`` to skip
+            per-frame transpose+unsqueeze.
     """
     lt, rb = distance.chunk(2, dim=1)
-    anchors = anchor_points.transpose(0, 1).unsqueeze(0)  # (1, 2, N)
-    x1y1 = anchors - lt
-    x2y2 = anchors + rb
+    if anchors_t is None:
+        anchors_t = anchor_points.transpose(0, 1).unsqueeze(0)  # (1, 2, N)
+    x1y1 = anchors_t - lt
+    x2y2 = anchors_t + rb
     if xywh:
         c_xy = (x1y1 + x2y2) / 2
         wh = x2y2 - x1y1
@@ -117,6 +122,8 @@ class Detect(nn.Module):
       Output ``(B, max_det, 6)`` — NMS-free top-k selection.
     """
 
+    stride: Tensor
+
     def __init__(
         self,
         nc: int = 80,
@@ -133,8 +140,11 @@ class Detect(nn.Module):
         self.end2end = end2end
         self.max_det = max_det
 
-        # Stride is set during the first forward pass
-        self.stride = torch.zeros(self.nl)
+        # Stride is set during the first forward pass.
+        # Registered as non-persistent buffer so torch.compile/Dynamo sees a
+        # stable tensor identity and dispatch key set (avoids recompilation
+        # guard failures from DispatchKeySet mismatch).
+        self.register_buffer("stride", torch.zeros(self.nl), persistent=False)
 
         # Box regression branch (per scale)
         c2 = max(16, ch[0] // 4, reg_max * 4) if ch else 16
@@ -167,6 +177,9 @@ class Detect(nn.Module):
         self._anchor_cache_key: tuple[tuple[int, ...], ...] | None = None
         self._cached_anchors: Tensor | None = None
         self._cached_strides: Tensor | None = None
+        # Pre-transposed anchor/stride tensors — avoid per-frame transpose
+        self._cached_anchors_t: Tensor | None = None  # (1, 2, N)
+        self._cached_strides_t: Tensor | None = None  # (1, 1, N)
 
         # End-to-end: duplicate heads for one-to-one matching
         if end2end:
@@ -233,23 +246,33 @@ class Detect(nn.Module):
         shape_key = tuple(xi.shape[2:] for xi in x)
         if self._anchor_cache_key != shape_key:
             self._cached_anchors, self._cached_strides = make_anchors(x, self.stride)
+            # Pre-transpose for dist2bbox and stride multiply — avoid per-frame ops
+            self._cached_anchors_t = self._cached_anchors.transpose(0, 1).unsqueeze(0)
+            self._cached_strides_t = self._cached_strides.transpose(0, 1)
             self._anchor_cache_key = shape_key
 
         # DFL decode: (B, 4*reg_max, N) → (B, 4, N)
         dfl_out = self.dfl(box_cat)
 
         assert self._cached_anchors is not None
-        assert self._cached_strides is not None
+        assert self._cached_anchors_t is not None
+        assert self._cached_strides_t is not None
 
         # Decode to bounding boxes in pixel coords
-        dbox = dist2bbox(
-            dfl_out, self._cached_anchors, xywh=not self.end2end
-        ) * self._cached_strides.transpose(0, 1)
+        dbox = (
+            dist2bbox(
+                dfl_out,
+                self._cached_anchors,
+                xywh=not self.end2end,
+                anchors_t=self._cached_anchors_t,
+            )
+            * self._cached_strides_t
+        )
 
         # In-place sigmoid — avoids allocating a new (B, nc, N) tensor per frame
         cls_cat.sigmoid_()
 
-        return torch.cat([dbox, cls_cat], dim=1)  # (B, 4+nc, N)
+        return torch.cat([dbox, cls_cat], dim=1)  # (B, 4+nc, N)  # (B, 4+nc, N)
 
     def _postprocess_end2end(self, preds: Tensor) -> Tensor:
         """Top-k selection for NMS-free inference.
@@ -284,7 +307,11 @@ class Detect(nn.Module):
         # P3 has stride 8 by convention; P4=16, P5=32 for 640 input.
         feat_sizes = torch.tensor([x[i].shape[2] for i in range(self.nl)], dtype=torch.float)
         max_feat = feat_sizes.max()
-        self.stride = (max_feat / feat_sizes * 8.0).to(x[0].device)
+        # copy_ preserves the buffer's tensor identity + dispatch keys so
+        # torch.compile doesn't trigger recompilation guards.
+        self.stride.copy_((max_feat / feat_sizes * 8.0).to(x[0].device))
         self._strides_initialized = True
         # Reset anchor cache when strides change (e.g. after device migration)
         self._anchor_cache_key = None
+        self._cached_anchors_t = None
+        self._cached_strides_t = None

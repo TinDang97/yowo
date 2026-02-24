@@ -10,6 +10,7 @@ on machines without OpenVINO installed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,8 @@ from numpy.typing import NDArray
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, PreprocessedTensor
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -44,6 +47,17 @@ class OpenVinoBackend:
         self._compiled_model: object | None = None
         self._infer_request: object | None = None
         self._input_shape: tuple[int, int] = (640, 640)
+        self._input_name: str = "images"
+        # KV cache I/O state (populated in load() when model has KV I/O)
+        self._has_kv_io: bool = False
+        self._kv_state: dict[str, NDArray[np.float32]] = {}
+        self._kv_input_names: list[str] = []
+        self._kv_output_names: list[str] = []
+        self._kv_shapes: dict[str, tuple[int, ...]] = {}
+        # Pre-allocated use_cache scalars and zero tensors (set in load())
+        self._use_cache_cold: NDArray[np.float32] = np.array(0.0, dtype=np.float32)
+        self._use_cache_warm: NDArray[np.float32] = np.array(1.0, dtype=np.float32)
+        self._kv_zeros: dict[str, NDArray[np.float32]] = {}
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -77,6 +91,14 @@ class OpenVinoBackend:
             DependencyError: ``openvino`` not installed.
             BackendLoadError: Model load or compilation failed.
         """
+        # Reset KV state from any previous model to prevent stale routing
+        self._has_kv_io = False
+        self._kv_state = {}
+        self._kv_input_names = []
+        self._kv_output_names = []
+        self._kv_shapes = {}
+        self._kv_zeros = {}
+
         try:
             from openvino.runtime import Core  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -92,12 +114,36 @@ class OpenVinoBackend:
             self._compiled_model = core.compile_model(model, ov_device)
             self._infer_request = self._compiled_model.create_infer_request()  # type: ignore[attr-defined]
 
-            # Derive input shape from compiled model
-            input_node = next(iter(self._compiled_model.inputs), None)  # type: ignore[attr-defined]
-            if input_node is not None:
+            # Derive input shape and detect KV cache I/O
+            all_inputs = list(self._compiled_model.inputs)  # type: ignore[attr-defined]
+            if all_inputs:
+                input_node = all_inputs[0]
+                self._input_name = input_node.get_any_name()  # type: ignore[attr-defined]
                 shape = input_node.shape
                 if len(shape) == 4:
                     self._input_shape = (int(shape[2]), int(shape[3]))
+            kv_inputs = [
+                n
+                for n in all_inputs
+                if n.get_any_name().startswith("past_")  # type: ignore[attr-defined]
+            ]
+            if kv_inputs:
+                self._has_kv_io = True
+                self._kv_input_names = [n.get_any_name() for n in kv_inputs]  # type: ignore[attr-defined]
+                self._kv_shapes = {
+                    n.get_any_name(): tuple(int(d) for d in n.shape)  # type: ignore[attr-defined]
+                    for n in kv_inputs
+                }
+                self._kv_output_names = [
+                    n.get_any_name()  # type: ignore[attr-defined]
+                    for n in self._compiled_model.outputs  # type: ignore[attr-defined]
+                    if n.get_any_name().startswith("present_")  # type: ignore[attr-defined]
+                ]
+                # Pre-allocate zero tensors for cold-start KV feed
+                self._kv_zeros = {
+                    name: np.zeros(shape, dtype=np.float32)
+                    for name, shape in self._kv_shapes.items()
+                }
         except Exception as exc:
             self._compiled_model = None
             self._infer_request = None
@@ -119,15 +165,35 @@ class OpenVinoBackend:
             raise InferenceError("OpenVinoBackend: no model loaded — call load() first")
 
         try:
-            results = self._infer_request.infer({0: tensor.data})  # type: ignore[attr-defined]
-            # ``results`` is a dict of {output_name: ndarray}; take the first
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: tensor.data,
+                    "use_cache": self._use_cache_warm if self._kv_state else self._use_cache_cold,
+                }
+                for name in self._kv_input_names:
+                    feed[name] = self._kv_state.get(name, self._kv_zeros[name])
+                results = self._infer_request.infer(feed)  # type: ignore[attr-defined]
+                # Collect present K,V into kv_state for the next frame
+                for present_name in self._kv_output_names:
+                    past_name = present_name.replace("present_", "past_")
+                    self._kv_state[past_name] = np.asarray(results[present_name], dtype=np.float32)
+            else:
+                results = self._infer_request.infer({0: tensor.data})  # type: ignore[attr-defined]
+            # First output is always the detection tensor
             output = next(iter(results.values()))
             return np.asarray(output, dtype=np.float32)
+        except InferenceError:
+            raise
         except Exception as exc:
             raise InferenceError(f"OpenVinoBackend: inference failed: {exc}") from exc
 
+    def clear_kv_cache(self) -> None:
+        """Clear KV state for streaming reset (e.g. new video source)."""
+        self._kv_state = {}
+
     def unload(self) -> None:
         """Release compiled model and infer request."""
+        self._kv_state = {}
         self._compiled_model = None
         self._infer_request = None
 
@@ -142,10 +208,18 @@ class OpenVinoBackend:
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
-            self._infer_request.infer({0: dummy})  # type: ignore[attr-defined]
-        except Exception:
-            # Warmup failures are non-fatal
-            pass
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: dummy,
+                    "use_cache": np.array(0.0, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = np.zeros(self._kv_shapes[name], dtype=np.float32)
+                self._infer_request.infer(feed)  # type: ignore[attr-defined]
+            else:
+                self._infer_request.infer({0: dummy})  # type: ignore[attr-defined]
+        except Exception as exc:
+            logger.debug("OpenVinoBackend: warmup failed (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

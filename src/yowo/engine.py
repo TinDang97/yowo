@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 from yowo.backends import InferenceBackend, create_backend
 from yowo.backends._selector import get_fallback_backends, select_backend
@@ -53,12 +54,23 @@ class InferenceEngine:
         batch_size: int = 1,
         confidence: float = 0.25,
         iou_threshold: float = 0.45,
+        cache: bool = False,
+        cache_dir: Path | None = None,
+        kv_cache: bool = False,
     ) -> None:
         self._spec = spec
         self._batch_size = batch_size
         self._confidence = confidence
         self._iou_threshold = iou_threshold
         self._device = device
+
+        # Feature cache (opt-in, PyTorch backend only)
+        # cache=True → in-memory; cache_dir → mmap-backed
+        self._feature_cache = None
+        if cache or cache_dir is not None:
+            from yowo.cache import FeatureCache
+
+            self._feature_cache = FeatureCache(cache_dir=cache_dir)
 
         # Detect hardware once
         self._hw = get_hardware_profile()
@@ -72,8 +84,13 @@ class InferenceEngine:
             precision_override=precision.value if precision else None,
         )
 
+        self._kv_cache = kv_cache
         self._backend: InferenceBackend = create_backend(
-            self._selection.backend, self._hw, model_spec=self._spec
+            self._selection.backend,
+            self._hw,
+            model_spec=self._spec,
+            feature_cache=self._feature_cache,
+            kv_cache=kv_cache,
         )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
@@ -102,7 +119,13 @@ class InferenceEngine:
                         self._selection.backend.value,
                         bt.value,
                     )
-                    self._backend = create_backend(bt, self._hw, model_spec=self._spec)
+                    self._backend = create_backend(
+                        bt,
+                        self._hw,
+                        model_spec=self._spec,
+                        feature_cache=self._feature_cache,
+                        kv_cache=self._kv_cache,
+                    )
 
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)
@@ -145,6 +168,12 @@ class InferenceEngine:
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
         tensor = preprocess(frames, target_size)
 
+        # Set source_id for feature caching (PyTorch backend only)
+        if self._feature_cache is not None and frames:
+            sid = frames[0].source_id
+            if sid and hasattr(self._backend, "set_source_id"):
+                self._backend.set_source_id(sid)  # type: ignore[attr-defined]
+
         t0 = time.perf_counter()
         raw_output = self._backend.infer(tensor)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -165,6 +194,10 @@ class InferenceEngine:
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
+        # Reset KV state at the start of each new source
+        if hasattr(self._backend, "clear_kv_cache"):
+            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
+
         batch: list[Frame] = []
         try:
             for frame in source:
@@ -180,6 +213,8 @@ class InferenceEngine:
     def close(self) -> None:
         """Release all backend resources."""
         self._backend.unload()
+        if self._feature_cache is not None:
+            self._feature_cache.clear()
         self._loaded = False
 
     def __enter__(self) -> InferenceEngine:

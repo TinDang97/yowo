@@ -298,12 +298,16 @@ class TestProbeTensorrt:
 
 
 class TestProbeOnnxruntime:
-    def _make_ort_module(self, *, has_cuda: bool, version: str = "1.17.0") -> ModuleType:
+    def _make_ort_module(
+        self, *, has_cuda: bool, has_coreml: bool = False, version: str = "1.17.0"
+    ) -> ModuleType:
         fake_ort = ModuleType("onnxruntime")
         fake_ort.__version__ = version  # type: ignore[attr-defined]
         providers = ["CPUExecutionProvider"]
         if has_cuda:
             providers.append("CUDAExecutionProvider")
+        if has_coreml:
+            providers.append("CoreMLExecutionProvider")
         fake_ort.get_available_providers = lambda: providers  # type: ignore[attr-defined]
         return fake_ort
 
@@ -313,7 +317,7 @@ class TestProbeOnnxruntime:
             patch("importlib.util.find_spec", return_value=MagicMock()),
             patch.dict(sys.modules, {"onnxruntime": fake_ort}),
         ):
-            version, has_cuda = probe_onnxruntime()
+            version, has_cuda, _has_coreml = probe_onnxruntime()
         assert version == "1.17.0"
         assert has_cuda is True
 
@@ -323,15 +327,26 @@ class TestProbeOnnxruntime:
             patch("importlib.util.find_spec", return_value=MagicMock()),
             patch.dict(sys.modules, {"onnxruntime": fake_ort}),
         ):
-            version, has_cuda = probe_onnxruntime()
+            version, has_cuda, _has_coreml = probe_onnxruntime()
         assert version == "1.17.0"
         assert has_cuda is False
 
     def test_returns_none_when_not_installed(self) -> None:
         with patch("importlib.util.find_spec", return_value=None):
-            version, has_cuda = probe_onnxruntime()
+            version, has_cuda, has_coreml = probe_onnxruntime()
         assert version is None
         assert has_cuda is False
+        assert has_coreml is False
+
+    def test_returns_coreml_true_when_coreml_provider_present(self) -> None:
+        fake_ort = self._make_ort_module(has_cuda=False, has_coreml=True)
+        with (
+            patch("importlib.util.find_spec", return_value=MagicMock()),
+            patch.dict(sys.modules, {"onnxruntime": fake_ort}),
+        ):
+            version, _has_cuda, has_coreml = probe_onnxruntime()
+        assert version == "1.17.0"
+        assert has_coreml is True
 
 
 # ---------------------------------------------------------------------------

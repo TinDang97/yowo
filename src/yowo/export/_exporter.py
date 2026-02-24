@@ -6,6 +6,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from yowo.errors import ConfigError, DependencyError, ExportError
 from yowo.export._calibration import resolve_calibration_images
@@ -26,6 +27,7 @@ def export_model(
     dynamic_batch: bool = False,
     imgsz: int = 640,
     calibration_data: str | None = None,
+    kv_cache: bool = False,
 ) -> ExportMetadata:
     """Export a YOLO model to an optimized inference format.
 
@@ -40,6 +42,8 @@ def export_model(
         dynamic_batch: Enable dynamic batch dimension (ONNX only).
         imgsz: Input image size.
         calibration_data: Required for INT8; path to image directory.
+        kv_cache: Export with K,V as explicit ONNX I/O for stateful
+            streaming inference across all runtimes.
 
     Returns:
         ExportMetadata record with file path and sidecar written to disk.
@@ -76,11 +80,12 @@ def export_model(
         dummy = dummy.half()
 
     logger.info(
-        "Exporting %s%s -> %s (%s)",
+        "Exporting %s%s -> %s (%s)%s",
         spec.family.value,
         spec.size.value,
         target_format.value,
         precision.value,
+        " [kv_cache]" if kv_cache else "",
     )
 
     t0 = time.monotonic()
@@ -88,7 +93,14 @@ def export_model(
     # Step 1: Always produce ONNX first
     model_stem = f"{spec.family.value}{spec.size.value}"
     onnx_path = output_dir / f"{model_stem}.onnx"
-    _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
+
+    if kv_cache:
+        from yowo.export._kv_wrapper import YOLOKVWrapper
+
+        wrapper = YOLOKVWrapper(model)
+        _export_onnx_kv(wrapper, dummy, onnx_path, dynamic_batch=dynamic_batch)
+    else:
+        _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
 
     # Step 2: Convert if needed
     match target_format:
@@ -126,6 +138,7 @@ def export_model(
         yowo_version=getattr(yowo, "__version__", "0.1.0"),
         gpu_name=hw.primary_gpu.name if hw.primary_gpu else None,
         calibration_data=calibration_data,
+        extra={"kv_cache": True} if kv_cache else {},
     )
     meta.save()
 
@@ -181,6 +194,99 @@ def _export_onnx(
         logger.debug("onnxslim not installed, skipping ONNX simplification")
     except Exception as exc:
         logger.warning("ONNX simplification failed (non-fatal): %s", exc)
+
+
+def _export_onnx_kv(
+    wrapper: object,
+    dummy_images: object,
+    onnx_path: Path,
+    *,
+    dynamic_batch: bool,
+) -> None:
+    """Export KV-wrapper to ONNX with K,V as explicit model I/O.
+
+    Applies onnxslim simplification with I/O validation guard.
+    Internalizes external tensor data so CoreML EP can load the model.
+    """
+    import torch  # type: ignore[import-untyped]
+    from torch import Tensor
+
+    from yowo.export._kv_wrapper import YOLOKVWrapper
+
+    assert isinstance(wrapper, YOLOKVWrapper)
+    assert isinstance(dummy_images, Tensor)
+
+    dummy_kvs = wrapper.build_dummy_kv_inputs(dummy_images.shape[-1], dtype=dummy_images.dtype)
+    use_cache = torch.tensor(0.0, dtype=dummy_images.dtype)
+    dummy_inputs = (dummy_images, use_cache, *dummy_kvs)
+
+    input_names = ["images", *wrapper.kv_input_names]
+    output_names = ["output0", *wrapper.kv_output_names]
+
+    dynamic_axes: dict[str, dict[int, str]] | None = None
+    if dynamic_batch:
+        dynamic_axes = {"images": {0: "batch"}, "output0": {0: "batch"}}
+        for name in wrapper.kv_input_names:
+            if name != "use_cache":
+                dynamic_axes[name] = {0: "batch"}
+        for name in wrapper.kv_output_names:
+            dynamic_axes[name] = {0: "batch"}
+
+    try:
+        torch.onnx.export(
+            wrapper,  # type: ignore[arg-type]
+            dummy_inputs,  # type: ignore[arg-type]
+            str(onnx_path),
+            opset_version=17,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+        )
+    except Exception as exc:
+        raise ExportError(f"ONNX KV export failed: {exc}") from exc
+
+    # Internalize external tensor data so all runtimes (CoreML EP) can load
+    # the model from a single file without needing the .onnx.data sidecar.
+    try:
+        import onnx  # type: ignore[import-untyped]
+
+        model = onnx.load(str(onnx_path), load_external_data=True)
+        tmp_path = onnx_path.with_suffix(".onnx.tmp")
+        onnx.save(model, str(tmp_path))  # type: ignore[arg-type]
+        tmp_path.replace(onnx_path)
+        data_path = onnx_path.with_suffix(".onnx.data")
+        data_path.unlink(missing_ok=True)
+    except ImportError:
+        logger.debug("onnx package not installed, skipping data internalization")
+    except Exception as exc:
+        tmp_cleanup = onnx_path.with_suffix(".onnx.tmp")
+        tmp_cleanup.unlink(missing_ok=True)
+        logger.warning("Failed to internalize ONNX data (non-fatal): %s", exc)
+
+    # Simplify with onnxslim — KV I/O nodes have real data dependencies
+    # (consumed by Where/blending ops, produced by QKV split) and survive.
+    try:
+        import onnx  # type: ignore[import-untyped]
+        import onnxslim  # type: ignore[import-untyped]
+
+        slim_model: Any = onnxslim.slim(str(onnx_path))
+        # Validate KV I/O survived simplification
+        slim_ins: set[str] = {i.name for i in slim_model.graph.input}
+        slim_outs: set[str] = {o.name for o in slim_model.graph.output}
+        io_ok = all(n in slim_ins for n in input_names) and all(
+            n in slim_outs for n in output_names
+        )
+        if io_ok:
+            onnx.save(slim_model, str(onnx_path))  # type: ignore[arg-type]
+            logger.debug("KV ONNX model simplified with onnxslim")
+        else:
+            logger.warning("onnxslim stripped KV I/O — keeping unsimplified model")
+    except ImportError:
+        logger.debug("onnxslim not installed, skipping KV ONNX simplification")
+    except Exception as exc:
+        logger.warning("KV ONNX simplification failed (non-fatal): %s", exc)
+
+    logger.debug("KV-cache ONNX export complete: %s", onnx_path.name)
 
 
 def _convert_tensorrt(

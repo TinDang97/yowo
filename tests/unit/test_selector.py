@@ -64,6 +64,7 @@ def make_profile(
     has_tensorrt: bool = False,
     has_onnx: bool = False,
     has_onnx_cuda: bool = False,
+    has_onnx_coreml: bool = False,
     has_openvino: bool = False,
     has_torch: bool = False,
     gpu_memory_mb: int = 8192,
@@ -94,6 +95,7 @@ def make_profile(
         tensorrt_version="10.0.1" if has_tensorrt else None,
         onnxruntime_version="1.17.0" if has_onnx else None,
         onnxruntime_has_cuda=has_onnx_cuda,
+        onnxruntime_has_coreml=has_onnx_coreml,
         openvino_version="2024.0" if has_openvino else None,
     )
 
@@ -128,6 +130,21 @@ class TestSelectBackendAutoSelection:
         result = select_backend(profile, "n")
         assert result.backend == BackendType.ONNX
         assert result.device_type == DeviceType.CUDA
+
+    def test_onnx_coreml_selects_onnx_with_coreml_reason(self) -> None:
+        profile = make_profile(has_gpu=False, has_onnx=True, has_onnx_coreml=True)
+        result = select_backend(profile, "n")
+        assert result.backend == BackendType.ONNX
+        assert result.device_type == DeviceType.CPU
+        assert "CoreML" in result.reason
+
+    def test_coreml_beats_openvino_in_priority(self) -> None:
+        profile = make_profile(
+            has_gpu=False, has_onnx=True, has_onnx_coreml=True, has_openvino=True
+        )
+        result = select_backend(profile, "n")
+        assert result.backend == BackendType.ONNX
+        assert "CoreML" in result.reason
 
     def test_no_gpu_openvino_installed_selects_openvino(self) -> None:
         profile = make_profile(has_gpu=False, has_openvino=True)

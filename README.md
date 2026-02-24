@@ -127,11 +127,14 @@ yowo selects the best available backend automatically. You can override.
 |---------|--------|-----------|
 | TensorRT | `.engine` | NVIDIA GPU + TensorRT installed |
 | ONNX Runtime (CUDA) | `.onnx` | NVIDIA GPU + onnxruntime-gpu |
+| ONNX Runtime (CoreML) | `.onnx` | macOS + Apple Silicon (auto-detected) |
 | OpenVINO | `_openvino_model/` | Intel CPU/iGPU + openvino |
 | ONNX Runtime (CPU) | `.onnx` | Any CPU + onnxruntime |
 | PyTorch | `.pt` | Universal fallback |
 
-**Priority chain**: TensorRT → ONNX (CUDA) → OpenVINO → ONNX (CPU) → PyTorch
+**Priority chain**: TensorRT → ONNX (CUDA) → CoreML → OpenVINO → ONNX (CPU) → PyTorch
+
+> **Apple Silicon**: CoreML EP is auto-detected and offloads inference to the Neural Engine — **4-5x faster** than PyTorch CPU. No configuration needed.
 
 If a backend fails to load, yowo falls back to the next in chain and logs a warning — it never crashes.
 
@@ -200,6 +203,44 @@ from yowo import BackendType, Precision
 
 with InferenceEngine(spec, backend=BackendType.ONNX, precision=Precision.FP16) as engine:
     ...
+```
+
+### Feature map cache (sequential video inference)
+
+Skip backbone + neck on similar consecutive frames — 60–85% compute savings for slow-moving scenes.
+
+```python
+# In-memory cache (default)
+with InferenceEngine(spec, cache=True) as engine:
+    for detection in engine.stream(open_source("video.mp4")):
+        ...
+
+# mmap-backed cache (OS manages memory pressure)
+from pathlib import Path
+with InferenceEngine(spec, cache_dir=Path("/tmp/yowo-cache")) as engine:
+    for detection in engine.stream(open_source("rtsp://camera/stream")):
+        ...
+```
+
+### KV cache (attention state across frames)
+
+Reuse Attention K,V tensors and skip C2PSA/C3k2PSA blocks on similar frames. Best for PyTorch CPU/MPS; no benefit on ONNX runtimes.
+
+```python
+with InferenceEngine(spec, kv_cache=True) as engine:
+    for detection in engine.stream(open_source("video.mp4")):
+        ...
+```
+
+Export a KV-cache-enabled ONNX model (K,V as explicit I/O for stateless runtimes):
+
+```python
+from yowo import export_model, ExportFormat, Precision
+
+meta = export_model(
+    spec, ExportFormat.ONNX, output_dir=Path("./exported/"),
+    kv_cache=True,
+)
 ```
 
 ---
@@ -368,6 +409,8 @@ except YowoError as e:
 |----------|---------|-------|
 | NVIDIA GPU (server) | TensorRT or ONNX (CUDA) | Install `yowo[onnx-gpu]`; TensorRT is manual |
 | NVIDIA Jetson | TensorRT | `JetPack >= 5.0`; CUDA and TensorRT pre-installed |
+| Apple Silicon (M1–M4) | ONNX (CoreML) | Install `yowo[onnx]`; auto-detects Neural Engine, 4-5x vs CPU |
+| Apple Silicon (MPS) | PyTorch | MPS GPU via `--device mps`; 1.3x vs ultralytics |
 | Intel CPU/iGPU | OpenVINO | Install `yowo[openvino]` |
 | x86 CPU (Linux) | ONNX | Install `yowo[onnx]`; AVX2 gives ~2x speedup |
 | ARM CPU (Raspberry Pi, Graviton) | ONNX | Install `yowo[onnx]` |
@@ -417,8 +460,9 @@ Architecture and module contracts are documented in:
 
 | Report | Summary |
 |--------|---------|
-| [Vehicle Detection Benchmark — YOLO11s vs YOLO26m](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. YOLO11s ONNX FP16 achieves 18.1 FPS (2.62× PyTorch). YOLO26m ONNX FP32 achieves 6.9 FPS. |
-| [Native Architecture Inference Optimization — all 10 variants](docs/experiments/2026-02-24-arch-inference-optimization-benchmark.md) | DFL buffer, in-place sigmoid, stride flag, anchor cache applied to `arch/`. YOLO26 family 10–17% faster than ultralytics baseline; YOLO11 family 1–4% faster. Box IoU vs ultralytics: 0.967–0.995. 9/10 variants faster, avg 1.07×. |
+| [Vehicle Detection Benchmark — YOLO11s vs YOLO26m](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. YOLO11s ONNX FP16 achieves 18.1 FPS (2.62x PyTorch). YOLO26m ONNX FP32 achieves 6.9 FPS. |
+| [Native Architecture Inference Optimization — all 10 variants](docs/experiments/2026-02-24-arch-inference-optimization-benchmark.md) | DFL buffer, in-place sigmoid, stride flag, anchor cache applied to `arch/`. YOLO26 family 10-17% faster than ultralytics baseline; YOLO11 family 1-4% faster. Box IoU vs ultralytics: 0.967-0.995. 9/10 variants faster, avg 1.07x. |
+| [ONNX + CoreML EP + MPS Optimization](docs/experiments/2026-02-24-onnx-coreml-optimization-benchmark.md) | CoreML EP auto-detection for Apple Neural Engine: **4.36x avg faster** than PyTorch across all 10 variants (nano 140-188 FPS, XL 27-29 FPS). MPS (Metal GPU): 1.32x avg faster than ultralytics. KV cache analysis: +12% on CPU PyTorch (block cache), negligible on GPU/CoreML. |
 
 ---
 
