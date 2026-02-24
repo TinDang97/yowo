@@ -74,49 +74,23 @@ with InferenceEngine(spec) as engine:
 
 ---
 
-## Real-World Example — Hanoi Traffic Surveillance
-
-Detection run on a 965×539 Hanoi traffic surveillance screenshot using YOLO26 on CPU (Apple M4 Pro):
+## Example
 
 ```bash
-yowo detect "Hanoi AI Cameras Traffic Violations.webp" \
+yowo detect "input.jpg" \
   --model yolo26n \
-  --weights "Ultralytics YOLO26.pt" \
+  --weights "yolo26n.pt" \
   --backend pytorch \
   --confidence 0.25 \
   --output detections.json
 ```
-
-```
-Frame 0: 29 detections (582.2ms)
-Saved detections to detections.json
-```
-
-**Detection results** (sorted by confidence):
-
-| Class | Confidence | Bounding Box (x1,y1,x2,y2) |
-|-------|-----------|----------------------------|
-| car | 0.888 | (387, 422, 622, 537) |
-| car | 0.884 | (418, 151, 567, 300) |
-| car | 0.839 | (250, 190, 402, 339) |
-| car | 0.820 | (415, 269, 598, 447) |
-| car | 0.685 | (427, 89, 555, 197) |
-| motorcycle | 0.680 | (879, 384, 945, 499) |
-| motorcycle | 0.679 | (713, 407, 781, 527) |
-| car | 0.668 | (171, 251, 357, 451) |
-| motorcycle | 0.573 | (777, 373, 839, 476) |
-| motorcycle | 0.525 | (823, 449, 899, 536) |
-| person | 0.500 | (759, 449, 844, 539) |
-| … 18 more | 0.26–0.47 | motorcycles, persons, trucks, bus |
-
-**Summary**: 29 objects — 9 cars, 9 persons, 6 motorcycles, 2 trucks, 1 bus, 2 overlapping detections — in **582ms** on CPU. YOLO26's NMS-free head eliminates the NMS step; detections are post-filtered by confidence only.
 
 The full JSON output per detection:
 
 ```json
 {
   "frame_index": 0,
-  "source_id": "Hanoi AI Cameras Traffic Violations.webp",
+  "source_id": "input.jpg",
   "inference_time_ms": 582.2,
   "backend": "pytorch",
   "model": "yolo26n",
@@ -126,7 +100,8 @@ The full JSON output per detection:
       "confidence": 0.888,
       "class_id": 2,
       "class_name": "car"
-    }
+    },
+    ....
   ]
 }
 ```
@@ -404,6 +379,7 @@ except YowoError as e:
 | Module | Path | Responsibility |
 |--------|------|----------------|
 | core | [`src/yowo/`](src/yowo/README.md) | `InferenceEngine`, public API surface, `engine.py`, `config.py`, `types.py`, `errors.py` |
+| arch | [`src/yowo/arch/`](src/yowo/arch/README.md) | Native YOLO11 and YOLO26 PyTorch — backbone, FPN-PAN neck, detection head, scaling, weight loading |
 | backends | [`src/yowo/backends/`](src/yowo/backends/README.md) | Inference backend implementations (TensorRT, ONNX, OpenVINO, PyTorch) and automatic priority-chain selection |
 | cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `export`, `info`, `models` commands |
 | export | [`src/yowo/export/`](src/yowo/export/README.md) | Export `.pt` weights to ONNX / TensorRT / OpenVINO with calibration, metadata sidecar, and output validation |
@@ -434,6 +410,7 @@ uv run yowo info
 Architecture and module contracts are documented in:
 - [`CONTEXT.md`](CONTEXT.md) — project scope, principles, dependency graph
 - [`src/yowo/README.md`](src/yowo/README.md) — library architecture overview
+- [`src/yowo/arch/README.md`](src/yowo/arch/README.md) — native YOLO backbone/neck/head, scaling, weight loading
 - Each module directory has its own `README.md`
 
 ### Experiments
@@ -441,6 +418,7 @@ Architecture and module contracts are documented in:
 | Report | Summary |
 |--------|---------|
 | [Vehicle Detection Benchmark — YOLO11s vs YOLO26m](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. YOLO11s ONNX FP16 achieves 18.1 FPS (2.62× PyTorch). YOLO26m ONNX FP32 achieves 6.9 FPS. |
+| [Native Architecture Inference Optimization — all 10 variants](docs/experiments/2026-02-24-arch-inference-optimization-benchmark.md) | DFL buffer, in-place sigmoid, stride flag, anchor cache applied to `arch/`. YOLO26 family 10–17% faster than ultralytics baseline; YOLO11 family 1–4% faster. Box IoU vs ultralytics: 0.967–0.995. 9/10 variants faster, avg 1.07×. |
 
 ---
 

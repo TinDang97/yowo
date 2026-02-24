@@ -6,6 +6,9 @@ Supports Conv+BN fusion, channels_last, and torch.compile.
 
 from __future__ import annotations
 
+import logging
+
+import torch
 import torch.nn as nn
 from torch import Tensor
 
@@ -14,6 +17,8 @@ from yowo.arch._blocks import SPPF, C3k2, Conv, fuse_conv_and_bn
 from yowo.arch._config import ModelConfig, scale_channels, scale_repeats
 from yowo.arch._heads import Detect
 from yowo.arch._neck import FPNPANNeck
+
+logger = logging.getLogger(__name__)
 
 
 class Backbone(nn.Module):
@@ -146,6 +151,38 @@ class YOLOModel(nn.Module):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)
                 delattr(m, "bn")
                 m.forward = m.forward_fuse  # type: ignore[assignment]
+        return self
+
+    def compile_for_inference(self, *, mode: str = "reduce-overhead") -> YOLOModel:
+        """Apply ``torch.compile`` for optimized inference.
+
+        Must be called **after** ``fuse()`` and ``eval()``. The compiled model
+        traces through the forward graph on the first call (absorbed by
+        ``warmup()``), then runs fused kernels on all subsequent calls.
+
+        ``fullgraph=False`` is required because ``C2f.forward`` uses a Python
+        ``list.extend`` with a generator, causing a graph break. Partial
+        compilation still yields significant speedups from kernel fusion.
+
+        Args:
+            mode: Compilation mode passed to ``torch.compile``.
+                ``"reduce-overhead"`` (default) fuses kernels and uses CUDA
+                graphs for fixed-shape inputs. ``"default"`` is safer but
+                slower.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            RuntimeError: If ``torch.compile`` is unavailable (PyTorch < 2.0).
+        """
+        if not hasattr(torch, "compile"):
+            raise RuntimeError(
+                f"torch.compile requires PyTorch >= 2.0. Current version: {torch.__version__}"
+            )
+        self.forward = torch.compile(  # type: ignore[assignment]
+            self.forward, mode=mode, fullgraph=False
+        )
         return self
 
 

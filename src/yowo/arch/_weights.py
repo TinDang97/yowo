@@ -160,7 +160,9 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
 
     if missing:
         # Separate truly missing from stride/anchor buffers (non-critical)
-        critical_missing = [k for k in missing if "stride" not in k and "anchor" not in k]
+        critical_missing = [
+            k for k in missing if "stride" not in k and "anchor" not in k and "dfl.weight" not in k
+        ]
         if critical_missing:
             logger.warning(
                 "%d keys missing from checkpoint (model may produce incorrect results): %s",

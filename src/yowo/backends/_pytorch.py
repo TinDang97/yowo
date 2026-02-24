@@ -37,6 +37,9 @@ class PyTorchBackend:
         hw_profile: HardwareProfile,
         *,
         model_spec: ModelSpec | None = None,
+        compile: bool = False,
+        compile_mode: str = "reduce-overhead",
+        fp16: bool = False,
     ) -> None:
         if not hw_profile.libraries.torch_version:
             raise DependencyError(
@@ -49,6 +52,9 @@ class PyTorchBackend:
         self._torch: Any = None  # cached torch module from load()
         self._device_str: str = "cpu"
         self._input_shape: tuple[int, int] = (640, 640)
+        self._compile: bool = compile
+        self._compile_mode: str = compile_mode
+        self._fp16: bool = fp16
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -124,7 +130,16 @@ class PyTorchBackend:
 
             # Channels-last for GPU Tensor Core optimisation
             if resolved.startswith("cuda"):
+                torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
                 model = model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
+
+            # torch.compile — opt-in kernel fusion (requires PyTorch >= 2.0)
+            if self._compile:
+                try:
+                    model.compile_for_inference(mode=self._compile_mode)
+                    logger.info("torch.compile enabled (mode=%s)", self._compile_mode)
+                except Exception as exc:
+                    logger.debug("torch.compile failed (falling back to eager): %s", exc)
 
             self._model = model
             self._device_str = resolved
@@ -163,9 +178,13 @@ class PyTorchBackend:
                 t = t.to(memory_format=torch.channels_last)
 
             with torch.inference_mode():
-                output = self._model(t)
+                if self._fp16 and self._device_str.startswith("cuda"):
+                    with torch.amp.autocast("cuda", dtype=torch.float16):  # type: ignore[attr-defined]
+                        output = self._model(t)
+                else:
+                    output = self._model(t)
 
-            return output.cpu().numpy()
+            return output.cpu().float().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 
