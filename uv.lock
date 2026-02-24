@@ -1263,7 +1263,7 @@ wheels = [
 
 [[package]]
 name = "yowo"
-version = "0.1.0"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1311,6 +1311,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "ruff" },
+    { name = "setuptools" },
     { name = "torch" },
 ]
 
@@ -1344,5 +1345,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-mock", specifier = ">=3.14" },
     { name = "ruff", specifier = "==0.9.10" },
+    { name = "setuptools", specifier = ">=82.0.0" },
     { name = "torch", specifier = ">=2.0" },
 ]

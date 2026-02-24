@@ -200,6 +200,7 @@ Callers should catch `YowoError` for all-in-one handling or specific subclasses 
 
 | Module | Responsibility |
 |--------|----------------|
+| [arch/](arch/README.md) | Native YOLO11 and YOLO26 PyTorch implementations — backbone, FPN-PAN neck, detection head, scaling, weight loading |
 | [hardware/](hardware/README.md) | GPU/CPU detection, installed library probing, `HardwareProfile` singleton |
 | [models/](models/README.md) | Model family/size registry, weight download and cache |
 | [backends/](backends/README.md) | Inference backend Protocol, TensorRT/ONNX/OpenVINO/PyTorch impls, auto-selection |
