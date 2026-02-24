@@ -187,9 +187,8 @@ class InferenceEngine:
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
-        # Reset KV state at the start of each new source (non-PyTorch backends)
-        if hasattr(self._backend, "clear_kv_cache"):
-            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
+        # Reset KV state at the start of each new source
+        self._backend.clear_kv_cache()
 
         batch: list[Frame] = []
         try:

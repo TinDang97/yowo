@@ -203,8 +203,8 @@ class TestFeatureCache:
 
         assert cache.size == 3
 
-    def test_last_inputs_bounded(self) -> None:
-        """_last_inputs never exceeds max_entries."""
+    def test_last_fingerprints_bounded(self) -> None:
+        """_last_fingerprints never exceeds max_entries."""
         from yowo.cache import FeatureCache
 
         cache = FeatureCache(max_entries=3)
@@ -212,9 +212,9 @@ class TestFeatureCache:
             t = np.full((1, 3, 4, 4), float(i) * 0.01, dtype=np.float32)
             cache.update(f"src{i}", t, _make_features(i))
 
-        # Both store and _last_inputs should be capped at 3
+        # Both store and _last_fingerprints should be capped at 3
         assert cache.size == 3
-        assert len(cache._last_inputs) == 3
+        assert len(cache._last_fingerprints) == 3
 
     def test_mmap_mode_via_cache_dir(self, tmp_path: Path) -> None:
         """FeatureCache works with mmap when cache_dir is provided."""

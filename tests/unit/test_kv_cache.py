@@ -213,6 +213,7 @@ class TestYOLOModelKVCache:
 
     def test_enable_kv_cache_activates_all_modules(self) -> None:
         model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model.eval()
         model.enable_kv_cache()
 
         # All Attention modules should have cache enabled
@@ -226,6 +227,7 @@ class TestYOLOModelKVCache:
 
     def test_enable_kv_cache_activates_block_caches(self) -> None:
         model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model.eval()
         model.enable_kv_cache()
 
         c2psa_count = 0
@@ -282,6 +284,7 @@ class TestYOLOModelKVCache:
     def test_yolo11_enable_kv_cache_no_c3k2psa(self) -> None:
         """YOLO11 has no C3k2PSA — enable_kv_cache should still work."""
         model = build_model(ModelFamily.YOLO11, ModelSize.NANO)
+        model.eval()
         model.enable_kv_cache()
 
         c3k2psa_count = sum(1 for m in model.modules() if isinstance(m, C3k2PSA))

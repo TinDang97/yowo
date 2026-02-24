@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.cache._similarity import frame_similarity
 from yowo.cache._store import FeatureStore
 
 if TYPE_CHECKING:
@@ -68,7 +67,7 @@ class FeatureCache:
         self._store = FeatureStore(max_entries=max_entries, cache_dir=cache_dir)
         self._threshold = similarity_threshold
         self._max_entries = max_entries
-        self._last_inputs: dict[str, NDArray[np.float32]] = {}
+        self._last_fingerprints: dict[str, NDArray[np.float32]] = {}
 
     def check_and_load(
         self,
@@ -92,11 +91,13 @@ class FeatureCache:
         """
         import torch
 
-        last = self._last_inputs.get(source_id)
-        if last is None:
+        last_fp = self._last_fingerprints.get(source_id)
+        if last_fp is None:
             return None
 
-        diff = frame_similarity(current_tensor, last)
+        # Spatial-mean fingerprint comparison (same semantics as block cache)
+        current_fp = current_tensor.mean(axis=(2, 3))  # (B, C)
+        diff = float(np.abs(current_fp - last_fp).mean())
         if diff >= self._threshold:
             return None
 
@@ -126,22 +127,23 @@ class FeatureCache:
 
         Args:
             source_id: Identifies the input source.
-            input_tensor: The preprocessed BCHW tensor (stored in RAM for
-                similarity comparison on next frame).
+            input_tensor: The preprocessed BCHW tensor (spatial-mean fingerprint
+                stored for similarity comparison on next frame).
             neck_features: Tuple of 3 numpy arrays (P3', P4'', P5'') to cache.
         """
-        # Cap _last_inputs to max_entries (prevent unbounded RAM growth)
-        if source_id not in self._last_inputs:
-            while len(self._last_inputs) >= self._max_entries:
-                oldest = next(iter(self._last_inputs))
-                del self._last_inputs[oldest]
-        self._last_inputs[source_id] = input_tensor.copy()
+        # Cap fingerprints to max_entries (prevent unbounded growth)
+        if source_id not in self._last_fingerprints:
+            while len(self._last_fingerprints) >= self._max_entries:
+                oldest = next(iter(self._last_fingerprints))
+                del self._last_fingerprints[oldest]
+        # Store spatial-mean fingerprint (B, C) instead of full BCHW tensor
+        self._last_fingerprints[source_id] = input_tensor.mean(axis=(2, 3))
         self._store.store(source_id, neck_features)
 
     def clear(self) -> None:
         """Remove all cached data."""
         self._store.clear()
-        self._last_inputs.clear()
+        self._last_fingerprints.clear()
 
     @property
     def size(self) -> int:

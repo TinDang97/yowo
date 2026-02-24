@@ -246,17 +246,24 @@ def _export_onnx_kv(
 
     # Internalize external tensor data so all runtimes (CoreML EP) can load
     # the model from a single file without needing the .onnx.data sidecar.
+    # Write to a temp file first, then rename on success to avoid leaving
+    # a partially-written model if internalization fails.
     try:
         import onnx  # type: ignore[import-untyped]
 
         model = onnx.load(str(onnx_path), load_external_data=True)
-        onnx.save(model, str(onnx_path))  # type: ignore[arg-type]
+        tmp_path = onnx_path.with_suffix(".onnx.tmp")
+        onnx.save(model, str(tmp_path))  # type: ignore[arg-type]
+        tmp_path.replace(onnx_path)
         # Clean up leftover external data file
         data_path = onnx_path.with_suffix(".onnx.data")
         data_path.unlink(missing_ok=True)
     except ImportError:
         logger.debug("onnx package not installed, skipping data internalization")
     except Exception as exc:
+        # Clean up temp file on failure; original model remains intact
+        tmp_cleanup = onnx_path.with_suffix(".onnx.tmp")
+        tmp_cleanup.unlink(missing_ok=True)
         logger.warning("Failed to internalize ONNX data (non-fatal): %s", exc)
 
     logger.debug("KV-cache ONNX export complete: %s", onnx_path.name)

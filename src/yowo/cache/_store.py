@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,8 +54,9 @@ class FeatureStore:
         self._mmap: dict[str, _MmapMeta] = {}
         if cache_dir is not None:
             cache_dir.mkdir(parents=True, exist_ok=True)
+            # Only clean up directories matching the expected hash pattern
             for d in cache_dir.iterdir():
-                if d.is_dir():
+                if d.is_dir() and _is_hash_dir(d.name):
                     shutil.rmtree(d, ignore_errors=True)
 
     def store(self, key: str, features: _Features) -> None:
@@ -154,6 +156,14 @@ class FeatureStore:
             logger.debug("Failed to load mmap entry '%s', removing", key)
             self._remove_entry(key)
             return None
+
+
+_HASH_DIR_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _is_hash_dir(name: str) -> bool:
+    """Return True if ``name`` matches the 16-char hex hash pattern."""
+    return _HASH_DIR_RE.match(name) is not None
 
 
 def _hash_key(key: str) -> str:

@@ -10,6 +10,7 @@ on machines without onnxruntime installed.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,8 @@ from yowo.types import BackendType, PreprocessedTensor
 
 if TYPE_CHECKING:
     import onnxruntime as ort  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["OnnxBackend"]
 
@@ -181,10 +184,18 @@ class OnnxBackend:
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
-            self._session.run(None, {self._input_name: dummy})
-        except Exception:
-            # Warmup failures are non-fatal
-            pass
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: dummy,
+                    "use_cache": np.array(0.0, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = np.zeros(self._kv_shapes[name], dtype=np.float32)
+                self._session.run(None, feed)
+            else:
+                self._session.run(None, {self._input_name: dummy})
+        except Exception as exc:
+            logger.debug("OnnxBackend: warmup failed (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

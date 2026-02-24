@@ -10,6 +10,7 @@ on machines without OpenVINO installed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,8 @@ from numpy.typing import NDArray
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, PreprocessedTensor
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -190,10 +193,18 @@ class OpenVinoBackend:
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
-            self._infer_request.infer({0: dummy})  # type: ignore[attr-defined]
-        except Exception:
-            # Warmup failures are non-fatal
-            pass
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: dummy,
+                    "use_cache": np.array(0.0, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = np.zeros(self._kv_shapes[name], dtype=np.float32)
+                self._infer_request.infer(feed)  # type: ignore[attr-defined]
+            else:
+                self._infer_request.infer({0: dummy})  # type: ignore[attr-defined]
+        except Exception as exc:
+            logger.debug("OpenVinoBackend: warmup failed (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

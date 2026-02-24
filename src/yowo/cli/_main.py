@@ -192,7 +192,12 @@ def info_command() -> None:
     click.echo(f"tensorrt:     {libs.tensorrt_version or 'not installed'}")
     ort_line = f"onnxruntime:  {libs.onnxruntime_version or 'not installed'}"
     if libs.onnxruntime_version:
-        ort_line += " (CUDA)" if libs.onnxruntime_has_cuda else " (CPU)"
+        if libs.onnxruntime_has_cuda:
+            ort_line += " (CUDA)"
+        elif libs.onnxruntime_has_coreml:
+            ort_line += " (CoreML)"
+        else:
+            ort_line += " (CPU)"
     click.echo(ort_line)
     click.echo(f"openvino:     {libs.openvino_version or 'not installed'}")
 

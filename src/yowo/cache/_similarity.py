@@ -14,6 +14,7 @@ def frame_similarity(
 
     Both tensors are expected to be BCHW float32 in [0, 1] range.
     Returns a value in [0, 1] where 0 = identical, 1 = maximally different.
+    Returns 1.0 (cache miss) if shapes differ.
 
     Args:
         current: Current frame as BCHW float32 array.
@@ -22,4 +23,6 @@ def frame_similarity(
     Returns:
         Mean absolute pixel difference (lower = more similar).
     """
+    if current.shape != previous.shape:
+        return 1.0
     return float(np.abs(current - previous).mean())

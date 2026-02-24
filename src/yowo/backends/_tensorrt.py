@@ -10,6 +10,7 @@ on machines without TensorRT installed.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,8 @@ from numpy.typing import NDArray
 from yowo.errors import BackendError, BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, PreprocessedTensor
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TensorRTBackend"]
 
@@ -200,11 +203,20 @@ class TensorRTBackend:
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
-            for _ in range(3):
-                self._session.run(None, {self._input_name: dummy})
-        except Exception:
-            # Warmup failures are non-fatal
-            pass
+            if self._has_kv_io:
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: dummy,
+                    "use_cache": np.array(0.0, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = np.zeros(self._kv_shapes[name], dtype=np.float32)
+                for _ in range(3):
+                    self._session.run(None, feed)
+            else:
+                for _ in range(3):
+                    self._session.run(None, {self._input_name: dummy})
+        except Exception as exc:
+            logger.debug("TensorRTBackend: warmup failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------

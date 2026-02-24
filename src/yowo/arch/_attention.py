@@ -100,6 +100,10 @@ class Attention(nn.Module):
         (set by ``YOLOKVWrapper`` before tracing). Blends past and fresh
         K,V via arithmetic (no ONNX ``If`` nodes). Stores present K,V in
         ``_export_present_k/v`` for the wrapper to collect.
+
+        ``use_cache`` must be binary: ``0.0`` (cold — use fresh K,V) or
+        ``1.0`` (warm — use cached K,V). Non-binary values produce
+        undefined soft-blending behaviour.
         """
         assert self._export_past_k is not None
         assert self._export_past_v is not None
@@ -291,7 +295,14 @@ class C2PSA(nn.Module):
         self._cached_input_fp: Tensor | None = None
 
     def enable_block_cache(self, enabled: bool = True) -> None:
-        """Enable or disable block-level output caching."""
+        """Enable or disable block-level output caching.
+
+        Raises:
+            RuntimeError: If called with ``enabled=True`` while in training mode.
+        """
+        if enabled and self.training:
+            msg = "Block cache must not be enabled during training (breaks gradient flow)"
+            raise RuntimeError(msg)
         self._block_cache_enabled = enabled
         if not enabled:
             self.clear_block_cache()
@@ -361,7 +372,14 @@ class C3k2PSA(nn.Module):
         self._cached_input_fp: Tensor | None = None
 
     def enable_block_cache(self, enabled: bool = True) -> None:
-        """Enable or disable block-level output caching."""
+        """Enable or disable block-level output caching.
+
+        Raises:
+            RuntimeError: If called with ``enabled=True`` while in training mode.
+        """
+        if enabled and self.training:
+            msg = "Block cache must not be enabled during training (breaks gradient flow)"
+            raise RuntimeError(msg)
         self._block_cache_enabled = enabled
         if not enabled:
             self.clear_block_cache()

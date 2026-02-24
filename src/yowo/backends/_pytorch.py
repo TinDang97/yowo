@@ -196,6 +196,11 @@ class PyTorchBackend:
             self._model.clear_kv_cache()
         self._current_source_id = source_id
 
+    def clear_kv_cache(self) -> None:
+        """Reset KV cache state (e.g. on source change during streaming)."""
+        if self._kv_cache and self._model is not None:
+            self._model.clear_kv_cache()
+
     def infer(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Run inference using the native YOLO model.
 
