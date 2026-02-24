@@ -56,6 +56,7 @@ class InferenceEngine:
         iou_threshold: float = 0.45,
         cache: bool = False,
         cache_dir: Path | None = None,
+        kv_cache: bool = False,
     ) -> None:
         self._spec = spec
         self._batch_size = batch_size
@@ -88,6 +89,7 @@ class InferenceEngine:
             self._hw,
             model_spec=self._spec,
             feature_cache=self._feature_cache,
+            kv_cache=kv_cache,
         )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
@@ -184,6 +186,10 @@ class InferenceEngine:
         """Yield detections from a FrameSource, batching internally."""
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
+
+        # Reset KV state at the start of each new source (non-PyTorch backends)
+        if hasattr(self._backend, "clear_kv_cache"):
+            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
 
         batch: list[Frame] = []
         try:

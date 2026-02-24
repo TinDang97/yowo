@@ -44,6 +44,12 @@ class OnnxBackend:
         self._session: Any = None  # ort.InferenceSession at runtime
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
+        # KV cache I/O state (populated in load() when model has KV I/O)
+        self._has_kv_io: bool = False
+        self._kv_state: dict[str, NDArray[np.float32]] = {}
+        self._kv_input_names: list[str] = []
+        self._kv_output_names: list[str] = []
+        self._kv_shapes: dict[str, tuple[int, ...]] = {}
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -105,6 +111,15 @@ class OnnxBackend:
                 and isinstance(input_shape[3], int)
             ):
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
+            # Detect KV cache I/O by inspecting input names
+            kv_inputs = [i for i in inputs if i.name.startswith("past_")]
+            if kv_inputs:
+                self._has_kv_io = True
+                self._kv_input_names = [i.name for i in kv_inputs]
+                self._kv_shapes = {i.name: tuple(i.shape) for i in kv_inputs}
+                self._kv_output_names = [
+                    o.name for o in self._session.get_outputs() if o.name.startswith("present_")
+                ]
         except Exception as exc:
             self._session = None
             raise BackendLoadError(f"OnnxBackend: session creation failed: {exc}") from exc
@@ -125,13 +140,34 @@ class OnnxBackend:
             raise InferenceError("OnnxBackend: no session loaded — call load() first")
 
         try:
-            outputs = self._session.run(None, {self._input_name: tensor.data})
+            if self._has_kv_io:
+                use_cache = np.float32(1.0 if self._kv_state else 0.0)
+                feed: dict[str, NDArray[np.float32]] = {
+                    self._input_name: tensor.data,
+                    "use_cache": np.array(use_cache, dtype=np.float32),
+                }
+                for name in self._kv_input_names:
+                    feed[name] = self._kv_state.get(
+                        name,
+                        np.zeros(self._kv_shapes[name], dtype=np.float32),
+                    )
+                outputs = self._session.run(None, feed)
+                for idx, present_name in enumerate(self._kv_output_names):
+                    past_name = present_name.replace("present_", "past_")
+                    self._kv_state[past_name] = outputs[1 + idx]
+            else:
+                outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
         except Exception as exc:
             raise InferenceError(f"OnnxBackend: inference failed: {exc}") from exc
 
+    def clear_kv_cache(self) -> None:
+        """Clear KV state for streaming reset (e.g. new video source)."""
+        self._kv_state = {}
+
     def unload(self) -> None:
         """Release the ONNX Runtime session."""
+        self._kv_state = {}
         self._session = None
 
     def warmup(self, batch_size: int = 1) -> None:

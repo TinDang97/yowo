@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from yowo.arch._attention import C2PSA
+from yowo.arch._attention import C2PSA, Attention, C3k2PSA
 from yowo.arch._blocks import SPPF, Bottleneck, C3k2, Conv, fuse_conv_and_bn
 from yowo.arch._config import ModelConfig, scale_channels, scale_repeats
 from yowo.arch._heads import Detect
@@ -207,6 +207,30 @@ class YOLOModel(nn.Module):
             self.forward, mode=mode, fullgraph=False
         )
         return self
+
+    def enable_kv_cache(self, enabled: bool = True) -> YOLOModel:
+        """Enable or disable KV cache and block output cache for streaming.
+
+        Enables KV caching in all ``Attention`` modules (skips KV projection
+        when cache is warm) and block-level output caching in ``C2PSA`` /
+        ``C3k2PSA`` modules (skips entire block when input is similar).
+
+        Returns self for method chaining.
+        """
+        for m in self.modules():
+            if isinstance(m, Attention):
+                m.enable_kv_cache(enabled)
+            elif isinstance(m, C2PSA | C3k2PSA):
+                m.enable_block_cache(enabled)
+        return self
+
+    def clear_kv_cache(self) -> None:
+        """Clear all KV caches and block output caches."""
+        for m in self.modules():
+            if isinstance(m, Attention):
+                m.clear_kv_cache()
+            elif isinstance(m, C2PSA | C3k2PSA):
+                m.clear_block_cache()
 
 
 __all__ = ["Backbone", "YOLOModel"]

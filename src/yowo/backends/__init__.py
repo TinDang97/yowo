@@ -91,6 +91,7 @@ def create_backend(
     *,
     model_spec: ModelSpec | None = None,
     feature_cache: Any | None = None,
+    kv_cache: bool = False,
 ) -> InferenceBackend:
     """Instantiate a backend (does not load a model).
 
@@ -105,6 +106,8 @@ def create_backend(
             the native architecture).
         feature_cache: Optional FeatureCache for mmap-backed neck feature
             caching (PyTorch backend only, ignored by others).
+        kv_cache: Enable attention KV cache and block output cache for
+            streaming inference (PyTorch backend only).
 
     Returns:
         An unloaded ``InferenceBackend`` instance.
@@ -121,6 +124,7 @@ def create_backend(
                 hw_profile,
                 model_spec=model_spec,
                 feature_cache=feature_cache,
+                kv_cache=kv_cache,
             )
         case BackendType.ONNX:
             from yowo.backends._onnx import OnnxBackend

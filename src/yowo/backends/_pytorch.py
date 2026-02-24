@@ -41,6 +41,7 @@ class PyTorchBackend:
         compile_mode: str = "reduce-overhead",
         fp16: bool = False,
         feature_cache: Any | None = None,
+        kv_cache: bool = False,
     ) -> None:
         if not hw_profile.libraries.torch_version:
             raise DependencyError(
@@ -57,6 +58,7 @@ class PyTorchBackend:
         self._compile_mode: str = compile_mode
         self._fp16: bool = fp16
         self._feature_cache: Any | None = feature_cache
+        self._kv_cache: bool = kv_cache
         self._neck_hook_handle: Any = None
         self._last_neck_output: Any = None
         self._current_source_id: str = ""
@@ -133,6 +135,11 @@ class PyTorchBackend:
             model.eval()
             model.to(resolved)
 
+            # KV cache — opt-in attention/block caching for streaming
+            if self._kv_cache:
+                model.enable_kv_cache()
+                logger.info("KV cache enabled for streaming inference")
+
             # Channels-last for GPU Tensor Core optimisation
             if resolved.startswith("cuda"):
                 torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
@@ -177,7 +184,10 @@ class PyTorchBackend:
 
         Called by the engine before ``infer()`` to enable per-source caching.
         Only effective when ``feature_cache`` was provided at construction.
+        Clears KV cache when source changes to prevent stale cross-attention.
         """
+        if source_id != self._current_source_id and self._kv_cache and self._model is not None:
+            self._model.clear_kv_cache()
         self._current_source_id = source_id
 
     def infer(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
