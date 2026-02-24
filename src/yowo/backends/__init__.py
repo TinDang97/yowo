@@ -8,7 +8,7 @@ create_backend() uses lazy imports so unused SDKs are never loaded.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -90,6 +90,7 @@ def create_backend(
     hw_profile: HardwareProfile,
     *,
     model_spec: ModelSpec | None = None,
+    feature_cache: Any | None = None,
 ) -> InferenceBackend:
     """Instantiate a backend (does not load a model).
 
@@ -102,6 +103,8 @@ def create_backend(
         hw_profile: Hardware snapshot used for device validation.
         model_spec: Model specification (required for PyTorch backend to build
             the native architecture).
+        feature_cache: Optional FeatureCache for mmap-backed neck feature
+            caching (PyTorch backend only, ignored by others).
 
     Returns:
         An unloaded ``InferenceBackend`` instance.
@@ -114,7 +117,11 @@ def create_backend(
         case BackendType.PYTORCH:
             from yowo.backends._pytorch import PyTorchBackend
 
-            return PyTorchBackend(hw_profile, model_spec=model_spec)
+            return PyTorchBackend(
+                hw_profile,
+                model_spec=model_spec,
+                feature_cache=feature_cache,
+            )
         case BackendType.ONNX:
             from yowo.backends._onnx import OnnxBackend
 

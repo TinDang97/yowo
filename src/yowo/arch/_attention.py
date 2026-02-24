@@ -64,11 +64,11 @@ class Attention(nn.Module):
         attn_out = F.scaled_dot_product_attention(q, k, v)
         # attn_out: (B, heads, N, head_dim)
 
-        # Reshape back to spatial
-        attn_out = attn_out.transpose(-2, -1).reshape(B, C, H, W)
+        # Reshape back to spatial — explicit contiguous() for torch.compile visibility
+        attn_out = attn_out.transpose(-2, -1).contiguous().view(B, C, H, W)
 
         # Positional encoding on values (reshaped to spatial)
-        v_spatial = v.transpose(-2, -1).reshape(B, C, H, W)
+        v_spatial = v.transpose(-2, -1).contiguous().view(B, C, H, W)
         return self.proj(attn_out + self.pe(v_spatial))
 
 

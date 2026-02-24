@@ -40,6 +40,7 @@ class PyTorchBackend:
         compile: bool = False,
         compile_mode: str = "reduce-overhead",
         fp16: bool = False,
+        feature_cache: Any | None = None,
     ) -> None:
         if not hw_profile.libraries.torch_version:
             raise DependencyError(
@@ -55,6 +56,10 @@ class PyTorchBackend:
         self._compile: bool = compile
         self._compile_mode: str = compile_mode
         self._fp16: bool = fp16
+        self._feature_cache: Any | None = feature_cache
+        self._neck_hook_handle: Any = None
+        self._last_neck_output: Any = None
+        self._current_source_id: str = ""
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -141,6 +146,20 @@ class PyTorchBackend:
                 except Exception as exc:
                     logger.debug("torch.compile failed (falling back to eager): %s", exc)
 
+            # Register neck forward hook to capture features for caching
+            if self._feature_cache is not None:
+
+                def _capture_neck(
+                    _module: Any,
+                    _input: Any,
+                    output: Any,
+                ) -> None:
+                    self._last_neck_output = tuple(t.detach().cpu().numpy() for t in output)
+
+                self._neck_hook_handle = model.neck.register_forward_hook(
+                    _capture_neck,
+                )
+
             self._model = model
             self._device_str = resolved
         except RuntimeError as exc:
@@ -153,8 +172,21 @@ class PyTorchBackend:
             self._model = None
             raise BackendLoadError(f"PyTorchBackend: failed to load model: {exc}") from exc
 
+    def set_source_id(self, source_id: str) -> None:
+        """Set the source identifier for feature cache keying.
+
+        Called by the engine before ``infer()`` to enable per-source caching.
+        Only effective when ``feature_cache`` was provided at construction.
+        """
+        self._current_source_id = source_id
+
     def infer(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Run inference using the native YOLO model.
+
+        When a feature cache is active and ``set_source_id()`` was called,
+        this method checks for a cache hit first. On hit, only the detection
+        head runs (skipping backbone + neck). On miss, full inference runs
+        and the neck output is stored for future reuse.
 
         Args:
             tensor: BCHW float32 array in [0, 1].
@@ -170,7 +202,18 @@ class PyTorchBackend:
 
         try:
             torch = self._torch
+            cache = self._feature_cache
+            sid = self._current_source_id
 
+            # Cache hit: head-only inference (skip backbone + neck)
+            if cache is not None and sid:
+                cached = cache.check_and_load(sid, tensor.data, self._device_str)
+                if cached is not None:
+                    with torch.inference_mode():
+                        output = self._model.forward_head(cached)
+                    return output.cpu().float().numpy()
+
+            # Full inference path
             t = torch.from_numpy(tensor.data).to(self._device_str, non_blocking=True)
 
             # Channels-last input on GPU
@@ -184,12 +227,22 @@ class PyTorchBackend:
                 else:
                     output = self._model(t)
 
+            # Cache store: save neck features after full inference
+            if cache is not None and sid and self._last_neck_output is not None:
+                cache.update(sid, tensor.data, self._last_neck_output)
+                self._last_neck_output = None
+
             return output.cpu().float().numpy()
         except Exception as exc:
             raise InferenceError(f"PyTorchBackend: inference failed: {exc}") from exc
 
     def unload(self) -> None:
         """Release model reference and free device memory."""
+        if self._neck_hook_handle is not None:
+            self._neck_hook_handle.remove()
+            self._neck_hook_handle = None
+        self._last_neck_output = None
+        self._current_source_id = ""
         if self._model is not None:
             device = self._device_str
             del self._model

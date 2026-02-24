@@ -92,3 +92,70 @@ class TestFuse:
         for m in model.modules():
             if isinstance(m, Conv):
                 assert not hasattr(m, "bn"), "BN should be removed after fuse()"
+
+    def test_fuse_identity_act_elimination(self) -> None:
+        """Conv layers with act=Identity get forward_fuse_no_act after fuse()."""
+        import types
+
+        from yowo.arch._blocks import Conv
+
+        model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model.fuse()
+
+        found_no_act = False
+        for m in model.modules():
+            if isinstance(m, Conv) and isinstance(m.act, torch.nn.Identity):
+                assert isinstance(m.forward, types.MethodType)
+                assert m.forward.__func__.__name__ == "forward_fuse_no_act"
+                found_no_act = True
+
+        assert found_no_act, "Expected at least one Conv with forward_fuse_no_act"
+
+    def test_fuse_bottleneck_specialization(self) -> None:
+        """Bottleneck modules get specialized forward after fuse()."""
+        import types
+
+        from yowo.arch._blocks import Bottleneck
+
+        model = build_model(ModelFamily.YOLO11, ModelSize.NANO)
+        model.fuse()
+
+        found_shortcut = False
+        for m in model.modules():
+            if isinstance(m, Bottleneck):
+                assert isinstance(m.forward, types.MethodType)
+                name = m.forward.__func__.__name__
+                assert name in ("_forward_shortcut", "_forward_no_shortcut")
+                if name == "_forward_shortcut":
+                    found_shortcut = True
+
+        assert found_shortcut, "Expected at least one Bottleneck with _forward_shortcut"
+
+    def test_fuse_yolo26_produces_equivalent_output(self) -> None:
+        """YOLO26 fuse() with all optimizations produces equivalent output."""
+        model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model.eval()
+
+        x = torch.randn(1, 3, 320, 320)
+        with torch.no_grad():
+            out_before = model(x)
+
+        model.fuse()
+        with torch.no_grad():
+            out_after = model(x)
+
+        torch.testing.assert_close(out_before, out_after, atol=1e-4, rtol=1e-4)
+
+    def test_forward_head(self) -> None:
+        """forward_head produces same output as full forward for given neck features."""
+        model = build_model(ModelFamily.YOLO11, ModelSize.NANO)
+        model.eval()
+
+        x = torch.randn(1, 3, 320, 320)
+        with torch.no_grad():
+            features = model.backbone(x)
+            enhanced = model.neck(features)
+            head_out = model.forward_head(enhanced)
+            full_out = model(x)
+
+        torch.testing.assert_close(head_out, full_out, atol=1e-6, rtol=1e-6)
