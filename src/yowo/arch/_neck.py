@@ -51,7 +51,7 @@ class FPNPANNeck(nn.Module):
         # Layer 12: Concat (handled in forward)
         self.concat1 = Concat(dim=1)
         # Layer 13: C3k2 on [upsampled_P5 + P4] → P4'
-        self.c3k2_fpn1 = C3k2(c5 + c4, c4, n=n2, c3k=neck_c3k, shortcut=False)
+        self.c3k2_fpn1 = C3k2(c5 + c4, c4, n=n2, c3k=neck_c3k)
 
         # Layer 14: Upsample P4'
         self.up2 = nn.Upsample(scale_factor=2, mode="nearest")
@@ -59,7 +59,7 @@ class FPNPANNeck(nn.Module):
         self.concat2 = Concat(dim=1)
         # Layer 16: C3k2 on [upsampled_P4' + P3] → P3'
         # P3 from backbone layer 4 has c4 channels (not c3)
-        self.c3k2_fpn2 = C3k2(c4 + c4, c3, n=n2, c3k=neck_c3k, shortcut=False)
+        self.c3k2_fpn2 = C3k2(c4 + c4, c3, n=n2, c3k=neck_c3k)
 
         # --- PAN bottom-up ---
         # Layer 17: Conv downsample P3'
@@ -67,7 +67,7 @@ class FPNPANNeck(nn.Module):
         # Layer 18: Concat (handled in forward)
         self.concat3 = Concat(dim=1)
         # Layer 19: C3k2 on [downsampled_P3' + P4'] → P4''
-        self.c3k2_pan1 = C3k2(c3 + c4, c4, n=n2, c3k=neck_c3k, shortcut=False)
+        self.c3k2_pan1 = C3k2(c3 + c4, c4, n=n2, c3k=neck_c3k)
 
         # Layer 20: Conv downsample P4''
         self.down2 = Conv(c4, c4, 3, 2)
@@ -77,9 +77,9 @@ class FPNPANNeck(nn.Module):
         # YOLO26: n=1, Sequential(Bottleneck, PSABlock); YOLO11: standard C3k2
         n_last = 1 if config.end2end else n2
         if config.end2end:
-            self.c3k2_pan2 = C3k2PSA(c4 + c5, c5, n=n_last, shortcut=False)
+            self.c3k2_pan2 = C3k2PSA(c4 + c5, c5, n=n_last)
         else:
-            self.c3k2_pan2 = C3k2(c4 + c5, c5, n=n_last, c3k=True, shortcut=False)
+            self.c3k2_pan2 = C3k2(c4 + c5, c5, n=n_last, c3k=True)
 
     def forward(self, features: tuple[Tensor, Tensor, Tensor]) -> tuple[Tensor, Tensor, Tensor]:
         """Enhance multi-scale features.

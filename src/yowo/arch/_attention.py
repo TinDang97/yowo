@@ -42,7 +42,7 @@ class Attention(nn.Module):
         self.key_dim = int(self.head_dim * attn_ratio)
         nh_kd = num_heads * self.key_dim
 
-        self.qkv = Conv(dim, dim + 2 * nh_kd, 1)
+        self.qkv = Conv(dim, dim + 2 * nh_kd, 1, act=False)
         self.proj = Conv(dim, dim, 1, act=False)
         self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)  # depthwise positional encoding
 
@@ -149,7 +149,7 @@ class C3k2PSA(nn.Module):
         c2: int,
         n: int = 1,
         e: float = 0.5,
-        shortcut: bool = False,
+        shortcut: bool = True,
     ) -> None:
         super().__init__()
         self.c = int(c2 * e)

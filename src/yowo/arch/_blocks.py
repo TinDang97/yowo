@@ -95,7 +95,7 @@ class Conv(nn.Module):
     ) -> None:
         super().__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
-        self.bn = nn.BatchNorm2d(c2)
+        self.bn = nn.BatchNorm2d(c2, eps=1e-3, momentum=0.03)
         self.act: nn.Module = (
             self.default_act
             if act is True
@@ -310,7 +310,9 @@ class SPPF(nn.Module):
     ) -> None:
         super().__init__()
         c_ = c1 // 2
-        self.cv1 = Conv(c1, c_, 1, 1, act=False)
+        # When shortcut=True (YOLO26), cv1 has no activation (Identity);
+        # when shortcut=False (YOLO11), cv1 uses SiLU (default act=True).
+        self.cv1 = Conv(c1, c_, 1, 1, act=not shortcut)
         self.cv2 = Conv(c_ * (n + 1), c2, 1, 1)
         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
         self.n = n
