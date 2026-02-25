@@ -13,6 +13,10 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] — 2026-02-26
+
 ### Added
 
 - **pipeline**: Multi-stream inference pipeline — `FrameCollector`, `BatchScheduler`,
@@ -34,6 +38,15 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 - **types**: `TaggedFrame(dataclass, slots=True)` — frame annotated with `stream_id`.
   `StreamState(StrEnum)` — `RUNNING | RECONNECTING | STOPPED | ERROR`.
+
+### Documentation
+
+- Multi-stream pipeline user guide (section 7) with setup, graceful shutdown, health
+  monitoring, and multi-camera warehouse use case.
+- Pipeline module README with design principles, data flow, and API reference.
+- Self-contained benchmark suite with setup tooling.
+- Comprehensive user guide covering CLI, Python API, backends, streaming, export,
+  configuration, error reference, and 7 use cases.
 
 ---
 
@@ -247,7 +260,8 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 Initial beta release.
 
-[1.1.0]: https://github.com/TinDang97/yowo/compare/v1.0.2...v1.1.0
+[1.3.0]: https://github.com/TinDang97/yowo/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/TinDang97/yowo/compare/v1.1.1...v1.2.0
+[1.1.0]: https://github.com/TinDang97/yowo/compare/v1.0.2...v1.1.0
 [0.1.0]: https://github.com/TinDang97/yowo/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/TinDang97/yowo/releases/tag/v0.0.1
