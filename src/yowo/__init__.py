@@ -10,7 +10,14 @@ Quick start::
                 print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
-from yowo.config import ExportConfig, InferenceConfig, load_config
+from yowo.config import (
+    ExportConfig,
+    InferenceConfig,
+    classify_device,
+    classify_source,
+    load_config,
+    preset_config,
+)
 from yowo.engine import InferenceEngine
 from yowo.errors import (
     BackendError,
@@ -37,6 +44,7 @@ from yowo.types import (
     BoundingBox,
     CPUArch,
     Detection,
+    DeviceCategory,
     DeviceType,
     ExportFormat,
     ExportResult,
@@ -48,6 +56,7 @@ from yowo.types import (
     ModelSpec,
     Precision,
     PreprocessedTensor,
+    SourceCategory,
     StreamState,
     TaggedFrame,
     is_free_threaded,
@@ -67,6 +76,7 @@ __all__ = [
     "DependencyError",
     "Detection",
     "DetectionRouter",
+    "DeviceCategory",
     "DeviceError",
     "DeviceType",
     "ExportConfig",
@@ -90,15 +100,19 @@ __all__ = [
     "ModelSpec",
     "Precision",
     "PreprocessedTensor",
+    "SourceCategory",
     "SourceError",
     "SourceTimeoutError",
     "StreamState",
     "TaggedFrame",
     "YowoError",
     "__version__",
+    "classify_device",
+    "classify_source",
     "export_model",
     "is_free_threaded",
     "load_config",
     "open_source",
+    "preset_config",
     "run_pipeline",
 ]

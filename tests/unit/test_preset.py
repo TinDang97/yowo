@@ -91,6 +91,12 @@ class TestClassifySource:
     def test_directory(self, tmp_path: Path) -> None:
         assert classify_source(tmp_path) == SourceCategory.IMAGE
 
+    def test_image_uppercase_extension(self) -> None:
+        assert classify_source("PHOTO.JPG") == SourceCategory.IMAGE
+
+    def test_video_uppercase_extension(self) -> None:
+        assert classify_source("clip.MP4") == SourceCategory.VIDEO
+
     def test_unknown_extension_raises(self) -> None:
         with pytest.raises(ConfigError):
             classify_source("data.xyz")
@@ -184,6 +190,10 @@ class TestClassifyDevice:
         hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64))
         assert classify_device(hw) == DeviceCategory.CPU_ARM
 
+    def test_cuda_just_below_high_threshold(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=8191),))
+        assert classify_device(hw) == DeviceCategory.CUDA_LOW
+
     def test_jetson_priority_over_cuda(self) -> None:
         """Jetson has a GPU but should be classified as JETSON, not CUDA."""
         jetson_gpu = _gpu_device(vram_mb=8192, is_jetson=True)
@@ -256,6 +266,69 @@ class TestPresetConfig:
         hw = _hw()
         with pytest.raises(ConfigError, match="Unknown"):
             preset_config(hw, SourceCategory.IMAGE, nonexistent_field=42)
+
+    def test_cuda_low_video(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=4096),))
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 2
+        assert cfg.prefetch is True
+        assert cfg.cache is False  # CUDA_LOW does not set cache
+
+    def test_cuda_low_live(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=4096),))
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is True
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+        assert cfg.max_queue_size == 2
+
+    def test_jetson_video(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True))
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 1
+        assert cfg.prefetch is True
+
+    def test_jetson_live(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True))
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is True
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+        assert cfg.max_queue_size == 2
+
+    def test_cpu_arm_video(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64))
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 1
+        assert cfg.prefetch is True
+
+    def test_cpu_arm_live_no_kv_cache(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64))
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is False
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+        assert cfg.max_queue_size == 2
+
+    def test_apple_silicon_live(self) -> None:
+        hw = _hw(
+            cpu=_cpu_device(arch=CPUArch.AARCH64),
+            libs=_libs(onnxruntime_version="1.17.0", onnxruntime_has_coreml=True),
+        )
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is True
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+        assert cfg.max_queue_size == 2
+
+    def test_override_prefetch_overrides_preset(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=24576),))
+        cfg = preset_config(hw, SourceCategory.VIDEO, prefetch=False)
+        assert cfg.prefetch is False
+        assert cfg.batch_size == 4  # other preset values intact
+
+    def test_none_field_uses_inference_config_default(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.X86_64))
+        cfg = preset_config(hw, SourceCategory.IMAGE)
+        assert cfg.cache is False  # not in preset → InferenceConfig default
+        assert cfg.kv_cache is False
+        assert cfg.iou_threshold == 0.45
 
     def test_does_not_set_backend(self) -> None:
         """Preset must not override backend/device/precision."""
