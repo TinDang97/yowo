@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from yowo.config import classify_device, classify_source
+from yowo.config import classify_device, classify_source, preset_config
 from yowo.errors import ConfigError
 from yowo.hardware import HardwareProfile
 from yowo.hardware._capabilities import InstalledLibraries
 from yowo.hardware._device import Device
-from yowo.types import CPUArch, DeviceCategory, DeviceType, GPUArch, SourceCategory
+from yowo.types import CPUArch, DeviceCategory, DeviceType, FrameDropPolicy, GPUArch, SourceCategory
 
 
 class TestSourceCategory:
@@ -183,3 +183,75 @@ class TestClassifyDevice:
             cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True),
         )
         assert classify_device(hw) == DeviceCategory.JETSON
+
+
+# ---------------------------------------------------------------------------
+# preset_config tests
+# ---------------------------------------------------------------------------
+
+
+class TestPresetConfig:
+    def test_cuda_high_video(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=24576),))
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 4
+        assert cfg.cache is True
+        assert cfg.prefetch is True
+
+    def test_cuda_high_live(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=24576),))
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.batch_size == 1
+        assert cfg.kv_cache is True
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+        assert cfg.max_queue_size == 4
+
+    def test_cpu_x86_image(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.X86_64))
+        cfg = preset_config(hw, SourceCategory.IMAGE)
+        assert cfg.batch_size == 1
+        assert cfg.prefetch is False
+
+    def test_cpu_x86_live_no_kv_cache(self) -> None:
+        hw = _hw(cpu=_cpu_device(arch=CPUArch.X86_64))
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is False
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+
+    def test_apple_silicon_video(self) -> None:
+        hw = _hw(
+            cpu=_cpu_device(arch=CPUArch.AARCH64),
+            libs=_libs(onnxruntime_version="1.17.0", onnxruntime_has_coreml=True),
+        )
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 2
+        assert cfg.cache is True
+        assert cfg.prefetch is True
+
+    def test_override_batch_size(self) -> None:
+        hw = _hw(gpus=(_gpu_device(vram_mb=24576),))
+        cfg = preset_config(hw, SourceCategory.VIDEO, batch_size=8)
+        assert cfg.batch_size == 8
+        # other preset values still applied
+        assert cfg.cache is True
+        assert cfg.prefetch is True
+
+    def test_override_model_family(self) -> None:
+        from yowo.types import ModelFamily
+
+        hw = _hw()
+        cfg = preset_config(hw, SourceCategory.IMAGE, model_family=ModelFamily.YOLO11)
+        assert cfg.model_family == ModelFamily.YOLO11
+
+    def test_unknown_override_raises(self) -> None:
+        hw = _hw()
+        with pytest.raises(ConfigError, match="Unknown"):
+            preset_config(hw, SourceCategory.IMAGE, nonexistent_field=42)
+
+    def test_does_not_set_backend(self) -> None:
+        """Preset must not override backend/device/precision."""
+        hw = _hw(gpus=(_gpu_device(vram_mb=24576),))
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.backend is None
+        assert cfg.device == "auto"
+        assert cfg.precision is None

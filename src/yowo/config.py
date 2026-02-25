@@ -24,6 +24,7 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
 
 from __future__ import annotations
 
+import dataclasses as _dc
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -390,10 +391,151 @@ def classify_device(hw: HardwareProfile) -> DeviceCategory:
     return DeviceCategory.CPU_ARM
 
 
+# ---------------------------------------------------------------------------
+# Preset inference: overrides dataclass + lookup table
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _PresetOverrides:
+    """Pipeline/caching knobs that differ from InferenceConfig defaults."""
+
+    batch_size: int | None = None
+    cache: bool | None = None
+    kv_cache: bool | None = None
+    prefetch: bool | None = None
+    frame_drop_policy: FrameDropPolicy | None = None
+    max_queue_size: int | None = None
+    pipeline_workers: int | None = None
+    confidence_threshold: float | None = None
+
+
+_DC = DeviceCategory
+_SC = SourceCategory
+_P = _PresetOverrides
+_LATEST = FrameDropPolicy.LATEST
+
+_PRESET_TABLE: dict[tuple[DeviceCategory, SourceCategory], _PresetOverrides] = {
+    # -- CUDA HIGH (>= 8 GB VRAM) --
+    (_DC.CUDA_HIGH, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.CUDA_HIGH, _SC.VIDEO): _P(
+        batch_size=4,
+        cache=True,
+        prefetch=True,
+    ),
+    (_DC.CUDA_HIGH, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        kv_cache=True,
+        frame_drop_policy=_LATEST,
+        max_queue_size=4,
+    ),
+    # -- CUDA LOW (< 8 GB VRAM) --
+    (_DC.CUDA_LOW, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.CUDA_LOW, _SC.VIDEO): _P(batch_size=2, prefetch=True),
+    (_DC.CUDA_LOW, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        kv_cache=True,
+        frame_drop_policy=_LATEST,
+        max_queue_size=2,
+    ),
+    # -- JETSON --
+    (_DC.JETSON, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.JETSON, _SC.VIDEO): _P(batch_size=1, prefetch=True),
+    (_DC.JETSON, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        kv_cache=True,
+        frame_drop_policy=_LATEST,
+        max_queue_size=2,
+    ),
+    # -- APPLE SILICON (CoreML) --
+    (_DC.APPLE_SILICON, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.APPLE_SILICON, _SC.VIDEO): _P(
+        batch_size=2,
+        cache=True,
+        prefetch=True,
+    ),
+    (_DC.APPLE_SILICON, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        kv_cache=True,
+        frame_drop_policy=_LATEST,
+        max_queue_size=2,
+    ),
+    # -- CPU x86 --
+    (_DC.CPU_X86, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.CPU_X86, _SC.VIDEO): _P(batch_size=2, prefetch=True),
+    (_DC.CPU_X86, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        frame_drop_policy=_LATEST,
+        max_queue_size=2,
+    ),
+    # -- CPU ARM (no CoreML) --
+    (_DC.CPU_ARM, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    (_DC.CPU_ARM, _SC.VIDEO): _P(batch_size=1, prefetch=True),
+    (_DC.CPU_ARM, _SC.LIVE_STREAM): _P(
+        batch_size=1,
+        frame_drop_policy=_LATEST,
+        max_queue_size=2,
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Preset inference: factory function
+# ---------------------------------------------------------------------------
+
+_INFERENCE_CONFIG_FIELDS = frozenset(f.name for f in _dc.fields(InferenceConfig))
+
+
+def preset_config(
+    hw: HardwareProfile,
+    source_type: SourceCategory,
+    **overrides: Any,
+) -> InferenceConfig:
+    """Build a device+source-optimized InferenceConfig.
+
+    Looks up optimal pipeline/caching knobs for the ``(device, source)``
+    combination, then applies any explicit ``**overrides`` on top.
+
+    Backend, device, and precision are **not** set by presets -- those
+    are resolved later by ``select_backend()``.
+
+    Args:
+        hw: Hardware profile snapshot.
+        source_type: Classified source category.
+        **overrides: Any ``InferenceConfig`` field name. Values replace
+            preset values. Unknown keys raise ``ConfigError``.
+
+    Returns:
+        A validated ``InferenceConfig`` with preset + override values.
+
+    Raises:
+        ConfigError: If an unknown override key is passed.
+    """
+    bad_keys = set(overrides) - _INFERENCE_CONFIG_FIELDS
+    if bad_keys:
+        raise ConfigError(f"Unknown InferenceConfig fields: {sorted(bad_keys)}")
+
+    device_cat = classify_device(hw)
+    preset = _PRESET_TABLE[(device_cat, source_type)]
+
+    # Start from preset values (only non-None fields)
+    kwargs: dict[str, Any] = {}
+    for f in _dc.fields(preset):
+        val = getattr(preset, f.name)
+        if val is not None:
+            kwargs[f.name] = val
+
+    # Explicit overrides win
+    kwargs.update(overrides)
+
+    return InferenceConfig(**kwargs)
+
+
 __all__ = [
     "ExportConfig",
     "InferenceConfig",
     "classify_device",
     "classify_source",
     "load_config",
+    "preset_config",
 ]
