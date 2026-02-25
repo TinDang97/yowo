@@ -174,8 +174,8 @@ def _class_aware_nms(
     shifted_xywh[:, 3] = boxes_xyxy[:, 3] - boxes_xyxy[:, 1]  # h = y2 - y1
 
     indices = cv2.dnn.NMSBoxes(
-        shifted_xywh.tolist(),
-        scores.tolist(),
+        shifted_xywh,  # type: ignore[arg-type]  # cv2 stubs expect Sequence, ndarray works at runtime
+        scores,  # type: ignore[arg-type]
         score_threshold=0.0,  # already pre-filtered by confidence
         nms_threshold=iou_threshold,
     )
@@ -214,39 +214,20 @@ def _inverse_letterbox(
     Returns:
         (N, 4) clipped to [0, orig_w] / [0, orig_h].
     """
-    # Cast to float32 to prevent float64 promotion in ufunc chains.
+    # Vectorised across all 4 columns: 3 ufunc dispatches instead of 12.
     inv_scale = np.float32(1.0 / scale)
-    w = np.float32(orig_w)
-    h = np.float32(orig_h)
-    pad_l = np.float32(pad_left)
-    pad_t = np.float32(pad_top)
+    pad = np.array([pad_left, pad_top, pad_left, pad_top], dtype=np.float32)
+    clip_max = np.array([orig_w, orig_h, orig_w, orig_h], dtype=np.float32)
 
     n = boxes_xyxy.shape[0]
     # Use scratch buffer to avoid allocation; fall back to np.empty when absent.
-    # explicit (n, 4) shape/dtype (not empty_like) always produces C-contiguous output.
     out: NDArray[np.float32] = (
         scratch.get_inverse_out(n) if scratch is not None else np.empty((n, 4), dtype=np.float32)
     )
 
-    # x1: subtract pad, multiply inv_scale, clip — all in-place into out[:, 0].
-    np.subtract(boxes_xyxy[:, 0], pad_l, out=out[:, 0])
-    np.multiply(out[:, 0], inv_scale, out=out[:, 0])
-    np.clip(out[:, 0], 0.0, w, out=out[:, 0])
-
-    # y1
-    np.subtract(boxes_xyxy[:, 1], pad_t, out=out[:, 1])
-    np.multiply(out[:, 1], inv_scale, out=out[:, 1])
-    np.clip(out[:, 1], 0.0, h, out=out[:, 1])
-
-    # x2
-    np.subtract(boxes_xyxy[:, 2], pad_l, out=out[:, 2])
-    np.multiply(out[:, 2], inv_scale, out=out[:, 2])
-    np.clip(out[:, 2], 0.0, w, out=out[:, 2])
-
-    # y2
-    np.subtract(boxes_xyxy[:, 3], pad_t, out=out[:, 3])
-    np.multiply(out[:, 3], inv_scale, out=out[:, 3])
-    np.clip(out[:, 3], 0.0, h, out=out[:, 3])
+    np.subtract(boxes_xyxy, pad, out=out)
+    np.multiply(out, inv_scale, out=out)
+    np.clip(out, 0.0, clip_max, out=out)
 
     return out
 

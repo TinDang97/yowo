@@ -185,6 +185,33 @@ class TestPostprocessBuffer:
         assert out.dtype == np.float32
 
 
+class TestPreprocessBufferNeedsReset:
+    def test_first_call_returns_true(self) -> None:
+        """First call always needs reset (slot not yet used)."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        assert buf.needs_reset(0, 60, 60, 2, 2) is True
+
+    def test_same_dims_returns_false(self) -> None:
+        """Repeated call with same dimensions skips reset."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        assert buf.needs_reset(0, 60, 60, 2, 2) is False
+
+    def test_changed_dims_returns_true(self) -> None:
+        """When dimensions change, reset is needed."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        assert buf.needs_reset(0, 30, 30, 17, 17) is True
+
+    def test_different_slots_are_independent(self) -> None:
+        """Each slot tracks its own last dimensions."""
+        buf = PreprocessBuffer(max_batch=2, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        buf.needs_reset(1, 40, 40, 12, 12)
+        assert buf.needs_reset(0, 60, 60, 2, 2) is False
+        assert buf.needs_reset(1, 40, 40, 12, 12) is False
+
+
 class TestPreprocessIntoStagingReset:
     def test_staging_reset_removes_residual_pixels(self) -> None:
         """Second preprocess_into() call must not contain residual pixels from a prior call."""

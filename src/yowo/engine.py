@@ -21,6 +21,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -297,8 +298,12 @@ class InferenceEngine:
         """Live source path: threaded reader with frame drop policy, batch=1.
 
         Always uses batch=1 regardless of configured batch_size to minimise
-        latency on live sources.
+        latency on live sources.  Terminates after 30 s of consecutive
+        timeouts (dead/hung source) to prevent infinite hangs.
         """
+        _MAX_IDLE_S = 30.0
+        _POLL_TIMEOUT = 1.0
+
         if self._batch_size > 1:
             logger.debug(
                 "Live source: using batch=1 for latency (configured batch_size=%d ignored)",
@@ -311,13 +316,25 @@ class InferenceEngine:
         )
         reader.start()
         try:
+            idle_since: float | None = None
             while True:
-                frame = reader.get(timeout=1.0)
+                frame = reader.get(timeout=_POLL_TIMEOUT)
                 if frame is not None:
+                    idle_since = None
                     yield from self.detect([frame])
                 elif reader.is_exhausted:
                     break
-                # else: timeout — retry
+                else:
+                    # Timeout — track consecutive idle time.
+                    now = time.monotonic()
+                    if idle_since is None:
+                        idle_since = now
+                    elif now - idle_since >= _MAX_IDLE_S:
+                        logger.warning(
+                            "Live source idle for %.0fs, terminating stream",
+                            now - idle_since,
+                        )
+                        break
         finally:
             reader.stop()
             source.close()
@@ -335,6 +352,8 @@ class InferenceEngine:
 
         When ``pipeline_workers > 1``, shared preprocess/postprocess buffers
         are bypassed to avoid data races between concurrent worker threads.
+        A lock serialises ``backend.infer()`` calls to protect backends with
+        mutable state (e.g. PyTorch BatchNorm, feature cache).
         """
         from collections import deque as Deque
         from concurrent.futures import Future, ThreadPoolExecutor
@@ -347,15 +366,25 @@ class InferenceEngine:
         reader.start()
 
         concurrent = self._pipeline_workers > 1
+        # Serialise backend.infer() across worker threads to prevent data
+        # races in backends with mutable state (PyTorch BatchNorm, KV cache).
+        # Preprocessing still runs in parallel across workers.
+        infer_lock = threading.Lock() if concurrent else None
 
         def _infer_batch(frames: list[Frame]) -> list[Detection]:
             if concurrent:
                 # Per-call allocation — no shared buffers across workers.
                 target_size = (self._model_meta.input_height, self._model_meta.input_width)
                 tensor = preprocess(frames, target_size)
-                t0 = time.perf_counter()
-                raw_output = self._backend.infer(tensor)
-                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                if infer_lock is not None:
+                    with infer_lock:
+                        t0 = time.perf_counter()
+                        raw_output = self._backend.infer(tensor)
+                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                else:
+                    t0 = time.perf_counter()
+                    raw_output = self._backend.infer(tensor)
+                    elapsed_ms = (time.perf_counter() - t0) * 1000.0
                 return postprocess(
                     raw_output,
                     tensor,
@@ -368,8 +397,8 @@ class InferenceEngine:
                 )
             return self.detect(frames)
 
+        pending: Deque[Future[list[Detection]]] = Deque()
         try:
-            pending: Deque[Future[list[Detection]]] = Deque()
             batch: list[Frame] = []
             max_pending = self._pipeline_workers
 
@@ -393,6 +422,9 @@ class InferenceEngine:
                 while pending:
                     yield from pending.popleft().result()
         finally:
+            # Cancel any undrained futures to prevent leaked threads.
+            for fut in pending:
+                fut.cancel()
             reader.stop()
             source.close()
 

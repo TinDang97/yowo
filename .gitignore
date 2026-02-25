@@ -368,3 +368,6 @@ __marimo__/
 tmp/*
 .claude/*
 .serena/*
+
+# ONNX Runtime profiling artifacts
+onnxruntime_profile__*.json
