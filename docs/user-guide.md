@@ -21,18 +21,26 @@
    - [IO Utilities](#45-io-utilities)
 5. [Backend Selection](#5-backend-selection)
 6. [Streaming Pipeline](#6-streaming-pipeline)
-7. [Model Export](#7-model-export)
-8. [Environment Variables](#8-environment-variables)
-9. [YAML Configuration](#9-yaml-configuration)
-10. [Error Reference](#10-error-reference)
-11. [Use Cases](#11-use-cases)
-    - [Traffic Surveillance on Apple Silicon](#111-traffic-surveillance-on-apple-silicon)
-    - [Live RTSP Camera Stream](#112-live-rtsp-camera-stream)
-    - [Custom Fine-Tuned Vehicle Detector](#113-custom-fine-tuned-vehicle-detector)
-    - [Batch Video Processing](#114-batch-video-processing)
-    - [Free-Threaded Python Parallelism](#115-free-threaded-python-parallelism)
-    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#116-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
-12. [Performance Reference](#12-performance-reference)
+7. [Multi-Stream Pipeline](#7-multi-stream-pipeline)
+   - [FrameCollector](#71-framecollector)
+   - [BatchScheduler](#72-batchscheduler)
+   - [DetectionRouter](#73-detectionrouter)
+   - [run_pipeline](#74-run_pipeline)
+   - [Graceful Shutdown](#75-graceful-shutdown)
+   - [Stream Health Monitoring](#76-stream-health-monitoring)
+8. [Model Export](#8-model-export)
+9. [Environment Variables](#9-environment-variables)
+10. [YAML Configuration](#10-yaml-configuration)
+11. [Error Reference](#11-error-reference)
+12. [Use Cases](#12-use-cases)
+    - [Traffic Surveillance on Apple Silicon](#121-traffic-surveillance-on-apple-silicon)
+    - [Live RTSP Camera Stream](#122-live-rtsp-camera-stream)
+    - [Custom Fine-Tuned Vehicle Detector](#123-custom-fine-tuned-vehicle-detector)
+    - [Batch Video Processing](#124-batch-video-processing)
+    - [Free-Threaded Python Parallelism](#125-free-threaded-python-parallelism)
+    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#126-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
+    - [Multi-Camera Warehouse Monitoring](#127-multi-camera-warehouse-monitoring)
+13. [Performance Reference](#13-performance-reference)
 
 ---
 
@@ -835,7 +843,184 @@ Measured throughput gain on Apple M4 Pro: **+49%** (58.4 FPS vs 39.3 FPS) with `
 
 ---
 
-## 7. Model Export
+## 7. Multi-Stream Pipeline
+
+Run N concurrent video/RTSP streams through a single `InferenceEngine` with batched inference and per-stream result routing. The pipeline decomposes into four single-responsibility modules:
+
+```
+N sources → FrameCollector → TaggedFrame
+  → BatchScheduler → list[TaggedFrame]
+  → engine.detect() → list[Detection]
+  → DetectionRouter → per-stream callbacks
+```
+
+### 7.1 FrameCollector
+
+Manages N concurrent stream readers. Each stream gets its own `ThreadedFrameReader` (background thread + bounded deque). Iteration round-robins across all active streams.
+
+```python
+from yowo.io import open_source
+from yowo.pipeline import FrameCollector
+
+collector = FrameCollector(max_queue_size=4)
+collector.add_stream("cam-0", open_source("rtsp://camera1.local:8554/live"))
+collector.add_stream("cam-1", open_source("rtsp://camera2.local:8554/live"))
+collector.add_stream("cam-2", open_source("video.mp4"))
+
+for tagged in collector:
+    print(f"[{tagged.stream_id}] frame {tagged.frame.frame_index}")
+
+collector.close()
+```
+
+**Auto frame drop policy:** Live sources (`is_live=True`) automatically use `FrameDropPolicy.LATEST` (stay temporally current). Offline sources use `FrameDropPolicy.NONE` (no drops). Override per-stream:
+
+```python
+from yowo.types import FrameDropPolicy
+
+collector.add_stream("cam-0", source, policy=FrameDropPolicy.SKIP_OLDEST)
+```
+
+**Dynamic membership:** Add or remove streams while the pipeline is running — all operations are thread-safe:
+
+```python
+collector.add_stream("cam-3", new_source)   # starts immediately
+collector.remove_stream("cam-1")             # stops reader, closes source
+```
+
+### 7.2 BatchScheduler
+
+Accumulates `TaggedFrame` objects into fixed-size batches. Flushes when either condition is met:
+
+| Trigger | Condition |
+|---------|-----------|
+| Capacity | Batch reaches `max_batch_size` |
+| Timeout | `timeout_ms` elapsed since first frame in batch |
+| Exhaustion | Upstream iterator exhausted |
+| Cancellation | `stop_event` is set |
+
+```python
+from yowo.pipeline import BatchScheduler
+
+scheduler = BatchScheduler(
+    collector,              # any Iterable[TaggedFrame]
+    max_batch_size=4,       # flush at 4 frames
+    timeout_ms=50.0,        # or after 50ms, whichever first
+)
+
+for batch in scheduler:
+    # batch: list[TaggedFrame], len 1..4
+    frames = [t.frame for t in batch]
+    detections = engine.detect(frames)
+```
+
+### 7.3 DetectionRouter
+
+Routes detection results back to per-stream callbacks using positional index: `detections[i]` maps to `batch[i]` (guaranteed by `engine.detect()` which returns one `Detection` per input frame, in order).
+
+```python
+from yowo.pipeline import DetectionRouter
+from yowo.types import Detection
+
+def on_cam0(stream_id: str, dets: list[Detection]) -> None:
+    for det in dets:
+        print(f"[{stream_id}] {det.num_boxes} objects in {det.inference_time_ms:.1f}ms")
+
+def on_cam1(stream_id: str, dets: list[Detection]) -> None:
+    save_to_database(stream_id, dets)
+
+router = DetectionRouter()
+router.register("cam-0", on_cam0)
+router.register("cam-1", on_cam1)
+
+# After inference:
+router.route(detections, batch)
+```
+
+Unregistered streams are silently dropped. Callbacks can be changed at any time:
+
+```python
+router.register("cam-0", new_callback)  # overwrites previous
+router.unregister("cam-1")              # detections for cam-1 now dropped
+```
+
+### 7.4 `run_pipeline`
+
+Thin wiring function that connects all four modules. Blocking call that runs until all streams are exhausted, `stop_event` is set, or an unhandled exception propagates.
+
+```python
+from yowo import InferenceEngine
+from yowo.io import open_source
+from yowo.pipeline import (
+    BatchScheduler,
+    DetectionRouter,
+    FrameCollector,
+    run_pipeline,
+)
+
+engine = InferenceEngine(
+    model_family=ModelFamily.YOLO26,
+    model_size=ModelSize.NANO,
+)
+engine.load()
+
+collector = FrameCollector(max_queue_size=4)
+collector.add_stream("cam-0", open_source("rtsp://camera1:8554/live"))
+collector.add_stream("cam-1", open_source("rtsp://camera2:8554/live"))
+
+scheduler = BatchScheduler(collector, max_batch_size=4, timeout_ms=50)
+
+router = DetectionRouter()
+router.register("cam-0", handle_cam0)
+router.register("cam-1", handle_cam1)
+
+run_pipeline(engine, collector, scheduler, router)
+```
+
+**Feature cache safety:** `run_pipeline()` automatically disables the engine's feature cache when active. `engine.detect()` keys its cache on `frames[0].source_id`, which is incorrect for mixed-source batches. A warning is logged when the cache is disabled.
+
+### 7.5 Graceful Shutdown
+
+Pass a `threading.Event` to `run_pipeline()` for external shutdown control. The scheduler checks the event between upstream pulls for responsive cancellation:
+
+```python
+import signal
+import threading
+
+stop = threading.Event()
+signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+# In main thread — blocks until stop.set() or all streams exhausted:
+run_pipeline(engine, collector, scheduler, router, stop_event=stop)
+```
+
+### 7.6 Stream Health Monitoring
+
+`FrameCollector` tracks per-stream health via `StreamState`:
+
+| State | Meaning |
+|-------|---------|
+| `RUNNING` | Actively producing frames |
+| `RECONNECTING` | Attempting reconnection (RTSP) |
+| `STOPPED` | Stream exhausted normally |
+| `ERROR` | Unrecoverable error occurred |
+
+```python
+# Check all stream states
+states = collector.stream_states
+# {'cam-0': <StreamState.RUNNING>, 'cam-1': <StreamState.ERROR>}
+
+# Inspect errors programmatically
+errors = collector.stream_errors
+# {'cam-1': ConnectionResetError('RTSP connection lost')}
+
+# Counts
+print(f"{collector.active_count}/{collector.stream_count} streams active")
+```
+
+---
+
+## 8. Model Export
 
 ### From CLI
 
@@ -881,7 +1066,7 @@ print(f"Exported to {meta.file_path} ({meta.file_size_bytes / 1e6:.1f} MB)")
 
 ---
 
-## 8. Environment Variables
+## 9. Environment Variables
 
 All `InferenceConfig` fields can be set via `YOWO_*` environment variables. Env vars override YAML values.
 
@@ -914,7 +1099,7 @@ yowo detect traffic.mp4 --model yolo26n
 
 ---
 
-## 9. YAML Configuration
+## 10. YAML Configuration
 
 ```yaml
 # yowo.yaml
@@ -946,7 +1131,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-## 10. Error Reference
+## 11. Error Reference
 
 All exceptions inherit from `YowoError` in `yowo.errors`.
 
@@ -986,9 +1171,9 @@ except YowoError as e:
 
 ---
 
-## 11. Use Cases
+## 12. Use Cases
 
-### 11.1 Traffic Surveillance on Apple Silicon
+### 12.1 Traffic Surveillance on Apple Silicon
 
 **Scenario:** Process a 2560×1440 traffic surveillance image. Maximize throughput on Apple M-series.
 
@@ -1035,7 +1220,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 11.2 Live RTSP Camera Stream
+### 12.2 Live RTSP Camera Stream
 
 **Scenario:** Process a live IP camera stream. Stay current — drop stale frames; don't queue up.
 
@@ -1072,7 +1257,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 11.3 Custom Fine-Tuned Vehicle Detector
+### 12.3 Custom Fine-Tuned Vehicle Detector
 
 **Scenario:** Run a YOLO11s model fine-tuned on 7 vehicle classes (car, motorcycle, bus, truck, transporter, container, big_transporter).
 
@@ -1116,7 +1301,7 @@ Then point `weights_path` at the exported `.onnx` file with `backend=BackendType
 
 ---
 
-### 11.4 Batch Video Processing
+### 12.4 Batch Video Processing
 
 **Scenario:** Process a long video file and save per-frame JSON results. Use prefetch for maximum throughput.
 
@@ -1151,7 +1336,7 @@ print(f"{len(results)} frames, {total_boxes} total detections, avg {avg_ms:.1f}m
 
 ---
 
-### 11.5 Free-Threaded Python Parallelism
+### 12.5 Free-Threaded Python Parallelism
 
 **Scenario:** Maximize CPU throughput using Python 3.13 free-threaded build (`cp313t`, GIL disabled). Enables true thread parallelism between I/O decode and inference — no GPU required.
 
@@ -1359,7 +1544,7 @@ Speedup caps at ~1.5x (not 2.0x theoretical) due to L3 cache contention between 
 
 ---
 
-### 11.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
+### 12.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
 
 **Scenario:** You have an Apple Silicon Mac and want to use GPU-class acceleration. Two paths are available — ONNX via CoreML EP (Neural Engine) and PyTorch via Metal (GPU). This example runs both and compares.
 
@@ -1443,7 +1628,80 @@ with InferenceEngine(coreml_config) as eng:
 
 ---
 
-## 12. Performance Reference
+### 12.7 Multi-Camera Warehouse Monitoring
+
+**Scenario:** 4 warehouse cameras (2 RTSP, 2 USB webcams) feeding a single YOLO26n engine. Each camera has its own alert callback. Graceful shutdown on SIGINT.
+
+```python
+import signal
+import threading
+from yowo import InferenceEngine
+from yowo.io import open_source
+from yowo.pipeline import (
+    BatchScheduler,
+    DetectionRouter,
+    FrameCollector,
+    run_pipeline,
+)
+from yowo.types import Detection, ModelFamily, ModelSize
+
+# --- Callbacks ---
+def alert_zone_a(stream_id: str, dets: list[Detection]) -> None:
+    for det in dets:
+        for box in det.boxes:
+            if box.class_name == "person" and box.confidence > 0.6:
+                print(f"[{stream_id}] Person detected: {box}")
+
+def alert_zone_b(stream_id: str, dets: list[Detection]) -> None:
+    for det in dets:
+        for box in det.boxes:
+            if box.class_name == "forklift":
+                log_forklift_activity(stream_id, box)
+
+# --- Engine ---
+engine = InferenceEngine(
+    model_family=ModelFamily.YOLO26,
+    model_size=ModelSize.NANO,
+)
+engine.load()
+
+# --- Pipeline ---
+collector = FrameCollector(max_queue_size=4)
+collector.add_stream("dock-cam",   open_source("rtsp://192.168.1.10:554/live"))
+collector.add_stream("aisle-cam",  open_source("rtsp://192.168.1.11:554/live"))
+collector.add_stream("entrance",   open_source(0))   # USB webcam 0
+collector.add_stream("loading",    open_source(1))   # USB webcam 1
+
+scheduler = BatchScheduler(collector, max_batch_size=4, timeout_ms=50)
+
+router = DetectionRouter()
+router.register("dock-cam",  alert_zone_a)
+router.register("aisle-cam", alert_zone_b)
+router.register("entrance",  alert_zone_a)
+router.register("loading",   alert_zone_b)
+
+# --- Graceful shutdown ---
+stop = threading.Event()
+signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+run_pipeline(engine, collector, scheduler, router, stop_event=stop)
+
+# After shutdown — check health
+for sid, state in collector.stream_states.items():
+    print(f"  {sid}: {state.value}")
+for sid, err in collector.stream_errors.items():
+    print(f"  {sid} ERROR: {err}")
+```
+
+**Key points:**
+- Live sources auto-use `FrameDropPolicy.LATEST` — cameras stay temporally current even when inference is slower than frame rate.
+- `max_batch_size=4` matches camera count — each batch processes one frame from each camera.
+- `timeout_ms=50` flushes partial batches if some cameras are slower — prevents stalling on one offline camera.
+- Feature cache is auto-disabled (mixed-source batches).
+
+---
+
+## 13. Performance Reference
 
 ### Backend comparison (YOLO26n, Apple M4 Pro, batch=1)
 

@@ -13,6 +13,28 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **pipeline**: Multi-stream inference pipeline — `FrameCollector`, `BatchScheduler`,
+  `DetectionRouter`, and `run_pipeline()`. Orchestrates N concurrent video/RTSP streams
+  through a single `InferenceEngine` with batched inference, per-stream result routing,
+  and health monitoring. Four single-responsibility modules following black box
+  architecture principles (validated via profiling that >93% of hot path is native C++).
+
+  - `FrameCollector` — manages N concurrent stream readers via `ThreadedFrameReader`
+    composition. Round-robin dispatch, thread-safe add/remove, per-stream health states
+    (`StreamState`), and programmatic error inspection (`stream_errors`).
+  - `BatchScheduler` — accumulates `TaggedFrame` objects into batches by capacity or
+    timeout flush (whichever comes first). Supports `stop_event` for responsive
+    cancellation. Accepts `Iterable` for reuse across pipeline runs.
+  - `DetectionRouter` — positional-index routing of `Detection` results to per-stream
+    callbacks. Deterministic: `detections[i]` maps to `batch[i]`.
+  - `run_pipeline()` — thin wiring function connecting all modules through
+    `InferenceEngine.detect()`. Auto-disables feature cache for mixed-source batches.
+
+- **types**: `TaggedFrame(dataclass, slots=True)` — frame annotated with `stream_id`.
+  `StreamState(StrEnum)` — `RUNNING | RECONNECTING | STOPPED | ERROR`.
+
 ---
 
 ## [1.2.0] — 2026-02-25
