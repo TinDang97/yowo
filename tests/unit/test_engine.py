@@ -5,6 +5,7 @@ No real hardware, no model downloads — everything is mocked.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,7 @@ import numpy as np
 import pytest
 
 from yowo.backends import InferenceBackend
+from yowo.engine import InferenceEngine
 from yowo.errors import BackendLoadError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.hardware._capabilities import InstalledLibraries
@@ -269,6 +271,27 @@ class TestDetect:
 
         assert results[0].backend == BackendType.PYTORCH
 
+    def test_detect_exceeds_buffer_capacity_falls_back_to_preprocess(self) -> None:
+        """detect() with more frames than buffer capacity falls back to fresh preprocess()."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        # batch_size=1 → buffer capacity=1; pass 3 frames to exceed it
+        dummy_output = np.zeros((3, 0, 6), dtype=np.float32)
+        mock_backend = _make_mock_backend(infer_output=dummy_output)
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+        ):
+            from yowo.engine import InferenceEngine
+
+            with InferenceEngine(spec, batch_size=1) as engine:
+                # 3 frames > capacity of 1 — must not crash, falls back to preprocess()
+                results = engine.detect([_make_frame(0), _make_frame(1), _make_frame(2)])
+
+        assert len(results) == 3
+
 
 # ---------------------------------------------------------------------------
 # Test: stream batching
@@ -296,9 +319,12 @@ class TestStream:
         frames = [_make_frame(i) for i in range(5)]
 
         # Mock source that yields the frames then closes
+        # Set is_live=False and total_frames=5 to route to _stream_pipeline (offline)
         mock_source = MagicMock()
         mock_source.__iter__ = MagicMock(return_value=iter(frames))
         mock_source.close = MagicMock()
+        mock_source.is_live = False
+        mock_source.total_frames = 5
 
         detect_calls: list[list[Frame]] = []
         original_detect = engine.detect
@@ -343,6 +369,7 @@ class TestStream:
         results_collected = []
         with (
             patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
             patch(
                 "yowo.engine.postprocess",
                 side_effect=lambda raw, tensor, frames_, **kw: [
@@ -459,3 +486,450 @@ class TestFallback:
 
             with pytest.raises(BackendLoadError, match="All backends failed"):
                 engine.load()
+
+
+# ---------------------------------------------------------------------------
+# Test: source-type-aware stream() dispatch
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_source(
+    *,
+    frames: list[Frame],
+    is_live: bool = False,
+    total_frames: int | None = None,
+) -> MagicMock:
+    """Build a MagicMock that satisfies the FrameSource protocol."""
+    source = MagicMock()
+    source.__iter__ = MagicMock(return_value=iter(list(frames)))
+    source.close = MagicMock()
+    source.is_live = is_live
+    source.total_frames = total_frames if total_frames is not None else len(frames)
+    return source
+
+
+def _make_loaded_engine(
+    spec: ModelSpec,
+    hw: object,
+    mock_backend: MagicMock,
+    *,
+    batch_size: int = 1,
+    prefetch: bool = True,
+    pipeline_workers: int = 1,
+    frame_drop_policy: object | None = None,
+) -> InferenceEngine:
+    """Return a loaded InferenceEngine with mocked backend and patched imports."""
+    from yowo.types import FrameDropPolicy as FDP
+
+    policy = frame_drop_policy if frame_drop_policy is not None else FDP.LATEST
+    engine = InferenceEngine(
+        spec,
+        batch_size=batch_size,
+        prefetch=prefetch,
+        pipeline_workers=pipeline_workers,
+        frame_drop_policy=policy,  # type: ignore[arg-type]
+    )
+    engine._hw = hw  # type: ignore[attr-defined]
+    engine._backend = mock_backend
+    engine._loaded = True
+    # Allocate buffers (mirrors what load() does)
+    from yowo.io import PreprocessBuffer
+    from yowo.postprocess import PostprocessBuffer
+
+    meta = engine._model_meta  # type: ignore[attr-defined]
+    engine._preprocess_buf = PreprocessBuffer(batch_size, (meta.input_height, meta.input_width))  # type: ignore[attr-defined]
+    engine._postprocess_buf = PostprocessBuffer()  # type: ignore[attr-defined]
+    return engine
+
+
+def _make_detection(frame: Frame, spec: ModelSpec) -> Detection:
+    return Detection(
+        frame=frame,
+        boxes=(),
+        inference_time_ms=0.0,
+        backend=BackendType.PYTORCH,
+        model_spec=spec,
+    )
+
+
+class TestStreamStrategies:
+    """Tests for source-type-aware stream() dispatch."""
+
+    def test_stream_single_image_uses_direct_path(self) -> None:
+        """Single-frame source (total_frames=1) routes to _stream_single."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+        ):
+            engine = _make_loaded_engine(spec, hw, mock_backend)
+
+        frame = _make_frame(0)
+        source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        expected = [_make_detection(frame, spec)]
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch("yowo.engine.postprocess", return_value=expected),
+        ):
+            results = list(engine.stream(source))
+
+        assert results == expected
+        source.close.assert_called_once()
+
+    def test_stream_single_dispatches_not_to_live_or_pipeline(self) -> None:
+        """total_frames==1 calls _stream_single, not _stream_live or _stream_pipeline."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(spec, hw, mock_backend)
+
+        frame = _make_frame(0)
+        source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
+
+        stream_live_called = []
+        stream_pipeline_called = []
+        original_live = engine._stream_live
+        original_pipeline = engine._stream_pipeline
+
+        def spy_live(s: object) -> object:
+            stream_live_called.append(True)
+            return original_live(s)  # type: ignore[arg-type]
+
+        def spy_pipeline(s: object) -> object:
+            stream_pipeline_called.append(True)
+            return original_pipeline(s)  # type: ignore[arg-type]
+
+        engine._stream_live = spy_live  # type: ignore[method-assign]
+        engine._stream_pipeline = spy_pipeline  # type: ignore[method-assign]
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch("yowo.engine.postprocess", return_value=[_make_detection(frame, spec)]),
+        ):
+            list(engine.stream(source))
+
+        assert not stream_live_called
+        assert not stream_pipeline_called
+
+    def test_stream_live_source_uses_threaded_reader(self) -> None:
+        """Live source (is_live=True) routes to _stream_live.
+
+        Uses SKIP_OLDEST policy so all 3 frames are guaranteed to be processed
+        (avoids the non-deterministic frame-drop behaviour of LATEST).
+        """
+        from yowo.types import FrameDropPolicy
+
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(
+                spec,
+                hw,
+                mock_backend,
+                frame_drop_policy=FrameDropPolicy.SKIP_OLDEST,
+            )
+        # Increase queue so 3 frames fit without any dropping
+        engine._max_queue_size = 4  # type: ignore[attr-defined]
+
+        frames = [_make_frame(i) for i in range(3)]
+        source = _make_mock_source(frames=frames, is_live=True, total_frames=None)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        live_called: list[bool] = []
+        original_live = engine._stream_live
+
+        def spy_live(s: object) -> Iterator[Detection]:
+            live_called.append(True)
+            yield from original_live(s)  # type: ignore[arg-type]
+
+        engine._stream_live = spy_live  # type: ignore[method-assign]
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(fs[0], spec)],
+            ),
+        ):
+            results = list(engine.stream(source))
+
+        assert live_called, "_stream_live was not called for is_live=True source"
+        assert len(results) == 3
+        source.close.assert_called_once()
+
+    def test_stream_offline_source_uses_pipeline(self) -> None:
+        """Offline multi-frame source (is_live=False, total_frames>1) uses _stream_pipeline."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(spec, hw, mock_backend, pipeline_workers=1)
+
+        frames = [_make_frame(i) for i in range(4)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=4)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        pipeline_called: list[bool] = []
+        original_pipeline = engine._stream_pipeline
+
+        def spy_pipeline(s: object) -> Iterator[Detection]:
+            pipeline_called.append(True)
+            yield from original_pipeline(s)  # type: ignore[arg-type]
+
+        engine._stream_pipeline = spy_pipeline  # type: ignore[method-assign]
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(f, spec) for f in fs],
+            ),
+        ):
+            results = list(engine.stream(source))
+
+        assert pipeline_called, "_stream_pipeline was not called for offline multi-frame source"
+        assert len(results) == 4
+        source.close.assert_called_once()
+
+    def test_stream_prefetch_false_uses_sync(self) -> None:
+        """prefetch=False forces _stream_sync legacy path."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(spec, hw, mock_backend, prefetch=False)
+
+        frames = [_make_frame(i) for i in range(3)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=3)
+
+        sync_called: list[bool] = []
+        original_sync = engine._stream_sync
+
+        def spy_sync(s: object) -> Iterator[Detection]:
+            sync_called.append(True)
+            yield from original_sync(s)  # type: ignore[arg-type]
+
+        engine._stream_sync = spy_sync  # type: ignore[method-assign]
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(f, spec) for f in fs],
+            ),
+        ):
+            results = list(engine.stream(source))
+
+        assert sync_called, "_stream_sync was not called when prefetch=False"
+        assert len(results) == 3
+        source.close.assert_called_once()
+
+    def test_stream_pipeline_results_identical_to_sync(self) -> None:
+        """_stream_pipeline and _stream_sync produce identical detections for the same frames."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+
+        frames = [_make_frame(i) for i in range(5)]
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        def make_engine(*, prefetch: bool) -> InferenceEngine:
+            mock_backend = _make_mock_backend()
+            with (
+                patch("yowo.engine.get_hardware_profile", return_value=hw),
+                patch("yowo.engine.create_backend", return_value=mock_backend),
+            ):
+                return _make_loaded_engine(
+                    spec, hw, mock_backend, prefetch=prefetch, pipeline_workers=1
+                )
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(f, spec) for f in fs],
+            ),
+        ):
+            engine_pipeline = make_engine(prefetch=True)
+            source_pipeline = _make_mock_source(frames=frames, is_live=False, total_frames=5)
+            pipeline_results = list(engine_pipeline.stream(source_pipeline))
+
+            engine_sync = make_engine(prefetch=False)
+            source_sync = _make_mock_source(frames=frames, is_live=False, total_frames=5)
+            sync_results = list(engine_sync.stream(source_sync))
+
+        assert len(pipeline_results) == len(sync_results) == 5
+        pipeline_indices = [d.frame.frame_index for d in pipeline_results]
+        sync_indices = [d.frame.frame_index for d in sync_results]
+        assert sorted(pipeline_indices) == sorted(sync_indices)
+
+    def test_buffer_lifecycle(self) -> None:
+        """PreprocessBuffer and PostprocessBuffer allocated at load(), None after close()."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+        ):
+            from yowo.engine import InferenceEngine
+
+            engine = InferenceEngine(spec)
+            assert engine._preprocess_buf is None  # type: ignore[attr-defined]
+            assert engine._postprocess_buf is None  # type: ignore[attr-defined]
+
+            engine.load()
+            assert engine._preprocess_buf is not None  # type: ignore[attr-defined]
+            assert engine._postprocess_buf is not None  # type: ignore[attr-defined]
+
+            engine.close()
+            assert engine._preprocess_buf is None  # type: ignore[attr-defined]
+            assert engine._postprocess_buf is None  # type: ignore[attr-defined]
+
+    def test_pipeline_workers_auto_resolves(self) -> None:
+        """pipeline_workers=0 auto-resolves after load(): 2 for free-threaded, 1 otherwise."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        # Test GIL build → resolves to 1
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            patch("yowo.engine.is_free_threaded", return_value=False),
+        ):
+            from yowo.engine import InferenceEngine
+
+            engine_gil = InferenceEngine(spec, pipeline_workers=0)
+            engine_gil.load()
+
+        assert engine_gil._pipeline_workers == 1  # type: ignore[attr-defined]
+        mock_backend.unload()
+
+        # Test free-threaded build → resolves to 2
+        mock_backend2 = _make_mock_backend()
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend2),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            patch("yowo.engine.is_free_threaded", return_value=True),
+        ):
+            engine_ft = InferenceEngine(spec, pipeline_workers=0)
+            engine_ft.load()
+
+        assert engine_ft._pipeline_workers == 2  # type: ignore[attr-defined]
+
+    def test_stream_requires_loaded_for_all_strategies(self) -> None:
+        """stream() before load() raises InferenceError regardless of source type."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            from yowo.engine import InferenceEngine
+
+            engine = InferenceEngine(spec)
+
+        for is_live, total in [(False, 1), (True, None), (False, 5)]:
+            source = _make_mock_source(frames=[], is_live=is_live, total_frames=total)
+            with pytest.raises(InferenceError, match="not loaded"):
+                list(engine.stream(source))
+
+    def test_stream_calls_clear_kv_cache_when_backend_supports_it(self) -> None:
+        """stream() calls clear_kv_cache() once per invocation when the backend exposes it."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        # Give the backend a clear_kv_cache attribute (simulates PyTorch backend with KV cache)
+        mock_backend.clear_kv_cache = MagicMock()
+
+        engine = _make_loaded_engine(spec, hw, mock_backend)
+        frame = _make_frame(0)
+        source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                return_value=[_make_detection(frame, spec)],
+            ),
+        ):
+            list(engine.stream(source))
+
+        mock_backend.clear_kv_cache.assert_called_once()

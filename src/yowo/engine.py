@@ -22,12 +22,21 @@ from yowo.backends import InferenceBackend, create_backend
 from yowo.backends._selector import get_fallback_backends, select_backend
 from yowo.errors import BackendError, BackendLoadError, InferenceError
 from yowo.hardware import get_hardware_profile
-from yowo.io._decode import preprocess
+from yowo.io import PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
 from yowo.io._source import FrameSource
 from yowo.models import resolve_weights
 from yowo.models._registry import get as _registry_get
-from yowo.postprocess._nms import postprocess
-from yowo.types import BackendSelection, BackendType, Detection, Frame, ModelSpec, Precision
+from yowo.postprocess import PostprocessBuffer, postprocess
+from yowo.types import (
+    BackendSelection,
+    BackendType,
+    Detection,
+    Frame,
+    FrameDropPolicy,
+    ModelSpec,
+    Precision,
+    is_free_threaded,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +66,11 @@ class InferenceEngine:
         cache: bool = False,
         cache_dir: Path | None = None,
         kv_cache: bool = False,
+        # NEW — backward-compatible additions
+        frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
+        max_queue_size: int = 2,
+        prefetch: bool = True,
+        pipeline_workers: int = 0,
     ) -> None:
         self._spec = spec
         self._batch_size = batch_size
@@ -94,6 +108,14 @@ class InferenceEngine:
         )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
+
+        # Streaming pipeline parameters
+        self._frame_drop_policy = frame_drop_policy
+        self._max_queue_size = max_queue_size
+        self._prefetch = prefetch
+        self._pipeline_workers = pipeline_workers
+        self._preprocess_buf: PreprocessBuffer | None = None
+        self._postprocess_buf: PostprocessBuffer | None = None
 
     @property
     def selection(self) -> BackendSelection:
@@ -149,6 +171,15 @@ class InferenceEngine:
                         reason=f"Fallback from {self._selection.backend.value}",
                     )
 
+                # Allocate reusable buffers for streaming
+                target_size = (self._model_meta.input_height, self._model_meta.input_width)
+                self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
+                self._postprocess_buf = PostprocessBuffer()
+
+                # Resolve pipeline worker count
+                if self._pipeline_workers == 0:
+                    self._pipeline_workers = 2 if is_free_threaded() else 1
+
                 self._loaded = True
                 return
             except (BackendLoadError, BackendError) as exc:
@@ -166,7 +197,10 @@ class InferenceEngine:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
-        tensor = preprocess(frames, target_size)
+        if self._preprocess_buf is not None and len(frames) <= self._preprocess_buf.capacity:
+            tensor = preprocess_into(frames, target_size, self._preprocess_buf)
+        else:
+            tensor = preprocess(frames, target_size)
 
         # Set source_id for feature caching (PyTorch backend only)
         if self._feature_cache is not None and frames:
@@ -187,10 +221,18 @@ class InferenceEngine:
             confidence_threshold=self._confidence,
             iou_threshold=self._iou_threshold,
             inference_time_ms=elapsed_ms,
+            scratch=self._postprocess_buf,
         )
 
     def stream(self, source: FrameSource) -> Iterator[Detection]:
-        """Yield detections from a FrameSource, batching internally."""
+        """Yield detections from a FrameSource, batching internally.
+
+        Dispatches to source-type-aware strategy:
+        - Single image → _stream_single (no threading overhead)
+        - Live source (RTSP/webcam) → _stream_live (threaded reader + frame drop)
+        - Offline multi-frame → _stream_pipeline (prefetch + infer overlap)
+        - prefetch=False → _stream_sync (legacy sequential path)
+        """
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
@@ -198,6 +240,85 @@ class InferenceEngine:
         if hasattr(self._backend, "clear_kv_cache"):
             self._backend.clear_kv_cache()  # type: ignore[attr-defined]
 
+        if not self._prefetch:
+            yield from self._stream_sync(source)
+        elif source.total_frames == 1:
+            yield from self._stream_single(source)
+        elif source.is_live:
+            yield from self._stream_live(source)
+        else:
+            yield from self._stream_pipeline(source)
+
+    def _stream_single(self, source: FrameSource) -> Iterator[Detection]:
+        """Fast path for single-image sources — no threading overhead."""
+        try:
+            for frame in source:
+                yield from self.detect([frame])
+        finally:
+            source.close()
+
+    def _stream_live(self, source: FrameSource) -> Iterator[Detection]:
+        """Live source path: threaded reader with frame drop policy, batch=1."""
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=self._max_queue_size,
+            policy=self._frame_drop_policy,
+        )
+        reader.start()
+        try:
+            while (frame := reader.get(timeout=1.0)) is not None:
+                yield from self.detect([frame])
+        finally:
+            reader.stop()
+            source.close()
+
+    def _stream_pipeline(self, source: FrameSource) -> Iterator[Detection]:
+        """Offline source path: threaded prefetch + pipeline overlap.
+
+        Uses concurrent.futures.ThreadPoolExecutor to overlap frame reading
+        with inference. On free-threaded Python 3.14t, preprocess + postprocess
+        also run in parallel with I/O (true CPU parallelism). On GIL Python,
+        inference C++ code releases the GIL enabling I/O overlap.
+        """
+        from concurrent.futures import Future, ThreadPoolExecutor
+
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=self._batch_size * 2,
+            policy=FrameDropPolicy.NONE,  # offline: process every frame
+        )
+        reader.start()
+
+        def _infer_batch(frames: list[Frame]) -> list[Detection]:
+            return self.detect(frames)
+
+        try:
+            pending: Future[list[Detection]] | None = None
+            batch: list[Frame] = []
+
+            with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
+                while True:
+                    frame = reader.get(timeout=5.0)
+                    if frame is not None:
+                        batch.append(frame)
+
+                    if len(batch) >= self._batch_size or (frame is None and batch):
+                        if pending is not None:
+                            yield from pending.result()
+                        pending = pool.submit(_infer_batch, batch.copy())
+                        batch.clear()
+
+                    if frame is None:
+                        break
+
+                if pending is not None:
+                    yield from pending.result()
+        finally:
+            reader.stop()
+            source.close()
+
+    def _stream_sync(self, source: FrameSource) -> Iterator[Detection]:
+        """Legacy sequential streaming path (prefetch=False)."""
         batch: list[Frame] = []
         try:
             for frame in source:
@@ -215,6 +336,8 @@ class InferenceEngine:
         self._backend.unload()
         if self._feature_cache is not None:
             self._feature_cache.clear()
+        self._preprocess_buf = None
+        self._postprocess_buf = None
         self._loaded = False
 
     def __enter__(self) -> InferenceEngine:

@@ -41,12 +41,14 @@ from yowo.types import (
     ExportFormat,
     ExportResult,
     Frame,
+    FrameDropPolicy,
     GPUArch,
     ModelFamily,
     ModelSize,
     ModelSpec,
     Precision,
     PreprocessedTensor,
+    is_free_threaded,
 )
 
 __version__ = "0.1.0"
@@ -70,6 +72,7 @@ __all__ = [
     "ExportResult",
     "ExportUnsupportedError",
     "Frame",
+    "FrameDropPolicy",
     "GPUArch",
     "InferenceConfig",
     "InferenceEngine",
@@ -87,6 +90,7 @@ __all__ = [
     "YowoError",
     "__version__",
     "export_model",
+    "is_free_threaded",
     "load_config",
     "open_source",
 ]

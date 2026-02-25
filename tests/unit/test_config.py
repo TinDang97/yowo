@@ -13,7 +13,7 @@ import pytest
 
 from yowo.config import InferenceConfig, load_config
 from yowo.errors import ConfigError
-from yowo.types import BackendType, ModelFamily, ModelSize, Precision
+from yowo.types import BackendType, FrameDropPolicy, ModelFamily, ModelSize, Precision
 
 # ---------------------------------------------------------------------------
 # load_config — no file
@@ -262,3 +262,103 @@ class TestLoadConfigEnvOverrides:
         monkeypatch.setenv("YOWO_CONFIDENCE", "1.5")
         with pytest.raises(ConfigError, match="confidence_threshold"):
             load_config()
+
+
+# ---------------------------------------------------------------------------
+# Streaming + pipeline config fields
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingConfig:
+    def test_defaults(self) -> None:
+        cfg = InferenceConfig(model_family=ModelFamily.YOLO26, model_size=ModelSize.NANO)
+        assert cfg.frame_drop_policy == FrameDropPolicy.NONE
+        assert cfg.max_queue_size == 2
+        assert cfg.prefetch is True
+        assert cfg.pipeline_workers == 0
+
+    def test_max_queue_size_validation(self) -> None:
+        with pytest.raises(ConfigError, match="max_queue_size"):
+            InferenceConfig(
+                model_family=ModelFamily.YOLO26,
+                model_size=ModelSize.NANO,
+                max_queue_size=0,
+            )
+
+    def test_pipeline_workers_validation(self) -> None:
+        with pytest.raises(ConfigError, match="pipeline_workers"):
+            InferenceConfig(
+                model_family=ModelFamily.YOLO26,
+                model_size=ModelSize.NANO,
+                pipeline_workers=-1,
+            )
+
+    def test_frame_drop_policy_latest(self) -> None:
+        cfg = InferenceConfig(
+            model_family=ModelFamily.YOLO26,
+            model_size=ModelSize.NANO,
+            frame_drop_policy=FrameDropPolicy.LATEST,
+        )
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+
+    def test_frame_drop_policy_skip_oldest(self) -> None:
+        cfg = InferenceConfig(
+            model_family=ModelFamily.YOLO26,
+            model_size=ModelSize.NANO,
+            frame_drop_policy=FrameDropPolicy.SKIP_OLDEST,
+        )
+        assert cfg.frame_drop_policy == FrameDropPolicy.SKIP_OLDEST
+
+    def test_max_queue_size_minimum_valid(self) -> None:
+        cfg = InferenceConfig(
+            model_family=ModelFamily.YOLO26,
+            model_size=ModelSize.NANO,
+            max_queue_size=1,
+        )
+        assert cfg.max_queue_size == 1
+
+    def test_pipeline_workers_explicit_zero(self) -> None:
+        cfg = InferenceConfig(
+            model_family=ModelFamily.YOLO26,
+            model_size=ModelSize.NANO,
+            pipeline_workers=0,
+        )
+        assert cfg.pipeline_workers == 0
+
+    def test_prefetch_disabled(self) -> None:
+        cfg = InferenceConfig(
+            model_family=ModelFamily.YOLO26,
+            model_size=ModelSize.NANO,
+            prefetch=False,
+        )
+        assert cfg.prefetch is False
+
+    def test_yaml_loads_frame_drop_policy(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text("frame_drop_policy: latest\n")
+        cfg = load_config(path=cfg_file)
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+
+    def test_yaml_loads_max_queue_size(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text("max_queue_size: 8\n")
+        cfg = load_config(path=cfg_file)
+        assert cfg.max_queue_size == 8
+
+    def test_yaml_loads_pipeline_workers(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text("pipeline_workers: 4\n")
+        cfg = load_config(path=cfg_file)
+        assert cfg.pipeline_workers == 4
+
+    def test_yaml_loads_prefetch_false(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text("prefetch: false\n")
+        cfg = load_config(path=cfg_file)
+        assert cfg.prefetch is False
+
+    def test_yaml_invalid_frame_drop_policy_raises(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.yaml"
+        cfg_file.write_text("frame_drop_policy: bogus\n")
+        with pytest.raises(ConfigError, match="Invalid value in config file"):
+            load_config(path=cfg_file)

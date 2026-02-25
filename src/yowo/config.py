@@ -29,7 +29,7 @@ from typing import Any
 import yaml
 
 from yowo.errors import ConfigError
-from yowo.types import BackendType, ExportFormat, ModelFamily, ModelSize, Precision
+from yowo.types import BackendType, ExportFormat, FrameDropPolicy, ModelFamily, ModelSize, Precision
 
 # ---------------------------------------------------------------------------
 # InferenceConfig
@@ -65,6 +65,14 @@ class InferenceConfig:
         frame_skip: Skip every N frames; 0 disables skipping.
         max_frames: Stop after processing this many frames. ``None`` runs
             until the source is exhausted.
+        frame_drop_policy: Backlog policy for ThreadedFrameReader when the
+            queue is full. ``NONE`` applies backpressure (offline default);
+            ``LATEST`` keeps only the newest frame (live default).
+        max_queue_size: Bounded queue depth for ThreadedFrameReader. Must
+            be >= 1.
+        prefetch: Enable threaded frame prefetch in ``stream()``.
+        pipeline_workers: Worker thread count for the pipeline. ``0`` means
+            auto-detect (2 on free-threaded Python, 1 otherwise).
     """
 
     model_family: ModelFamily = ModelFamily.YOLO26
@@ -80,6 +88,10 @@ class InferenceConfig:
     reconnect_timeout_s: float = 30.0
     frame_skip: int = 0
     max_frames: int | None = None
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.NONE
+    max_queue_size: int = 2
+    prefetch: bool = True
+    pipeline_workers: int = 0
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.confidence_threshold <= 1.0):
@@ -94,6 +106,10 @@ class InferenceConfig:
             raise ConfigError(f"frame_skip must be >= 0, got {self.frame_skip}")
         if self.reconnect_timeout_s <= 0:
             raise ConfigError(f"reconnect_timeout_s must be > 0, got {self.reconnect_timeout_s}")
+        if self.max_queue_size < 1:
+            raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
+        if self.pipeline_workers < 0:
+            raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +212,18 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
     if "precision" in data and data["precision"] is not None:
         kwargs["precision"] = Precision(data["precision"])
 
+    if "frame_drop_policy" in data and data["frame_drop_policy"] is not None:
+        kwargs["frame_drop_policy"] = FrameDropPolicy(data["frame_drop_policy"])
+
     # Numeric scalars — copy as-is with type coercion for safety.
-    for int_field in ("batch_size", "max_memory_mb", "frame_skip", "max_frames"):
+    for int_field in (
+        "batch_size",
+        "max_memory_mb",
+        "frame_skip",
+        "max_frames",
+        "max_queue_size",
+        "pipeline_workers",
+    ):
         if int_field in data and data[int_field] is not None:
             kwargs[int_field] = int(data[int_field])
         elif int_field in data:
@@ -206,6 +232,10 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
     for float_field in ("confidence_threshold", "iou_threshold", "reconnect_timeout_s"):
         if float_field in data:
             kwargs[float_field] = float(data[float_field])
+
+    for bool_field in ("prefetch",):
+        if bool_field in data:
+            kwargs[bool_field] = bool(data[bool_field])
 
     return InferenceConfig(**kwargs)
 

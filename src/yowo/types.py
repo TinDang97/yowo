@@ -11,6 +11,7 @@ as logically immutable — callers must not mutate their contents.
 from __future__ import annotations
 
 import enum
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -88,6 +89,17 @@ class Precision(enum.StrEnum):
     FP32 = "fp32"
     FP16 = "fp16"
     INT8 = "int8"
+
+
+class FrameDropPolicy(enum.StrEnum):
+    """Frame backlog policy for live streaming.
+
+    Controls how ThreadedFrameReader handles a full queue.
+    """
+
+    NONE = "none"  # Backpressure — process every frame (offline default)
+    LATEST = "latest"  # Keep only newest frame (live default)
+    SKIP_OLDEST = "skip_oldest"  # Evict oldest when queue full
 
 
 # ---------------------------------------------------------------------------
@@ -294,11 +306,21 @@ class PreprocessedTensor:
         return int(self.data.shape[0])
 
 
+def is_free_threaded() -> bool:
+    """Detect if Python is running in free-threaded (no-GIL) mode.
+
+    Returns True on Python 3.13t+ with GIL disabled (PEP 703 Phase II).
+    Returns False on standard GIL builds and Python <3.13.
+    """
+    try:
+        return not sys._is_gil_enabled()  # type: ignore[attr-defined]
+    except AttributeError:
+        return False
+
+
 # Suppress "unused import" warnings — field is re-exported for subpackages.
 __all__ = [
-    # Frozen dataclasses
     "BackendSelection",
-    # Enums
     "BackendType",
     "BoundingBox",
     "CPUArch",
@@ -306,14 +328,15 @@ __all__ = [
     "DeviceType",
     "ExportFormat",
     "ExportResult",
-    # Mutable (logically immutable) dataclasses
     "Frame",
+    "FrameDropPolicy",
     "GPUArch",
     "ModelFamily",
     "ModelSize",
     "ModelSpec",
     "Precision",
     "PreprocessedTensor",
+    "is_free_threaded",
 ]
 
 # Silence F401 for field — used in submodules that import from types.
