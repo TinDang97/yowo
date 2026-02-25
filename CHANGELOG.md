@@ -13,6 +13,10 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] — 2026-02-25
+
 ### Added
 
 - **io, engine**: Source-aware pipeline dispatch — Phase 3.
@@ -222,5 +226,6 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 Initial beta release.
 
 [1.1.0]: https://github.com/TinDang97/yowo/compare/v1.0.2...v1.1.0
+[1.2.0]: https://github.com/TinDang97/yowo/compare/v1.1.1...v1.2.0
 [0.1.0]: https://github.com/TinDang97/yowo/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/TinDang97/yowo/releases/tag/v0.0.1
