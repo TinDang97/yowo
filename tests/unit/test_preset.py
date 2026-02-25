@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
+from yowo.cli._main import cli
 from yowo.config import classify_device, classify_source, preset_config
 from yowo.errors import ConfigError
 from yowo.hardware import HardwareProfile
@@ -55,6 +58,9 @@ class TestClassifySource:
     def test_image_webp(self) -> None:
         assert classify_source("img.webp") == SourceCategory.IMAGE
 
+    def test_image_jpeg(self) -> None:
+        assert classify_source("photo.jpeg") == SourceCategory.IMAGE
+
     def test_video_mp4(self) -> None:
         assert classify_source("clip.mp4") == SourceCategory.VIDEO
 
@@ -66,6 +72,9 @@ class TestClassifySource:
 
     def test_video_mkv(self) -> None:
         assert classify_source("clip.mkv") == SourceCategory.VIDEO
+
+    def test_video_ts(self) -> None:
+        assert classify_source("stream.ts") == SourceCategory.VIDEO
 
     def test_rtsp_url(self) -> None:
         assert classify_source("rtsp://192.168.1.1/stream") == SourceCategory.LIVE_STREAM
@@ -255,3 +264,70 @@ class TestPresetConfig:
         assert cfg.backend is None
         assert cfg.device == "auto"
         assert cfg.precision is None
+
+
+# ---------------------------------------------------------------------------
+# CLI --preset integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestPresetCLI:
+    def test_preset_flag_exists(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["detect", "--help"])
+        assert "--preset" in result.output
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_calls_preset_config(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig()
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset"])
+
+        mock_preset.assert_called_once()
+        call_args = mock_preset.call_args
+        assert call_args[0][1] == SourceCategory.VIDEO
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_with_batch_override(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig(batch_size=8)
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset", "--batch", "8"])
+
+        call_kwargs = mock_preset.call_args[1]
+        assert call_kwargs["batch_size"] == 8

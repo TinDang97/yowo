@@ -48,6 +48,12 @@ def cli() -> None:
     help="Output format. 'auto' infers from -o file extension.",
 )
 @click.option("--save-frames", default=None, type=click.Path())
+@click.option(
+    "--preset",
+    is_flag=True,
+    default=False,
+    help="Auto-tune config for detected device and source type",
+)
 def detect_command(
     source: str,
     model: str,
@@ -61,6 +67,7 @@ def detect_command(
     output: str | None,
     output_format: str,
     save_frames: str | None,
+    preset: bool,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
     from yowo.config import InferenceConfig
@@ -70,17 +77,45 @@ def detect_command(
     spec = _parse_model_spec(model)
     weights_path = Path(weights) if weights else spec.weights_path
 
-    config = InferenceConfig(
-        model_family=spec.family,
-        model_size=spec.size,
-        weights_path=weights_path,
-        batch_size=batch,
-        confidence_threshold=confidence,
-        iou_threshold=iou,
-        backend=BackendType(backend) if backend != "auto" else None,
-        device=device,
-        precision=Precision(precision) if precision != "auto" else None,
-    )
+    if preset:
+        from yowo.config import classify_source, preset_config
+        from yowo.hardware import get_hardware_profile
+
+        hw = get_hardware_profile()
+        source_cat = classify_source(source)
+
+        # Collect explicit CLI overrides (non-default values only)
+        cli_overrides: dict[str, object] = {
+            "model_family": spec.family,
+            "model_size": spec.size,
+            "weights_path": weights_path,
+        }
+        if backend != "auto":
+            cli_overrides["backend"] = BackendType(backend)
+        if device != "auto":
+            cli_overrides["device"] = device
+        if precision != "auto":
+            cli_overrides["precision"] = Precision(precision)
+        if batch != 1:
+            cli_overrides["batch_size"] = batch
+        if confidence != 0.25:
+            cli_overrides["confidence_threshold"] = confidence
+        if iou != 0.45:
+            cli_overrides["iou_threshold"] = iou
+
+        config = preset_config(hw, source_cat, **cli_overrides)
+    else:
+        config = InferenceConfig(
+            model_family=spec.family,
+            model_size=spec.size,
+            weights_path=weights_path,
+            batch_size=batch,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            backend=BackendType(backend) if backend != "auto" else None,
+            device=device,
+            precision=Precision(precision) if precision != "auto" else None,
+        )
 
     detections = []
     try:
