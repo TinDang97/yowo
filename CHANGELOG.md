@@ -11,6 +11,31 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [Unreleased]
+
+### Refactored
+
+- **engine, backends**: Black box boundary fixes from architecture audit.
+  - All cross-package imports now use public `__init__.py` surfaces instead of
+    private `_module` paths.
+  - `InferenceBackend` Protocol gains `clear_kv_cache()` and `set_source_id()`.
+    Removes all `hasattr`/`type: ignore[attr-defined]` from engine.py.
+  - `InferenceEngine` constructor flattened: accepts `InferenceConfig` or
+    individual kwargs (all optional, defaults to YOLO26 Nano). `ModelSpec` is
+    no longer accepted as a positional argument.
+
+### Breaking Changes
+
+- `InferenceEngine(spec, ...)` no longer accepts `ModelSpec` as the first
+  positional argument. Use `InferenceEngine(model_family=..., model_size=...)`
+  or `InferenceEngine(InferenceConfig(...))` instead.
+- `confidence` kwarg renamed to `confidence_threshold` (matches `InferenceConfig`).
+- `InferenceConfig` removes 4 dead fields: `max_memory_mb`,
+  `reconnect_timeout_s`, `frame_skip`, `max_frames`. Adds 3 fields: `cache`,
+  `cache_dir`, `kv_cache`.
+
+---
+
 ## [1.1.0] — 2026-02-24
 
 ### Features
