@@ -27,6 +27,41 @@ __all__ = ["C2PSA", "Attention", "C3k2PSA", "PSABlock"]
 _BLOCK_CACHE_THRESHOLD: float = 0.01
 
 
+def _build_q_conv(
+    qkv_conv: nn.Conv2d,
+    num_heads: int,
+    key_dim: int,
+    head_dim: int,
+) -> nn.Conv2d:
+    """Extract Q-only rows from a fused QKV Conv2d weight tensor.
+
+    The QKV weight has per-head interleaved layout:
+    ``[Q_h(key_dim), K_h(key_dim), V_h(head_dim)]`` for each head.
+    This builds a new Conv2d that computes only the Q output channels,
+    reducing compute by 75% on KV cache hit.
+    """
+    stride = 2 * key_dim + head_dim
+    q_indices = [h * stride + q for h in range(num_heads) for q in range(key_dim)]
+    idx = torch.tensor(q_indices, dtype=torch.long)
+
+    # QKV conv is always 1x1 (kernel=1, stride=1, padding=0, dilation=1)
+    q_conv = nn.Conv2d(
+        qkv_conv.in_channels,
+        num_heads * key_dim,
+        kernel_size=1,
+        stride=1,
+        padding=0,
+        groups=qkv_conv.groups,
+        bias=qkv_conv.bias is not None,
+    )
+    with torch.no_grad():
+        q_conv.weight.copy_(qkv_conv.weight[idx])
+        if qkv_conv.bias is not None:
+            q_conv.bias.copy_(qkv_conv.bias[idx])  # type: ignore[union-attr]
+    q_conv.requires_grad_(False)
+    return q_conv
+
+
 # ---------------------------------------------------------------------------
 # Attention — Multi-Head Self-Attention (spatial) with KV cache
 # ---------------------------------------------------------------------------
@@ -61,6 +96,9 @@ class Attention(nn.Module):
         self.qkv = Conv(dim, dim + 2 * nh_kd, 1, act=False)
         self.proj = Conv(dim, dim, 1, act=False)
         self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)  # depthwise positional encoding
+
+        # Q-only conv for cache-hit path (built by enable_kv_cache after fuse)
+        self.q_conv: nn.Conv2d | None = None
 
         # KV cache state (disabled by default)
         self._kv_cache_enabled: bool = False
@@ -164,8 +202,26 @@ class Attention(nn.Module):
     def enable_kv_cache(self, enabled: bool = True) -> None:
         """Enable or disable KV caching for streaming inference."""
         self._kv_cache_enabled = enabled
-        if not enabled:
+        if enabled:
+            self._split_qkv_if_ready()
+        else:
             self.clear_kv_cache()
+
+    def _split_qkv_if_ready(self) -> None:
+        """Build ``q_conv`` from fused QKV weights for cache-hit optimization.
+
+        After ``fuse()`` removes ``qkv.bn``, this extracts Q-only rows from
+        the fused QKV Conv2d into a separate lightweight Conv2d. On KV cache
+        hit, only Q channels (25%) are computed instead of all QKV channels.
+
+        If ``fuse()`` has not run yet (``qkv.bn`` still present), this is a
+        no-op — the cache-hit path falls back to the full QKV conv.
+        """
+        if self.q_conv is not None:
+            return
+        if hasattr(self.qkv, "bn"):
+            return
+        self.q_conv = _build_q_conv(self.qkv.conv, self.num_heads, self.key_dim, self.head_dim)
 
     def clear_kv_cache(self) -> None:
         """Clear cached K, V tensors."""
@@ -205,10 +261,15 @@ class Attention(nn.Module):
             assert self._cached_v is not None
             assert self._cached_v_spatial is not None
 
-            qkv = self.qkv(x)
-            qkv = qkv.view(B, self.num_heads, -1, N)
-            # Extract only Q (first key_dim channels per head)
-            q = qkv[:, :, : self.key_dim, :].transpose(-2, -1)
+            if self.q_conv is not None:
+                # Optimized: compute only Q channels (25% of full QKV)
+                q_flat = self.q_conv(x)  # (B, nh_kd, H, W)
+                q = q_flat.view(B, self.num_heads, self.key_dim, N).transpose(-2, -1)
+            else:
+                # Fallback: full QKV conv (pre-fuse or fuse not yet run)
+                qkv = self.qkv(x)
+                qkv = qkv.view(B, self.num_heads, -1, N)
+                q = qkv[:, :, : self.key_dim, :].transpose(-2, -1)
             k = self._cached_k
             v = self._cached_v
             v_spatial = self._cached_v_spatial

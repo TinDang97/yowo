@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 
 from yowo.arch import build_model
-from yowo.arch._attention import C2PSA, Attention, C3k2PSA, PSABlock
+from yowo.arch._attention import C2PSA, Attention, C3k2PSA, PSABlock, _build_q_conv
 from yowo.types import ModelFamily, ModelSize
 
 
@@ -322,3 +323,157 @@ class TestModelForwardWithCache:
 
         assert out.shape[0] == 1
         assert out.shape[2] == 80 * 80 + 40 * 40 + 20 * 20  # 8400
+
+
+class TestQConvSplit:
+    """Test QKV weight split into Q-only conv for cache-hit optimization."""
+
+    def _make_fused_attention(self, dim: int = 64, num_heads: int = 4) -> Attention:
+        """Create an Attention module and simulate fuse (remove bn)."""
+        attn = Attention(dim=dim, num_heads=num_heads, attn_ratio=0.5)
+        # Simulate fuse(): fold BN into conv and swap forward method
+        from yowo.arch._blocks import Conv, fuse_conv_and_bn
+
+        for m in attn.modules():
+            if isinstance(m, Conv) and hasattr(m, "bn"):
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                delattr(m, "bn")
+                if isinstance(m.act, nn.Identity):
+                    m.forward = m.forward_fuse_no_act  # type: ignore[assignment]
+                else:
+                    m.forward = m.forward_fuse  # type: ignore[assignment]
+        attn.eval()
+        return attn
+
+    def test_q_conv_output_matches_qkv_slice(self) -> None:
+        """q_conv(x) must be numerically identical to Q slice from full QKV."""
+        attn = self._make_fused_attention(dim=128, num_heads=4)
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is not None
+
+        x = torch.randn(2, 128, 8, 8)
+        with torch.no_grad():
+            # Full QKV path
+            full_qkv = attn.qkv.conv(x)
+            B, _, H, W = full_qkv.shape
+            N = H * W
+            qkv_r = full_qkv.view(B, attn.num_heads, -1, N)
+            q_expected = qkv_r[:, :, : attn.key_dim, :].reshape(
+                B, attn.num_heads * attn.key_dim, H, W
+            )
+
+            # Q-only path
+            q_direct = attn.q_conv(x)
+
+        assert torch.allclose(q_direct, q_expected, atol=1e-6)
+
+    def test_q_conv_is_none_before_fuse(self) -> None:
+        """q_conv must remain None when fuse() hasn't run (bn still present)."""
+        attn = Attention(dim=64, num_heads=4)
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is None
+
+    def test_q_conv_persists_on_disable(self) -> None:
+        """q_conv is a weight module, not cache state — survives disable."""
+        attn = self._make_fused_attention()
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is not None
+        attn.enable_kv_cache(False)
+        assert attn.q_conv is not None
+
+    def test_q_conv_not_rebuilt_on_re_enable(self) -> None:
+        """Repeated enable_kv_cache(True) must not rebuild q_conv."""
+        attn = self._make_fused_attention()
+        attn.enable_kv_cache(True)
+        q_conv_id = id(attn.q_conv)
+        attn.enable_kv_cache(True)
+        assert id(attn.q_conv) == q_conv_id
+
+    def test_q_conv_device_matches(self) -> None:
+        """q_conv must live on the same device as the QKV conv."""
+        attn = self._make_fused_attention()
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is not None
+        assert attn.q_conv.weight.device == attn.qkv.conv.weight.device
+
+    def test_q_conv_shape(self) -> None:
+        """q_conv weight must have correct output channels = num_heads * key_dim."""
+        attn = self._make_fused_attention(dim=256, num_heads=4)
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is not None
+        expected_out = attn.num_heads * attn.key_dim
+        assert attn.q_conv.weight.shape[0] == expected_out
+        assert attn.q_conv.weight.shape[1] == 256  # in_channels
+
+    def test_build_q_conv_index_correctness(self) -> None:
+        """Verify per-head interleaved Q index extraction is correct."""
+        num_heads, key_dim, head_dim = 4, 32, 64
+        stride = 2 * key_dim + head_dim  # 128
+        # Create a QKV conv with known weight values
+        qkv_conv = nn.Conv2d(256, num_heads * stride, 1, bias=True)
+        with torch.no_grad():
+            # Set each output channel's weight to its index for verification
+            for i in range(num_heads * stride):
+                qkv_conv.weight[i].fill_(float(i))
+                qkv_conv.bias[i] = float(i)  # type: ignore[index]
+
+        q_conv = _build_q_conv(qkv_conv, num_heads, key_dim, head_dim)
+
+        # Expected Q indices: head 0 [0..31], head 1 [128..159],
+        # head 2 [256..287], head 3 [384..415]
+        expected_indices = []
+        for h in range(num_heads):
+            for q in range(key_dim):
+                expected_indices.append(h * stride + q)
+
+        for i, expected_idx in enumerate(expected_indices):
+            assert q_conv.weight[i, 0, 0, 0].item() == float(expected_idx)
+            assert q_conv.bias[i].item() == float(expected_idx)  # type: ignore[index]
+
+    def test_forward_cache_hit_uses_q_conv(self) -> None:
+        """Cache-hit path must produce valid output using q_conv."""
+        attn = self._make_fused_attention(dim=64, num_heads=4)
+        attn.enable_kv_cache(True)
+        assert attn.q_conv is not None
+
+        x1 = torch.randn(1, 64, 8, 8)
+        x2 = torch.randn(1, 64, 8, 8)
+
+        with torch.no_grad():
+            out1 = attn(x1)  # cold — populates cache
+            out2 = attn(x2)  # warm — uses q_conv on cache hit
+
+        assert out1.shape == out2.shape == (1, 64, 8, 8)
+        assert torch.isfinite(out2).all()
+
+    def test_fused_model_kv_cache_q_split(self) -> None:
+        """Full model with fuse() + enable_kv_cache() must build q_conv."""
+        model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model = model.fuse().eval()
+        model.enable_kv_cache()
+
+        q_conv_count = 0
+        for m in model.modules():
+            if isinstance(m, Attention):
+                assert m.q_conv is not None, "q_conv must be built after fuse + enable_kv_cache"
+                q_conv_count += 1
+
+        assert q_conv_count >= 2  # YOLO26n has 2 Attention modules
+
+    def test_fused_model_output_with_q_split(self) -> None:
+        """Model output must be valid across cold + warm frames with q_conv."""
+        model = build_model(ModelFamily.YOLO26, ModelSize.NANO)
+        model = model.fuse().eval()
+        model.enable_kv_cache()
+
+        x1 = torch.randn(1, 3, 640, 640)
+        x2 = torch.randn(1, 3, 640, 640)
+
+        with torch.no_grad():
+            out1 = model(x1)  # cold
+            out2 = model(x2)  # warm — q_conv active on cache hit
+
+        assert out1.shape == out2.shape
+        assert out2.shape[0] == 1
+        assert out2.shape[2] == 6  # YOLO26: [x1,y1,x2,y2,conf,cls]
+        assert torch.isfinite(out2).all()
