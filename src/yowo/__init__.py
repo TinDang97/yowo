@@ -2,10 +2,9 @@
 
 Quick start::
 
-    from yowo import InferenceEngine, ModelSpec, ModelFamily, ModelSize, open_source
+    from yowo import InferenceEngine, open_source
 
-    spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
-    with InferenceEngine(spec) as engine:
+    with InferenceEngine(confidence_threshold=0.35) as engine:
         for detection in engine.stream(open_source("image.jpg")):
             for box in detection.boxes:
                 print(f"{box.class_name}: {box.confidence:.2f}")
@@ -30,7 +29,7 @@ from yowo.errors import (
     YowoError,
 )
 from yowo.export import ExportMetadata, export_model
-from yowo.io._source import open_source
+from yowo.io import open_source
 from yowo.types import (
     BackendSelection,
     BackendType,

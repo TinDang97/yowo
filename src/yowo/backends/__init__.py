@@ -13,12 +13,15 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from yowo.backends._selector import get_fallback_backends, select_backend
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
     "create_backend",
+    "get_fallback_backends",
+    "select_backend",
 ]
 
 
@@ -81,6 +84,20 @@ class InferenceBackend(Protocol):
         """Run a dummy inference pass to prime JIT caches and CUDA contexts.
 
         No-op if backend does not benefit from warmup or is not loaded.
+        """
+        ...
+
+    def clear_kv_cache(self) -> None:
+        """Reset KV cache state (e.g. on source change during streaming).
+
+        No-op if backend does not use KV caching.
+        """
+        ...
+
+    def set_source_id(self, source_id: str) -> None:
+        """Set the active source identifier for feature cache keying.
+
+        No-op for backends that do not support feature caching.
         """
         ...
 

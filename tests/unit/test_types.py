@@ -581,13 +581,17 @@ class TestInferenceConfigValidation:
         cfg = InferenceConfig(batch_size=1)
         assert cfg.batch_size == 1
 
-    def test_frame_skip_negative_raises(self) -> None:
-        with pytest.raises(ConfigError, match="frame_skip"):
-            InferenceConfig(frame_skip=-1)
+    def test_cache_default_false(self) -> None:
+        cfg = InferenceConfig()
+        assert cfg.cache is False
 
-    def test_reconnect_timeout_zero_raises(self) -> None:
-        with pytest.raises(ConfigError, match="reconnect_timeout_s"):
-            InferenceConfig(reconnect_timeout_s=0.0)
+    def test_kv_cache_default_false(self) -> None:
+        cfg = InferenceConfig()
+        assert cfg.kv_cache is False
+
+    def test_cache_dir_default_none(self) -> None:
+        cfg = InferenceConfig()
+        assert cfg.cache_dir is None
 
     def test_backend_none_is_default(self) -> None:
         cfg = InferenceConfig()

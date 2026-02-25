@@ -5,10 +5,17 @@ Handles backend lifecycle, batch accumulation, and graceful degradation.
 
 Usage::
 
-    spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
-    with InferenceEngine(spec) as engine:
+    # Option A: Pass an InferenceConfig
+    from yowo import InferenceConfig, InferenceEngine
+
+    config = InferenceConfig(confidence_threshold=0.35, batch_size=4)
+    with InferenceEngine(config) as engine:
         for detection in engine.stream(open_source("video.mp4")):
             process(detection)
+
+    # Option B: Pass individual kwargs (defaults to YOLO26 Nano)
+    with InferenceEngine(confidence_threshold=0.35) as engine:
+        ...
 """
 
 from __future__ import annotations
@@ -18,14 +25,18 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from yowo.backends import InferenceBackend, create_backend
-from yowo.backends._selector import get_fallback_backends, select_backend
+from yowo.backends import (
+    InferenceBackend,
+    create_backend,
+    get_fallback_backends,
+    select_backend,
+)
+from yowo.config import InferenceConfig
 from yowo.errors import BackendError, BackendLoadError, InferenceError
 from yowo.hardware import get_hardware_profile
-from yowo.io import PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
-from yowo.io._source import FrameSource
+from yowo.io import FrameSource, PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
+from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
-from yowo.models._registry import get as _registry_get
 from yowo.postprocess import PostprocessBuffer, postprocess
 from yowo.types import (
     BackendSelection,
@@ -33,6 +44,8 @@ from yowo.types import (
     Detection,
     Frame,
     FrameDropPolicy,
+    ModelFamily,
+    ModelSize,
     ModelSpec,
     Precision,
     is_free_threaded,
@@ -55,36 +68,62 @@ class InferenceEngine:
 
     def __init__(
         self,
-        spec: ModelSpec,
+        config: InferenceConfig | None = None,
         *,
+        model_family: ModelFamily = ModelFamily.YOLO26,
+        model_size: ModelSize = ModelSize.NANO,
+        weights_path: Path | None = None,
         backend: BackendType | None = None,
         device: str = "auto",
         precision: Precision | None = None,
         batch_size: int = 1,
-        confidence: float = 0.25,
+        confidence_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         cache: bool = False,
         cache_dir: Path | None = None,
         kv_cache: bool = False,
-        # NEW — backward-compatible additions
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
         pipeline_workers: int = 0,
     ) -> None:
+        if config is not None:
+            cfg = config
+        else:
+            cfg = InferenceConfig(
+                model_family=model_family,
+                model_size=model_size,
+                weights_path=weights_path,
+                backend=backend,
+                device=device,
+                precision=precision,
+                batch_size=batch_size,
+                confidence_threshold=confidence_threshold,
+                iou_threshold=iou_threshold,
+                cache=cache,
+                cache_dir=cache_dir,
+                kv_cache=kv_cache,
+                frame_drop_policy=frame_drop_policy,
+                max_queue_size=max_queue_size,
+                prefetch=prefetch,
+                pipeline_workers=pipeline_workers,
+            )
+
+        spec = ModelSpec(cfg.model_family, cfg.model_size, weights_path=cfg.weights_path)
+
         self._spec = spec
-        self._batch_size = batch_size
-        self._confidence = confidence
-        self._iou_threshold = iou_threshold
-        self._device = device
+        self._batch_size = cfg.batch_size
+        self._confidence = cfg.confidence_threshold
+        self._iou_threshold = cfg.iou_threshold
+        self._device = cfg.device
 
         # Feature cache (opt-in, PyTorch backend only)
         # cache=True → in-memory; cache_dir → mmap-backed
         self._feature_cache = None
-        if cache or cache_dir is not None:
+        if cfg.cache or cfg.cache_dir is not None:
             from yowo.cache import FeatureCache
 
-            self._feature_cache = FeatureCache(cache_dir=cache_dir)
+            self._feature_cache = FeatureCache(cache_dir=cfg.cache_dir)
 
         # Detect hardware once
         self._hw = get_hardware_profile()
@@ -93,27 +132,27 @@ class InferenceEngine:
         self._selection: BackendSelection = select_backend(
             self._hw,
             model_size=spec.size.value,
-            backend_override=backend.value if backend else None,
-            device_override=device if device != "auto" else None,
-            precision_override=precision.value if precision else None,
+            backend_override=cfg.backend.value if cfg.backend else None,
+            device_override=cfg.device if cfg.device != "auto" else None,
+            precision_override=cfg.precision.value if cfg.precision else None,
         )
 
-        self._kv_cache = kv_cache
+        self._kv_cache = cfg.kv_cache
         self._backend: InferenceBackend = create_backend(
             self._selection.backend,
             self._hw,
             model_spec=self._spec,
             feature_cache=self._feature_cache,
-            kv_cache=kv_cache,
+            kv_cache=cfg.kv_cache,
         )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
 
         # Streaming pipeline parameters
-        self._frame_drop_policy = frame_drop_policy
-        self._max_queue_size = max_queue_size
-        self._prefetch = prefetch
-        self._pipeline_workers = pipeline_workers
+        self._frame_drop_policy = cfg.frame_drop_policy
+        self._max_queue_size = cfg.max_queue_size
+        self._prefetch = cfg.prefetch
+        self._pipeline_workers = cfg.pipeline_workers
         self._preprocess_buf: PreprocessBuffer | None = None
         self._postprocess_buf: PostprocessBuffer | None = None
 
@@ -156,9 +195,7 @@ class InferenceEngine:
                     logger.warning("Using fallback backend: %s", bt.value)
                     # Re-derive device_type from the actual fallback backend
                     # and hardware — not from the (now-failed) original selection.
-                    from yowo.backends._selector import select_backend as _select
-
-                    _fallback_sel = _select(
+                    _fallback_sel = select_backend(
                         self._hw,
                         model_size=self._spec.size.value,
                         backend_override=bt.value,
@@ -202,11 +239,11 @@ class InferenceEngine:
         else:
             tensor = preprocess(frames, target_size)
 
-        # Set source_id for feature caching (PyTorch backend only)
+        # Set source_id for feature caching (PyTorch backend only; no-op on others)
         if self._feature_cache is not None and frames:
             sid = frames[0].source_id
-            if sid and hasattr(self._backend, "set_source_id"):
-                self._backend.set_source_id(sid)  # type: ignore[attr-defined]
+            if sid:
+                self._backend.set_source_id(sid)
 
         t0 = time.perf_counter()
         raw_output = self._backend.infer(tensor)
@@ -237,8 +274,7 @@ class InferenceEngine:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
         # Reset KV state at the start of each new source
-        if hasattr(self._backend, "clear_kv_cache"):
-            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
+        self._backend.clear_kv_cache()
 
         if not self._prefetch:
             yield from self._stream_sync(source)

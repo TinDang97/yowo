@@ -81,23 +81,23 @@ class TestLoadConfigFromYaml:
         cfg = load_config(path=cfg_file)
         assert cfg.batch_size == 4
 
-    def test_loads_max_memory_mb_from_yaml(self, tmp_path: Path) -> None:
+    def test_loads_cache_from_yaml(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text("max_memory_mb: 8192\n")
+        cfg_file.write_text("cache: true\n")
         cfg = load_config(path=cfg_file)
-        assert cfg.max_memory_mb == 8192
+        assert cfg.cache is True
 
-    def test_loads_frame_skip_from_yaml(self, tmp_path: Path) -> None:
+    def test_loads_cache_dir_from_yaml(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text("frame_skip: 2\n")
+        cfg_file.write_text("cache_dir: /tmp/yowo_cache\n")
         cfg = load_config(path=cfg_file)
-        assert cfg.frame_skip == 2
+        assert cfg.cache_dir == Path("/tmp/yowo_cache")
 
-    def test_loads_max_frames_from_yaml(self, tmp_path: Path) -> None:
+    def test_loads_kv_cache_from_yaml(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text("max_frames: 1000\n")
+        cfg_file.write_text("kv_cache: true\n")
         cfg = load_config(path=cfg_file)
-        assert cfg.max_frames == 1000
+        assert cfg.kv_cache is True
 
     def test_empty_yaml_uses_defaults(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -115,8 +115,8 @@ class TestLoadConfigFromYaml:
             confidence_threshold: 0.6
             iou_threshold: 0.5
             batch_size: 2
-            frame_skip: 1
-            reconnect_timeout_s: 10.0
+            cache: true
+            kv_cache: true
         """)
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text(content)
@@ -129,7 +129,8 @@ class TestLoadConfigFromYaml:
         assert cfg.confidence_threshold == pytest.approx(0.6)
         assert cfg.iou_threshold == pytest.approx(0.5)
         assert cfg.batch_size == 2
-        assert cfg.frame_skip == 1
+        assert cfg.cache is True
+        assert cfg.kv_cache is True
 
     def test_invalid_enum_value_in_yaml_raises_config_error(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -149,17 +150,11 @@ class TestLoadConfigFromYaml:
         with pytest.raises(ConfigError, match="confidence_threshold"):
             load_config(path=cfg_file)
 
-    def test_max_frames_null_in_yaml(self, tmp_path: Path) -> None:
+    def test_cache_dir_null_in_yaml(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text("max_frames: null\n")
+        cfg_file.write_text("cache_dir: null\n")
         cfg = load_config(path=cfg_file)
-        assert cfg.max_frames is None
-
-    def test_max_memory_null_in_yaml(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text("max_memory_mb: null\n")
-        cfg = load_config(path=cfg_file)
-        assert cfg.max_memory_mb is None
+        assert cfg.cache_dir is None
 
     def test_backend_null_in_yaml(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -216,25 +211,20 @@ class TestLoadConfigEnvOverrides:
         cfg = load_config()
         assert cfg.batch_size == 8
 
-    def test_env_overrides_max_memory_mb(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("YOWO_MAX_MEMORY_MB", "4096")
+    def test_env_overrides_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_CACHE", "true")
         cfg = load_config()
-        assert cfg.max_memory_mb == 4096
+        assert cfg.cache is True
 
-    def test_env_overrides_reconnect_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("YOWO_RECONNECT_TIMEOUT", "60.0")
+    def test_env_overrides_cache_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_CACHE_DIR", "/tmp/yowo_cache")
         cfg = load_config()
-        assert cfg.reconnect_timeout_s == pytest.approx(60.0)
+        assert cfg.cache_dir == Path("/tmp/yowo_cache")
 
-    def test_env_overrides_frame_skip(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("YOWO_FRAME_SKIP", "3")
+    def test_env_overrides_kv_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_KV_CACHE", "yes")
         cfg = load_config()
-        assert cfg.frame_skip == 3
-
-    def test_env_overrides_max_frames(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("YOWO_MAX_FRAMES", "500")
-        cfg = load_config()
-        assert cfg.max_frames == 500
+        assert cfg.kv_cache is True
 
     def test_env_overrides_weights_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("YOWO_WEIGHTS_PATH", "/data/model.pt")
