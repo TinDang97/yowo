@@ -102,6 +102,15 @@ class FrameDropPolicy(enum.StrEnum):
     SKIP_OLDEST = "skip_oldest"  # Evict oldest when queue full
 
 
+class StreamState(enum.StrEnum):
+    """Health state of a stream managed by FrameCollector."""
+
+    RUNNING = "running"
+    RECONNECTING = "reconnecting"
+    STOPPED = "stopped"
+    ERROR = "error"
+
+
 # ---------------------------------------------------------------------------
 # Frozen dataclasses (pure data, no numpy)
 # ---------------------------------------------------------------------------
@@ -277,6 +286,26 @@ class Frame:
 
 
 @dataclass(slots=True)
+class TaggedFrame:
+    """A frame annotated with its owning stream identifier.
+
+    Used by the multi-stream pipeline to track which stream produced
+    each frame through batched inference and result routing.
+
+    This class is *logically immutable*: callers must not modify fields
+    after construction. It is not ``frozen=True`` because it contains a
+    ``Frame`` reference (which itself is not frozen due to numpy arrays).
+
+    Attributes:
+        stream_id: Unique identifier for the source stream.
+        frame: The underlying video/image frame.
+    """
+
+    stream_id: str
+    frame: Frame
+
+
+@dataclass(slots=True)
 class PreprocessedTensor:
     """Preprocessed model input ready for inference.
 
@@ -336,6 +365,8 @@ __all__ = [
     "ModelSpec",
     "Precision",
     "PreprocessedTensor",
+    "StreamState",
+    "TaggedFrame",
     "is_free_threaded",
 ]
 

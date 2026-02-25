@@ -30,6 +30,7 @@ from yowo.errors import (
 )
 from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
+from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.types import (
     BackendSelection,
     BackendType,
@@ -47,6 +48,8 @@ from yowo.types import (
     ModelSpec,
     Precision,
     PreprocessedTensor,
+    StreamState,
+    TaggedFrame,
     is_free_threaded,
 )
 
@@ -57,11 +60,13 @@ __all__ = [
     "BackendLoadError",
     "BackendSelection",
     "BackendType",
+    "BatchScheduler",
     "BoundingBox",
     "CPUArch",
     "ConfigError",
     "DependencyError",
     "Detection",
+    "DetectionRouter",
     "DeviceError",
     "DeviceType",
     "ExportConfig",
@@ -71,6 +76,7 @@ __all__ = [
     "ExportResult",
     "ExportUnsupportedError",
     "Frame",
+    "FrameCollector",
     "FrameDropPolicy",
     "GPUArch",
     "InferenceConfig",
@@ -86,10 +92,13 @@ __all__ = [
     "PreprocessedTensor",
     "SourceError",
     "SourceTimeoutError",
+    "StreamState",
+    "TaggedFrame",
     "YowoError",
     "__version__",
     "export_model",
     "is_free_threaded",
     "load_config",
     "open_source",
+    "run_pipeline",
 ]

@@ -48,6 +48,8 @@ export/     ← depends on models + hardware + arch
     ↓
 engine.py   ← wires all modules (InferenceEngine)
     ↓
+pipeline/   ← depends on engine + io + types (multi-stream orchestration)
+    ↓
 cli/        ← Click entry point (yowo.cli._main:cli)
 ```
 
@@ -55,7 +57,7 @@ cli/        ← Click entry point (yowo.cli._main:cli)
 
 | File | Role |
 |------|------|
-| `src/yowo/types.py` | All core primitives: `Frame`, `PreprocessedTensor`, `Detection`, `BoundingBox`, `ModelSpec`, enums. Frozen dataclasses, logically immutable. |
+| `src/yowo/types.py` | All core primitives: `Frame`, `PreprocessedTensor`, `Detection`, `BoundingBox`, `ModelSpec`, `TaggedFrame`, `StreamState`, enums. Frozen dataclasses, logically immutable. |
 | `src/yowo/errors.py` | Exception hierarchy rooted at `YowoError`. |
 | `src/yowo/engine.py` | `InferenceEngine` — the public orchestrator. Lifecycle: `__init__` → `load()` → `detect()`/`stream()` → `close()`. Context manager supported. |
 | `src/yowo/backends/_selector.py` | Pure-function backend auto-selection and fallback chain. Priority: TensorRT → ONNX(CUDA) → OpenVINO → ONNX(CPU) → PyTorch. |
@@ -67,6 +69,10 @@ cli/        ← Click entry point (yowo.cli._main:cli)
 | `src/yowo/arch/_yolo.py` | `YOLOModel(nn.Module)` — assembles backbone + neck + head. `build_model()` factory + `fuse()` for inference. |
 | `src/yowo/arch/_weights.py` | `load_weights()` — loads `.pt` checkpoint weights into native `YOLOModel`, maps state_dict keys. |
 | `src/yowo/export/_exporter.py` | `export_model()` — `torch.onnx.export` with fused native model, TensorRT/OpenVINO conversion, `.yowo.json` sidecar. |
+| `src/yowo/pipeline/__init__.py` | `run_pipeline()` — thin wiring: collector → scheduler → engine.detect() → router. Auto-disables feature cache for mixed-source batches. |
+| `src/yowo/pipeline/_collector.py` | `FrameCollector` — manages N concurrent stream readers (ThreadedFrameReader composition), round-robin dispatch, health states. |
+| `src/yowo/pipeline/_scheduler.py` | `BatchScheduler` — accumulates TaggedFrames into batches by capacity or timeout, stop_event cancellation. |
+| `src/yowo/pipeline/_router.py` | `DetectionRouter` — positional-index routing of Detection results to per-stream callbacks. |
 | `src/yowo/config.py` | `InferenceConfig`, `ExportConfig`, `load_config()` (YAML + env var override). |
 
 ### Data flow
@@ -76,6 +82,15 @@ open_source() → FrameSource → Frame (BGR uint8 HWC)
   → preprocess() → PreprocessedTensor (float32 BCHW)
   → InferenceBackend.infer() → NDArray[float32]
   → postprocess() → Detection (Frame + BoundingBox tuple)
+```
+
+### Multi-stream pipeline data flow
+
+```
+N sources → FrameCollector (ThreadedFrameReader per stream) → TaggedFrame
+  → BatchScheduler (capacity/timeout flush) → list[TaggedFrame]
+  → engine.detect([frame for tagged in batch]) → list[Detection]
+  → DetectionRouter (positional index) → per-stream callbacks
 ```
 
 ### Backend implementations
