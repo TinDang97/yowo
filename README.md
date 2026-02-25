@@ -161,40 +161,72 @@ with InferenceEngine(
 ### Video file
 
 ```python
-with InferenceEngine(batch_size=4) as engine:
+# prefetch=True (default) overlaps decode and inference for offline sources
+with InferenceEngine(prefetch=True, batch_size=4) as engine:
     src = open_source("recording.mp4")
     for detection in engine.stream(src):
         # detection.frame.frame_index is the video frame number
         pass
 ```
 
-### RTSP stream (auto-reconnect)
+### RTSP stream (auto-reconnect, live pipeline)
 
 ```python
-with InferenceEngine() as engine:
+from yowo.types import FrameDropPolicy
+
+# Live source → _stream_live path is selected automatically
+# ThreadedFrameReader decouples network I/O from inference
+with InferenceEngine(
+    frame_drop_policy=FrameDropPolicy.LATEST,  # always-current frame
+    max_queue_size=2,
+) as engine:
     src = open_source("rtsp://192.168.1.10:554/live")
     for detection in engine.stream(src):
         # Reconnects automatically on disconnect
-        pass
+        print(f"lag: {detection.frame.frame_index}")
 ```
+
+`FrameDropPolicy` controls what happens when inference is slower than frame delivery:
+
+| Policy | Behaviour | Use case |
+|--------|-----------|----------|
+| `NONE` | Block until queue has space | Offline analysis — no frame skipping |
+| `LATEST` | Evict oldest, insert newest | Real-time display — always-current view |
+| `SKIP_OLDEST` | Pop back of queue | Ordered processing with bounded latency |
 
 ### Batch of frames
 
 ```python
 from yowo import InferenceEngine
+from yowo.types import Frame
+import cv2
 
 engine = InferenceEngine(batch_size=8)
 engine.load()
 
-import cv2, numpy as np
-from yowo.types import Frame
-
 frames = [
-    Frame(data=cv2.imread(f"frame_{i:04d}.jpg"), frame_index=i)
+    Frame(pixels=cv2.imread(f"frame_{i:04d}.jpg"), source_id="batch", frame_index=i)
     for i in range(8)
 ]
 detections = engine.detect(frames)
 engine.close()
+```
+
+### Free-threaded Python (GIL=OFF)
+
+On Python 3.13+ with the free-threaded build (`python3.13t`), inference workers
+run truly in parallel. `pipeline_workers` is auto-detected:
+
+```python
+from yowo.types import is_free_threaded
+
+print(is_free_threaded())  # True on python3.13t
+
+# pipeline_workers=2 is set automatically on GIL=OFF builds
+with InferenceEngine(prefetch=True) as engine:
+    for detection in engine.stream(open_source("video.mp4")):
+        ...
+# ~1.5x throughput vs GIL Python on CPU inference (YOLO26n: 39 → 58 FPS)
 ```
 
 ### Using InferenceConfig
@@ -487,6 +519,7 @@ Architecture and module contracts are documented in:
 | [Vehicle Detection Benchmark — YOLO11s vs YOLO26m](docs/experiments/2026-02-23-vehicle-detection-benchmark.md) | PyTorch FP32 vs ONNX FP32/FP16/INT8 on Apple M4 Pro. YOLO11s ONNX FP16 achieves 18.1 FPS (2.62x PyTorch). YOLO26m ONNX FP32 achieves 6.9 FPS. |
 | [Native Architecture Inference Optimization — all 10 variants](docs/experiments/2026-02-24-arch-inference-optimization-benchmark.md) | DFL buffer, in-place sigmoid, stride flag, anchor cache applied to `arch/`. YOLO26 family 10-17% faster than ultralytics baseline; YOLO11 family 1-4% faster. Box IoU vs ultralytics: 0.967-0.995. 9/10 variants faster, avg 1.07x. |
 | [ONNX + CoreML EP + MPS Optimization](docs/experiments/2026-02-24-onnx-coreml-optimization-benchmark.md) | CoreML EP auto-detection for Apple Neural Engine: **4.36x avg faster** than PyTorch across all 10 variants (nano 140-188 FPS, XL 27-29 FPS). MPS (Metal GPU): 1.32x avg faster than ultralytics. KV cache analysis: +12% on CPU PyTorch (block cache), negligible on GPU/CoreML. |
+| [Phase 3 Source-Aware Pipeline](docs/experiments/2026-02-25-phase3-source-aware-pipeline-benchmark.md) | Source-aware dispatch (`_stream_live` / `_stream_pipeline`), `ThreadedFrameReader`, `FrameDropPolicy`, pre-allocated I/O buffers. CoreML 3.5–3.75× faster than PyTorch on offline video. Free-threaded Python 3.13t: `pipeline_workers=2` auto-selected → **58.4 FPS vs 39.3 FPS (1.49×)** on YOLO26n. |
 
 ---
 
