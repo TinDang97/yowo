@@ -111,6 +111,25 @@ class StreamState(enum.StrEnum):
     ERROR = "error"
 
 
+class SourceCategory(enum.StrEnum):
+    """Input source classification for preset selection."""
+
+    IMAGE = "image"
+    VIDEO = "video"
+    LIVE_STREAM = "live"
+
+
+class DeviceCategory(enum.StrEnum):
+    """Hardware classification for preset selection."""
+
+    CUDA_HIGH = "cuda_high"
+    CUDA_LOW = "cuda_low"
+    JETSON = "jetson"
+    APPLE_SILICON = "apple_silicon"
+    CPU_X86 = "cpu_x86"
+    CPU_ARM = "cpu_arm"
+
+
 # ---------------------------------------------------------------------------
 # Frozen dataclasses (pure data, no numpy)
 # ---------------------------------------------------------------------------
@@ -354,6 +373,7 @@ __all__ = [
     "BoundingBox",
     "CPUArch",
     "Detection",
+    "DeviceCategory",
     "DeviceType",
     "ExportFormat",
     "ExportResult",
@@ -365,6 +385,7 @@ __all__ = [
     "ModelSpec",
     "Precision",
     "PreprocessedTensor",
+    "SourceCategory",
     "StreamState",
     "TaggedFrame",
     "is_free_threaded",
