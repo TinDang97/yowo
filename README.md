@@ -62,11 +62,10 @@ yowo models
 ### Python API
 
 ```python
-from yowo import InferenceEngine, ModelSpec, ModelFamily, ModelSize, open_source
+from yowo import InferenceEngine, open_source
 
-# Minimal: auto-select everything
-spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
-with InferenceEngine(spec) as engine:
+# Minimal: auto-select everything (defaults to YOLO26 Nano)
+with InferenceEngine(confidence_threshold=0.35) as engine:
     for detection in engine.stream(open_source("image.jpg")):
         for box in detection.boxes:
             print(f"{box.class_name}: {box.confidence:.2f} @ {box.as_xyxy()}")
@@ -145,10 +144,13 @@ If a backend fails to load, yowo falls back to the next in chain and logs a warn
 ### Single image
 
 ```python
-from yowo import InferenceEngine, ModelSpec, ModelFamily, ModelSize, open_source
+from yowo import InferenceEngine, ModelFamily, ModelSize, open_source
 
-spec = ModelSpec(ModelFamily.YOLO11, ModelSize.SMALL)
-with InferenceEngine(spec, confidence=0.3) as engine:
+with InferenceEngine(
+    model_family=ModelFamily.YOLO11,
+    model_size=ModelSize.SMALL,
+    confidence_threshold=0.3,
+) as engine:
     src = open_source("photo.jpg")
     for detection in engine.stream(src):
         print(f"{detection.num_boxes} objects in {detection.inference_time_ms:.1f}ms")
@@ -159,7 +161,7 @@ with InferenceEngine(spec, confidence=0.3) as engine:
 ### Video file
 
 ```python
-with InferenceEngine(spec, batch_size=4) as engine:
+with InferenceEngine(batch_size=4) as engine:
     src = open_source("recording.mp4")
     for detection in engine.stream(src):
         # detection.frame.frame_index is the video frame number
@@ -169,7 +171,7 @@ with InferenceEngine(spec, batch_size=4) as engine:
 ### RTSP stream (auto-reconnect)
 
 ```python
-with InferenceEngine(spec) as engine:
+with InferenceEngine() as engine:
     src = open_source("rtsp://192.168.1.10:554/live")
     for detection in engine.stream(src):
         # Reconnects automatically on disconnect
@@ -179,10 +181,9 @@ with InferenceEngine(spec) as engine:
 ### Batch of frames
 
 ```python
-from yowo import InferenceEngine, ModelSpec, ModelFamily, ModelSize
+from yowo import InferenceEngine
 
-spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
-engine = InferenceEngine(spec, batch_size=8)
+engine = InferenceEngine(batch_size=8)
 engine.load()
 
 import cv2, numpy as np
@@ -196,12 +197,27 @@ detections = engine.detect(frames)
 engine.close()
 ```
 
+### Using InferenceConfig
+
+```python
+from yowo import InferenceConfig, InferenceEngine
+
+config = InferenceConfig(
+    model_family=ModelFamily.YOLO26,
+    model_size=ModelSize.NANO,
+    confidence_threshold=0.35,
+    batch_size=4,
+)
+with InferenceEngine(config) as engine:
+    ...
+```
+
 ### Override backend and precision
 
 ```python
 from yowo import BackendType, Precision
 
-with InferenceEngine(spec, backend=BackendType.ONNX, precision=Precision.FP16) as engine:
+with InferenceEngine(backend=BackendType.ONNX, precision=Precision.FP16) as engine:
     ...
 ```
 
@@ -211,13 +227,13 @@ Skip backbone + neck on similar consecutive frames — 60–85% compute savings 
 
 ```python
 # In-memory cache (default)
-with InferenceEngine(spec, cache=True) as engine:
+with InferenceEngine(cache=True) as engine:
     for detection in engine.stream(open_source("video.mp4")):
         ...
 
 # mmap-backed cache (OS manages memory pressure)
 from pathlib import Path
-with InferenceEngine(spec, cache_dir=Path("/tmp/yowo-cache")) as engine:
+with InferenceEngine(cache_dir=Path("/tmp/yowo-cache")) as engine:
     for detection in engine.stream(open_source("rtsp://camera/stream")):
         ...
 ```
@@ -227,7 +243,7 @@ with InferenceEngine(spec, cache_dir=Path("/tmp/yowo-cache")) as engine:
 Reuse Attention K,V tensors and skip C2PSA/C3k2PSA blocks on similar frames. Best for PyTorch CPU/MPS; no benefit on ONNX runtimes.
 
 ```python
-with InferenceEngine(spec, kv_cache=True) as engine:
+with InferenceEngine(kv_cache=True) as engine:
     for detection in engine.stream(open_source("video.mp4")):
         ...
 ```
@@ -235,8 +251,10 @@ with InferenceEngine(spec, kv_cache=True) as engine:
 Export a KV-cache-enabled ONNX model (K,V as explicit I/O for stateless runtimes):
 
 ```python
-from yowo import export_model, ExportFormat, Precision
+from pathlib import Path
+from yowo import export_model, ExportFormat, ModelSpec, ModelFamily, ModelSize, Precision
 
+spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
 meta = export_model(
     spec, ExportFormat.ONNX, output_dir=Path("./exported/"),
     kv_cache=True,
@@ -337,13 +355,17 @@ openvino:     not installed
 ```python
 from yowo import InferenceConfig, InferenceEngine
 
-cfg = InferenceConfig(
-    confidence=0.35,
+# Option A: Pass config object
+config = InferenceConfig(
+    confidence_threshold=0.35,
     iou_threshold=0.5,
     batch_size=4,
-    max_det=100,
 )
-with InferenceEngine(spec, **cfg.__dict__) as engine:
+with InferenceEngine(config) as engine:
+    ...
+
+# Option B: Pass kwargs directly
+with InferenceEngine(confidence_threshold=0.35, batch_size=4) as engine:
     ...
 ```
 
@@ -351,15 +373,17 @@ with InferenceEngine(spec, **cfg.__dict__) as engine:
 
 ```yaml
 # yowo.yaml
-confidence: 0.35
+confidence_threshold: 0.35
 iou_threshold: 0.50
 batch_size: 4
-max_det: 100
 ```
 
 ```python
-from yowo import load_config
-cfg = load_config("yowo.yaml")
+from yowo import load_config, InferenceEngine
+
+config = load_config("yowo.yaml")
+with InferenceEngine(config) as engine:
+    ...
 ```
 
 ### Via environment variables
@@ -367,7 +391,7 @@ cfg = load_config("yowo.yaml")
 ```bash
 export YOWO_CONFIDENCE=0.35
 export YOWO_BATCH_SIZE=4
-export YOWO_IOU_THRESHOLD=0.5
+export YOWO_IOU=0.5
 ```
 
 Precedence: environment variables > YAML file > defaults.
@@ -389,7 +413,7 @@ from yowo import (
 )
 
 try:
-    with InferenceEngine(spec) as engine:
+    with InferenceEngine() as engine:
         ...
 except DependencyError as e:
     print(f"Missing package: {e.package}")
