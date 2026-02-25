@@ -976,3 +976,225 @@ class TestConfigInit:
         assert engine._spec.size == ModelSize.SMALL
         assert engine._confidence == pytest.approx(0.5)  # type: ignore[attr-defined]
         assert engine._batch_size == 4  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Test: detect([]) empty frames (H-3)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectEmptyFrames:
+    def test_detect_empty_list_raises_value_error(self) -> None:
+        """detect([]) raises ValueError from preprocess() — empty input is invalid."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            InferenceEngine() as engine,
+            pytest.raises(ValueError, match="empty"),
+        ):
+            engine.detect([])
+
+
+# ---------------------------------------------------------------------------
+# Test: concurrent pipeline path (H-1/H-2)
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentPipeline:
+    def test_pipeline_workers_gt1_produces_correct_results(self) -> None:
+        """pipeline_workers=2 (concurrent path) yields the same results as sync."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, batch_size=2, pipeline_workers=2)
+
+        frames = [_make_frame(i) for i in range(6)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=6)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(f, spec) for f in fs],
+            ),
+        ):
+            results = list(engine.stream(source))
+
+        assert len(results) == 6
+        indices = sorted(d.frame.frame_index for d in results)
+        assert indices == list(range(6))
+        source.close.assert_called_once()
+
+    def test_pipeline_worker_exception_propagates(self) -> None:
+        """If a worker raises during inference, the exception propagates to the caller."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        mock_backend.infer.side_effect = RuntimeError("GPU OOM")
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, batch_size=1, pipeline_workers=2)
+
+        frames = [_make_frame(0)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=1)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+        dummy_tensor.data = np.zeros((1, 3, 640, 640), dtype=np.float32)
+
+        with (
+            patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            pytest.raises(RuntimeError, match="GPU OOM"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: source.close() called on exceptions (H-11)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceCloseOnExceptions:
+    def test_stream_single_closes_on_detect_error(self) -> None:
+        """_stream_single calls source.close() even when detect() raises."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend)
+
+        frame = _make_frame(0)
+        source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
+
+        with (
+            patch.object(engine, "detect", side_effect=InferenceError("boom")),
+            pytest.raises(InferenceError, match="boom"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+    def test_stream_sync_closes_on_detect_error(self) -> None:
+        """_stream_sync calls source.close() even when detect() raises."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, prefetch=False)
+
+        frames = [_make_frame(i) for i in range(3)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=3)
+
+        with (
+            patch.object(engine, "detect", side_effect=InferenceError("boom")),
+            pytest.raises(InferenceError, match="boom"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+    def test_stream_pipeline_closes_on_detect_error(self) -> None:
+        """_stream_pipeline calls source.close() even when detect() raises in worker."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        mock_backend.infer.side_effect = InferenceError("worker crash")
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, pipeline_workers=1)
+
+        frames = [_make_frame(i) for i in range(2)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=2)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+        dummy_tensor.data = np.zeros((1, 3, 640, 640), dtype=np.float32)
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            pytest.raises(InferenceError, match="worker crash"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: _stream_live idle timeout (H-5)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamLiveIdleTimeout:
+    def test_live_stream_terminates_on_idle_timeout(self) -> None:
+        """_stream_live breaks after max idle time with no frames."""
+        import time as time_mod
+
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend)
+
+        # Source that never yields any frames
+        source = _make_mock_source(frames=[], is_live=True, total_frames=None)
+
+        # Patch time.monotonic to simulate rapid passage of time
+        # and ThreadedFrameReader to return None (timeout) immediately
+        mono_times = iter([0.0, 0.0, 31.0])  # first call sets idle_since=0, third triggers break
+
+        with (
+            patch("yowo.engine.ThreadedFrameReader") as mock_reader_cls,
+            patch("yowo.engine.time") as mock_time,
+        ):
+            mock_reader = MagicMock()
+            mock_reader.get.return_value = None
+            mock_reader.is_exhausted = False
+            mock_reader_cls.return_value = mock_reader
+            mock_time.perf_counter = time_mod.perf_counter
+            mock_time.monotonic = lambda: next(mono_times)
+
+            results = list(engine.stream(source))
+
+        assert results == []
+        source.close.assert_called_once()
