@@ -27,12 +27,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from yowo.errors import ConfigError
-from yowo.types import BackendType, ExportFormat, FrameDropPolicy, ModelFamily, ModelSize, Precision
+from yowo.types import (
+    BackendType,
+    CPUArch,
+    DeviceCategory,
+    ExportFormat,
+    FrameDropPolicy,
+    ModelFamily,
+    ModelSize,
+    Precision,
+    SourceCategory,
+)
+
+if TYPE_CHECKING:
+    from yowo.hardware import HardwareProfile
 
 # ---------------------------------------------------------------------------
 # InferenceConfig
@@ -286,8 +299,101 @@ def load_config(path: Path | None = None) -> InferenceConfig:
     return cfg
 
 
+# ---------------------------------------------------------------------------
+# Preset inference: source classification
+# ---------------------------------------------------------------------------
+
+_IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
+_VIDEO_EXTS = frozenset({".mp4", ".avi", ".mov", ".mkv", ".ts"})
+_RTSP_SCHEMES = ("rtsp://", "rtsps://")
+
+
+def classify_source(source: str | Path) -> SourceCategory:
+    """Classify a source string into a SourceCategory without opening it.
+
+    Uses the same dispatch rules as ``open_source()`` in ``yowo.io``.
+
+    Args:
+        source: File path, URL string, webcam index string, or directory.
+
+    Returns:
+        The matching SourceCategory.
+
+    Raises:
+        ConfigError: If the source type cannot be determined.
+    """
+    source_str = str(source)
+
+    # Webcam: pure digit string -> live
+    if isinstance(source, str) and source.isdigit():
+        return SourceCategory.LIVE_STREAM
+
+    # RTSP -> live
+    if source_str.startswith(_RTSP_SCHEMES):
+        return SourceCategory.LIVE_STREAM
+
+    path = Path(source_str)
+    suffix = path.suffix.lower()
+
+    # Existing directory -> image batch
+    if path.is_dir():
+        return SourceCategory.IMAGE
+
+    if suffix in _IMAGE_EXTS:
+        return SourceCategory.IMAGE
+
+    if suffix in _VIDEO_EXTS:
+        return SourceCategory.VIDEO
+
+    raise ConfigError(
+        f"Cannot classify source type for: {source!r}. "
+        f"Supported: image files {sorted(_IMAGE_EXTS)}, "
+        f"video files {sorted(_VIDEO_EXTS)}, "
+        f'RTSP URLs (rtsp://), webcam indices ("0", "1", ...).'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Preset inference: device classification
+# ---------------------------------------------------------------------------
+
+_VRAM_HIGH_THRESHOLD_MB = 8192
+
+
+def classify_device(hw: HardwareProfile) -> DeviceCategory:
+    """Classify hardware into a DeviceCategory for preset selection.
+
+    Priority order: Jetson > CUDA_HIGH > CUDA_LOW > APPLE_SILICON > CPU_X86 > CPU_ARM.
+
+    Args:
+        hw: Hardware profile snapshot.
+
+    Returns:
+        The matching DeviceCategory.
+    """
+    if hw.is_jetson:
+        return DeviceCategory.JETSON
+
+    if hw.has_nvidia_gpu:
+        gpu = hw.primary_gpu
+        assert gpu is not None  # guarded by has_nvidia_gpu
+        if gpu.memory_total_mb >= _VRAM_HIGH_THRESHOLD_MB:
+            return DeviceCategory.CUDA_HIGH
+        return DeviceCategory.CUDA_LOW
+
+    if hw.libraries.onnxruntime_has_coreml and hw.cpu.cpu_arch == CPUArch.AARCH64:
+        return DeviceCategory.APPLE_SILICON
+
+    if hw.cpu.cpu_arch == CPUArch.X86_64:
+        return DeviceCategory.CPU_X86
+
+    return DeviceCategory.CPU_ARM
+
+
 __all__ = [
     "ExportConfig",
     "InferenceConfig",
+    "classify_device",
+    "classify_source",
     "load_config",
 ]
