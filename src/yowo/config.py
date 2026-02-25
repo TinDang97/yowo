@@ -17,6 +17,10 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_RECONNECT_TIMEOUT   -> InferenceConfig.reconnect_timeout_s
     YOWO_FRAME_SKIP          -> InferenceConfig.frame_skip
     YOWO_MAX_FRAMES          -> InferenceConfig.max_frames
+    YOWO_FRAME_DROP_POLICY   -> InferenceConfig.frame_drop_policy
+    YOWO_MAX_QUEUE_SIZE      -> InferenceConfig.max_queue_size
+    YOWO_PREFETCH            -> InferenceConfig.prefetch
+    YOWO_PIPELINE_WORKERS    -> InferenceConfig.pipeline_workers
 """
 
 from __future__ import annotations
@@ -88,7 +92,7 @@ class InferenceConfig:
     reconnect_timeout_s: float = 30.0
     frame_skip: int = 0
     max_frames: int | None = None
-    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.NONE
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST
     max_queue_size: int = 2
     prefetch: bool = True
     pipeline_workers: int = 0
@@ -193,6 +197,14 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.frame_skip = int(v)
     if (v := env.get("YOWO_MAX_FRAMES")) is not None:
         cfg.max_frames = int(v)
+    if (v := env.get("YOWO_FRAME_DROP_POLICY")) is not None:
+        cfg.frame_drop_policy = FrameDropPolicy(v)
+    if (v := env.get("YOWO_MAX_QUEUE_SIZE")) is not None:
+        cfg.max_queue_size = int(v)
+    if (v := env.get("YOWO_PREFETCH")) is not None:
+        cfg.prefetch = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_PIPELINE_WORKERS")) is not None:
+        cfg.pipeline_workers = int(v)
 
 
 def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:

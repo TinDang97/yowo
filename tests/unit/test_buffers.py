@@ -51,6 +51,10 @@ class TestPreprocessBuffer:
         second_call_id = id(buf.get_staging(0))
         assert first_call_id == second_call_id  # same object
 
+    def test_target_size_property(self) -> None:
+        buf = PreprocessBuffer(max_batch=1, target_size=(480, 640))
+        assert buf.target_size == (480, 640)
+
 
 class TestPreprocessInto:
     def test_output_shape_matches_preprocess(self) -> None:
@@ -108,6 +112,13 @@ class TestPreprocessInto:
         result = preprocess_into([frame], (640, 640), buf)
         reference = preprocess([frame], (640, 640))
         assert np.allclose(result.data, reference.data, atol=1e-5)
+
+    def test_target_size_mismatch_raises(self) -> None:
+        """preprocess_into() rejects buffer with mismatched target_size."""
+        frame = _make_frame()
+        buf = PreprocessBuffer(max_batch=1, target_size=(480, 640))
+        with pytest.raises(ValueError, match="target_size"):
+            preprocess_into([frame], (640, 640), buf)
 
 
 class TestPostprocessBuffer:

@@ -61,6 +61,10 @@ class PreprocessBuffer:
         return self._capacity
 
     @property
+    def target_size(self) -> tuple[int, int]:
+        return self._target_size
+
+    @property
     def memory_bytes(self) -> int:
         h, w = self._target_size
         return self._capacity * h * w * 3
@@ -182,6 +186,10 @@ def preprocess_into(
         raise ValueError("frames list must not be empty")
     if len(frames) > buffer.capacity:
         raise ValueError(f"batch size {len(frames)} exceeds buffer capacity {buffer.capacity}")
+    if buffer.target_size != target_size:
+        raise ValueError(
+            f"buffer target_size {buffer.target_size} does not match target_size {target_size}"
+        )
 
     target_h, target_w = target_size
     staging_views: list[cv2.typing.MatLike] = []

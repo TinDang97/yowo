@@ -272,7 +272,7 @@ class TestLoadConfigEnvOverrides:
 class TestStreamingConfig:
     def test_defaults(self) -> None:
         cfg = InferenceConfig(model_family=ModelFamily.YOLO26, model_size=ModelSize.NANO)
-        assert cfg.frame_drop_policy == FrameDropPolicy.NONE
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
         assert cfg.max_queue_size == 2
         assert cfg.prefetch is True
         assert cfg.pipeline_workers == 0
@@ -362,3 +362,38 @@ class TestStreamingConfig:
         cfg_file.write_text("frame_drop_policy: bogus\n")
         with pytest.raises(ConfigError, match="Invalid value in config file"):
             load_config(path=cfg_file)
+
+    def test_env_overrides_frame_drop_policy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_FRAME_DROP_POLICY", "none")
+        cfg = load_config()
+        assert cfg.frame_drop_policy == FrameDropPolicy.NONE
+
+    def test_env_overrides_max_queue_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_MAX_QUEUE_SIZE", "16")
+        cfg = load_config()
+        assert cfg.max_queue_size == 16
+
+    def test_env_overrides_prefetch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_PREFETCH", "false")
+        cfg = load_config()
+        assert cfg.prefetch is False
+
+    def test_env_overrides_prefetch_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_PREFETCH", "1")
+        cfg = load_config()
+        assert cfg.prefetch is True
+
+    def test_env_overrides_pipeline_workers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_PIPELINE_WORKERS", "2")
+        cfg = load_config()
+        assert cfg.pipeline_workers == 2
+
+    def test_env_invalid_frame_drop_policy_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_FRAME_DROP_POLICY", "bogus")
+        with pytest.raises(ConfigError, match="Invalid YOWO_ environment variable"):
+            load_config()
+
+    def test_env_max_queue_size_zero_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_MAX_QUEUE_SIZE", "0")
+        with pytest.raises(ConfigError, match="max_queue_size"):
+            load_config()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -145,25 +146,28 @@ class ThreadedFrameReader:
         """Get the next frame from the queue.
 
         Blocks until a frame is available, the source is exhausted, or
-        ``timeout`` seconds pass. Returns ``None`` when the source is fully
-        consumed. Re-raises any exception that occurred in the reader thread.
+        ``timeout`` seconds pass. Returns ``None`` only when the source is
+        fully consumed (``is_exhausted`` is True and the queue is empty).
+        Returns ``None`` on timeout as well — callers that need to distinguish
+        timeout from exhaustion should check ``is_exhausted`` after receiving
+        ``None``.
 
         Args:
             timeout: Maximum seconds to wait for the next frame.
 
         Returns:
-            A ``Frame``, or ``None`` when the source is exhausted.
+            A ``Frame``, or ``None`` when the source is exhausted or on timeout.
 
         Raises:
             Exception: Any exception raised by the underlying ``FrameSource``.
         """
         with self._not_empty:
-            deadline = timeout
+            deadline = time.monotonic() + timeout
             while not self._deque and not self._exhausted and self._error is None:
-                self._not_empty.wait(timeout=min(deadline, 0.1))
-                deadline -= 0.1
-                if deadline <= 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     break
+                self._not_empty.wait(timeout=min(remaining, 0.1))
             if self._error is not None:
                 raise self._error
             if self._deque:
@@ -176,6 +180,9 @@ class ThreadedFrameReader:
         """Signal the reader to stop and wait for the thread to join."""
         self._stop_event.set()
         with self._not_empty:
+            # Count remaining queued frames as dropped on shutdown.
+            self._frames_dropped += len(self._deque)
+            self._deque.clear()
             self._not_empty.notify_all()
             self._not_full.notify_all()
         if self._thread is not None:
@@ -196,6 +203,12 @@ class ThreadedFrameReader:
     # ------------------------------------------------------------------
     # Metrics
     # ------------------------------------------------------------------
+
+    @property
+    def is_exhausted(self) -> bool:
+        """True when the source has been fully consumed or errored."""
+        with self._lock:
+            return self._exhausted
 
     @property
     def frames_read(self) -> int:
