@@ -63,28 +63,28 @@ def detect_command(
     save_frames: str | None,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
+    from yowo.config import InferenceConfig
     from yowo.engine import InferenceEngine
-    from yowo.io._source import open_source
+    from yowo.io import open_source
 
     spec = _parse_model_spec(model)
-    if weights:
-        spec = ModelSpec(spec.family, spec.size, spec.task, Path(weights))
+    weights_path = Path(weights) if weights else spec.weights_path
 
-    engine_kwargs: dict[str, object] = dict(
+    config = InferenceConfig(
+        model_family=spec.family,
+        model_size=spec.size,
+        weights_path=weights_path,
         batch_size=batch,
-        confidence=confidence,
+        confidence_threshold=confidence,
         iou_threshold=iou,
+        backend=BackendType(backend) if backend != "auto" else None,
+        device=device,
+        precision=Precision(precision) if precision != "auto" else None,
     )
-    if backend != "auto":
-        engine_kwargs["backend"] = BackendType(backend)
-    if device != "auto":
-        engine_kwargs["device"] = device
-    if precision != "auto":
-        engine_kwargs["precision"] = Precision(precision)
 
     detections = []
     try:
-        with InferenceEngine(spec, **engine_kwargs) as engine:  # type: ignore[arg-type]
+        with InferenceEngine(config) as engine:
             src = open_source(source)
             for det in engine.stream(src):
                 detections.append(det)
@@ -106,7 +106,7 @@ def detect_command(
                 else "json"
             )
         if fmt == "image":
-            from yowo.io._sink import write_annotated_frame
+            from yowo.io import write_annotated_frame
 
             for det in detections:
                 write_annotated_frame(det, out_path)
@@ -114,7 +114,7 @@ def detect_command(
             _write_json(detections, out_path)
         click.echo(f"Saved detections to {output}")
     if save_frames:
-        from yowo.io._sink import write_annotated_frames
+        from yowo.io import write_annotated_frames
 
         out_dir = Path(save_frames)
         write_annotated_frames(detections, out_dir)
