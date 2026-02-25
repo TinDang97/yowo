@@ -11,6 +11,104 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **io, engine**: Source-aware pipeline dispatch — Phase 3.
+  `InferenceEngine.stream()` now inspects `source.is_live` to select the
+  optimal execution path automatically:
+  - `_stream_live` — live sources (RTSP, webcam): `ThreadedFrameReader` runs
+    in a background daemon thread, decoupling network I/O from inference.
+    `FrameDropPolicy` controls queue behaviour under backpressure.
+  - `_stream_pipeline` — offline video with `prefetch=True`: background
+    prefetch overlaps decode and inference to hide I/O latency.
+  - `_stream_sync` — offline video with `prefetch=False`: legacy sequential
+    path, zero regression guarantee.
+  - `_stream_single` — image sources: single-frame fast path.
+  No user configuration required — `open_source("rtsp://...")` sets
+  `is_live=True` and the engine dispatches accordingly.
+
+- **io**: `ThreadedFrameReader` — bounded background frame reader.
+  `io/_reader.py`: daemon thread fills a `deque(maxlen=max_queue_size)` from
+  any `FrameSource`. Exposes `frames_read`, `frames_dropped`, `drop_rate`
+  counters. Idle timeout (5 s) triggers clean shutdown without deadlock.
+  Thread-safe via `threading.Lock` on all shared state.
+
+- **types**: `FrameDropPolicy(StrEnum)` — three drop strategies for live
+  sources under backpressure:
+  - `NONE` — block until space is available (no drops, bounded latency risk)
+  - `LATEST` — evict oldest frame, insert newest (always-current view)
+  - `SKIP_OLDEST` — pop back of queue to make room (FIFO order preserved)
+
+- **io, postprocess**: Pre-allocated I/O buffers eliminate per-frame heap
+  allocation on the hot path.
+  - `PreprocessBuffer(max_batch, target_size)` — pre-allocated
+    `(max_batch, H, W, 3)` uint8 staging array. `preprocess_into()` writes
+    directly into the buffer, replacing `cv2.copyMakeBorder` allocation.
+  - `PostprocessBuffer(max_detections)` — pre-allocated `(max_detections, 4)`
+    float32 scratch for inverse letterbox. `get_inverse_out(n)` returns a view
+    with a fresh-allocation fallback for oversized batches.
+
+- **types, engine**: `is_free_threaded()` — runtime GIL detection.
+  `not sys._is_gil_enabled()` with `AttributeError` guard for Python < 3.13.
+  `InferenceEngine` uses this to auto-set `pipeline_workers=2` on free-threaded
+  Python (GIL=OFF) and `pipeline_workers=1` otherwise.
+
+- **engine**: New `InferenceEngine` kwargs for Phase 3 pipeline control.
+  `prefetch: bool` (default `True`), `pipeline_workers: int | None` (default
+  `None`, auto), `frame_drop_policy: FrameDropPolicy` (default `NONE`),
+  `max_queue_size: int` (default `4`). All reflected in `InferenceConfig`.
+
+### Refactored
+
+- **engine, backends**: Black box boundary fixes from architecture audit.
+  - All cross-package imports now use public `__init__.py` surfaces instead of
+    private `_module` paths.
+  - `InferenceBackend` Protocol gains `clear_kv_cache()` and `set_source_id()`.
+    Removes all `hasattr`/`type: ignore[attr-defined]` from engine.py.
+  - `InferenceEngine` constructor flattened: accepts `InferenceConfig` or
+    individual kwargs (all optional, defaults to YOLO26 Nano). `ModelSpec` is
+    no longer accepted as a positional argument.
+
+### Performance
+
+- **io**: `PreprocessBuffer` eliminates `cv2.copyMakeBorder` allocation on
+  every frame — saves one `(H, W, 3)` uint8 copy (~2.8 MB for 1280×720 input).
+- **postprocess**: `PostprocessBuffer` reuses inverse-letterbox scratch array
+  across frames — saves one `(max_detections, 4)` float32 allocation per frame.
+- **engine**: `pipeline_workers=2` on free-threaded Python (GIL=OFF) delivers
+  ~1.5× throughput on YOLO26n CPU inference via true thread parallelism
+  (1.47× measured on Apple M4 Pro, Python 3.13.3+freethreaded).
+
+### Fixes
+
+- **engine, io**: Thread safety hardening (P0/P1 review).
+  `ThreadedFrameReader` uses `threading.Lock` on `frames_dropped` counter
+  increment to prevent lost updates under concurrent reads. `_stop_event` is
+  checked before each `deque.append` to avoid post-stop writes.
+
+### Experiments
+
+- Phase 3 source-aware pipeline: offline video 1.03× vs legacy; RTSP
+  stream-capped at ~11 FPS on localhost (expected — gains visible on
+  high-latency remote cameras); CoreML 3.5–3.75× faster than PyTorch on
+  offline video; free-threaded Python 3.13t `pipeline_workers=2` → 58.4 FPS
+  vs 39.3 FPS (1.49×).
+  See [`docs/experiments/2026-02-25-phase3-source-aware-pipeline-benchmark.md`](docs/experiments/2026-02-25-phase3-source-aware-pipeline-benchmark.md).
+
+### Breaking Changes
+
+- `InferenceEngine(spec, ...)` no longer accepts `ModelSpec` as the first
+  positional argument. Use `InferenceEngine(model_family=..., model_size=...)`
+  or `InferenceEngine(InferenceConfig(...))` instead.
+- `confidence` kwarg renamed to `confidence_threshold` (matches `InferenceConfig`).
+- `InferenceConfig` removes 4 dead fields: `max_memory_mb`,
+  `reconnect_timeout_s`, `frame_skip`, `max_frames`. Adds 3 fields: `cache`,
+  `cache_dir`, `kv_cache`.
+
+---
+
 ## [1.1.0] — 2026-02-24
 
 ### Features

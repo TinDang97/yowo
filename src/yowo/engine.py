@@ -5,27 +5,39 @@ Handles backend lifecycle, batch accumulation, and graceful degradation.
 
 Usage::
 
-    spec = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
-    with InferenceEngine(spec) as engine:
+    # Option A: Pass an InferenceConfig
+    from yowo import InferenceConfig, InferenceEngine
+
+    config = InferenceConfig(confidence_threshold=0.35, batch_size=4)
+    with InferenceEngine(config) as engine:
         for detection in engine.stream(open_source("video.mp4")):
             process(detection)
+
+    # Option B: Pass individual kwargs (defaults to YOLO26 Nano)
+    with InferenceEngine(confidence_threshold=0.35) as engine:
+        ...
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from yowo.backends import InferenceBackend, create_backend
-from yowo.backends._selector import get_fallback_backends, select_backend
+from yowo.backends import (
+    InferenceBackend,
+    create_backend,
+    get_fallback_backends,
+    select_backend,
+)
+from yowo.config import InferenceConfig
 from yowo.errors import BackendError, BackendLoadError, InferenceError
 from yowo.hardware import get_hardware_profile
-from yowo.io import PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
-from yowo.io._source import FrameSource
+from yowo.io import FrameSource, PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
+from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
-from yowo.models._registry import get as _registry_get
 from yowo.postprocess import PostprocessBuffer, postprocess
 from yowo.types import (
     BackendSelection,
@@ -33,6 +45,8 @@ from yowo.types import (
     Detection,
     Frame,
     FrameDropPolicy,
+    ModelFamily,
+    ModelSize,
     ModelSpec,
     Precision,
     is_free_threaded,
@@ -55,36 +69,62 @@ class InferenceEngine:
 
     def __init__(
         self,
-        spec: ModelSpec,
+        config: InferenceConfig | None = None,
         *,
+        model_family: ModelFamily = ModelFamily.YOLO26,
+        model_size: ModelSize = ModelSize.NANO,
+        weights_path: Path | None = None,
         backend: BackendType | None = None,
         device: str = "auto",
         precision: Precision | None = None,
         batch_size: int = 1,
-        confidence: float = 0.25,
+        confidence_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         cache: bool = False,
         cache_dir: Path | None = None,
         kv_cache: bool = False,
-        # NEW — backward-compatible additions
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
         pipeline_workers: int = 0,
     ) -> None:
+        if config is not None:
+            cfg = config
+        else:
+            cfg = InferenceConfig(
+                model_family=model_family,
+                model_size=model_size,
+                weights_path=weights_path,
+                backend=backend,
+                device=device,
+                precision=precision,
+                batch_size=batch_size,
+                confidence_threshold=confidence_threshold,
+                iou_threshold=iou_threshold,
+                cache=cache,
+                cache_dir=cache_dir,
+                kv_cache=kv_cache,
+                frame_drop_policy=frame_drop_policy,
+                max_queue_size=max_queue_size,
+                prefetch=prefetch,
+                pipeline_workers=pipeline_workers,
+            )
+
+        spec = ModelSpec(cfg.model_family, cfg.model_size, weights_path=cfg.weights_path)
+
         self._spec = spec
-        self._batch_size = batch_size
-        self._confidence = confidence
-        self._iou_threshold = iou_threshold
-        self._device = device
+        self._batch_size = cfg.batch_size
+        self._confidence = cfg.confidence_threshold
+        self._iou_threshold = cfg.iou_threshold
+        self._device = cfg.device
 
         # Feature cache (opt-in, PyTorch backend only)
         # cache=True → in-memory; cache_dir → mmap-backed
         self._feature_cache = None
-        if cache or cache_dir is not None:
+        if cfg.cache or cfg.cache_dir is not None:
             from yowo.cache import FeatureCache
 
-            self._feature_cache = FeatureCache(cache_dir=cache_dir)
+            self._feature_cache = FeatureCache(cache_dir=cfg.cache_dir)
 
         # Detect hardware once
         self._hw = get_hardware_profile()
@@ -93,27 +133,27 @@ class InferenceEngine:
         self._selection: BackendSelection = select_backend(
             self._hw,
             model_size=spec.size.value,
-            backend_override=backend.value if backend else None,
-            device_override=device if device != "auto" else None,
-            precision_override=precision.value if precision else None,
+            backend_override=cfg.backend.value if cfg.backend else None,
+            device_override=cfg.device if cfg.device != "auto" else None,
+            precision_override=cfg.precision.value if cfg.precision else None,
         )
 
-        self._kv_cache = kv_cache
+        self._kv_cache = cfg.kv_cache
         self._backend: InferenceBackend = create_backend(
             self._selection.backend,
             self._hw,
             model_spec=self._spec,
             feature_cache=self._feature_cache,
-            kv_cache=kv_cache,
+            kv_cache=cfg.kv_cache,
         )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
 
         # Streaming pipeline parameters
-        self._frame_drop_policy = frame_drop_policy
-        self._max_queue_size = max_queue_size
-        self._prefetch = prefetch
-        self._pipeline_workers = pipeline_workers
+        self._frame_drop_policy = cfg.frame_drop_policy
+        self._max_queue_size = cfg.max_queue_size
+        self._prefetch = cfg.prefetch
+        self._pipeline_workers = cfg.pipeline_workers
         self._preprocess_buf: PreprocessBuffer | None = None
         self._postprocess_buf: PostprocessBuffer | None = None
 
@@ -156,9 +196,7 @@ class InferenceEngine:
                     logger.warning("Using fallback backend: %s", bt.value)
                     # Re-derive device_type from the actual fallback backend
                     # and hardware — not from the (now-failed) original selection.
-                    from yowo.backends._selector import select_backend as _select
-
-                    _fallback_sel = _select(
+                    _fallback_sel = select_backend(
                         self._hw,
                         model_size=self._spec.size.value,
                         backend_override=bt.value,
@@ -202,11 +240,11 @@ class InferenceEngine:
         else:
             tensor = preprocess(frames, target_size)
 
-        # Set source_id for feature caching (PyTorch backend only)
+        # Set source_id for feature caching (PyTorch backend only; no-op on others)
         if self._feature_cache is not None and frames:
             sid = frames[0].source_id
-            if sid and hasattr(self._backend, "set_source_id"):
-                self._backend.set_source_id(sid)  # type: ignore[attr-defined]
+            if sid:
+                self._backend.set_source_id(sid)
 
         t0 = time.perf_counter()
         raw_output = self._backend.infer(tensor)
@@ -237,8 +275,7 @@ class InferenceEngine:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
         # Reset KV state at the start of each new source
-        if hasattr(self._backend, "clear_kv_cache"):
-            self._backend.clear_kv_cache()  # type: ignore[attr-defined]
+        self._backend.clear_kv_cache()
 
         if not self._prefetch:
             yield from self._stream_sync(source)
@@ -258,7 +295,20 @@ class InferenceEngine:
             source.close()
 
     def _stream_live(self, source: FrameSource) -> Iterator[Detection]:
-        """Live source path: threaded reader with frame drop policy, batch=1."""
+        """Live source path: threaded reader with frame drop policy, batch=1.
+
+        Always uses batch=1 regardless of configured batch_size to minimise
+        latency on live sources.  Terminates after 30 s of consecutive
+        timeouts (dead/hung source) to prevent infinite hangs.
+        """
+        _MAX_IDLE_S = 30.0
+        _POLL_TIMEOUT = 1.0
+
+        if self._batch_size > 1:
+            logger.debug(
+                "Live source: using batch=1 for latency (configured batch_size=%d ignored)",
+                self._batch_size,
+            )
         reader = ThreadedFrameReader(
             source,
             max_queue_size=self._max_queue_size,
@@ -266,8 +316,25 @@ class InferenceEngine:
         )
         reader.start()
         try:
-            while (frame := reader.get(timeout=1.0)) is not None:
-                yield from self.detect([frame])
+            idle_since: float | None = None
+            while True:
+                frame = reader.get(timeout=_POLL_TIMEOUT)
+                if frame is not None:
+                    idle_since = None
+                    yield from self.detect([frame])
+                elif reader.is_exhausted:
+                    break
+                else:
+                    # Timeout — track consecutive idle time.
+                    now = time.monotonic()
+                    if idle_since is None:
+                        idle_since = now
+                    elif now - idle_since >= _MAX_IDLE_S:
+                        logger.warning(
+                            "Live source idle for %.0fs, terminating stream",
+                            now - idle_since,
+                        )
+                        break
         finally:
             reader.stop()
             source.close()
@@ -276,10 +343,19 @@ class InferenceEngine:
         """Offline source path: threaded prefetch + pipeline overlap.
 
         Uses concurrent.futures.ThreadPoolExecutor to overlap frame reading
-        with inference. On free-threaded Python 3.14t, preprocess + postprocess
-        also run in parallel with I/O (true CPU parallelism). On GIL Python,
-        inference C++ code releases the GIL enabling I/O overlap.
+        with inference. Maintains up to ``pipeline_workers`` futures in flight
+        so that batch N+1 can preprocess while batch N infers.
+
+        On free-threaded Python 3.14t, worker threads achieve true CPU
+        parallelism. On GIL Python, inference C++ code releases the GIL
+        enabling I/O overlap.
+
+        When ``pipeline_workers > 1``, shared preprocess/postprocess buffers
+        are bypassed to avoid data races between concurrent worker threads.
+        A lock serialises ``backend.infer()`` calls to protect backends with
+        mutable state (e.g. PyTorch BatchNorm, feature cache).
         """
+        from collections import deque as Deque
         from concurrent.futures import Future, ThreadPoolExecutor
 
         reader = ThreadedFrameReader(
@@ -289,12 +365,42 @@ class InferenceEngine:
         )
         reader.start()
 
+        concurrent = self._pipeline_workers > 1
+        # Serialise backend.infer() across worker threads to prevent data
+        # races in backends with mutable state (PyTorch BatchNorm, KV cache).
+        # Preprocessing still runs in parallel across workers.
+        infer_lock = threading.Lock() if concurrent else None
+
         def _infer_batch(frames: list[Frame]) -> list[Detection]:
+            if concurrent:
+                # Per-call allocation — no shared buffers across workers.
+                target_size = (self._model_meta.input_height, self._model_meta.input_width)
+                tensor = preprocess(frames, target_size)
+                if infer_lock is not None:
+                    with infer_lock:
+                        t0 = time.perf_counter()
+                        raw_output = self._backend.infer(tensor)
+                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                else:
+                    t0 = time.perf_counter()
+                    raw_output = self._backend.infer(tensor)
+                    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                return postprocess(
+                    raw_output,
+                    tensor,
+                    frames,
+                    model_spec=self._spec,
+                    backend=self._selection.backend,
+                    confidence_threshold=self._confidence,
+                    iou_threshold=self._iou_threshold,
+                    inference_time_ms=elapsed_ms,
+                )
             return self.detect(frames)
 
+        pending: Deque[Future[list[Detection]]] = Deque()
         try:
-            pending: Future[list[Detection]] | None = None
             batch: list[Frame] = []
+            max_pending = self._pipeline_workers
 
             with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
                 while True:
@@ -303,17 +409,22 @@ class InferenceEngine:
                         batch.append(frame)
 
                     if len(batch) >= self._batch_size or (frame is None and batch):
-                        if pending is not None:
-                            yield from pending.result()
-                        pending = pool.submit(_infer_batch, batch.copy())
+                        # Drain oldest future if pipeline is full.
+                        if len(pending) >= max_pending:
+                            yield from pending.popleft().result()
+                        pending.append(pool.submit(_infer_batch, batch.copy()))
                         batch.clear()
 
-                    if frame is None:
+                    if frame is None and reader.is_exhausted:
                         break
 
-                if pending is not None:
-                    yield from pending.result()
+                # Drain remaining futures in submission order.
+                while pending:
+                    yield from pending.popleft().result()
         finally:
+            # Cancel any undrained futures to prevent leaked threads.
+            for fut in pending:
+                fut.cancel()
             reader.stop()
             source.close()
 

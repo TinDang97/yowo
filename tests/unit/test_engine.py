@@ -119,23 +119,19 @@ class TestInitAutoSelectsBackend:
 
     def test_selects_pytorch_on_cpu_only_profile(self) -> None:
         """On a CPU-only machine with PyTorch, PYTORCH backend is chosen."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
 
         with (
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=_make_mock_backend()),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
 
         assert engine.selection.backend == BackendType.PYTORCH
         assert engine.selection.device_type == DeviceType.CPU
 
     def test_user_backend_override_respected(self) -> None:
         """When backend= is given, it overrides auto-selection."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend(backend_type=BackendType.PYTORCH)
 
@@ -143,9 +139,7 @@ class TestInitAutoSelectsBackend:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec, backend=BackendType.PYTORCH)
+            engine = InferenceEngine(backend=BackendType.PYTORCH)
 
         assert engine.selection.backend == BackendType.PYTORCH
 
@@ -156,10 +150,9 @@ class TestInitAutoSelectsBackend:
 
 
 class TestContextManager:
-    """with InferenceEngine(spec) as e: calls load() on enter, close() on exit."""
+    """with InferenceEngine() as e: calls load() on enter, close() on exit."""
 
     def test_context_manager_loads_and_closes(self) -> None:
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -168,9 +161,7 @@ class TestContextManager:
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
             assert not engine.is_loaded
 
             with engine:
@@ -184,7 +175,6 @@ class TestContextManager:
 
     def test_close_is_idempotent(self) -> None:
         """Calling close() twice does not raise."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -193,9 +183,7 @@ class TestContextManager:
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
             engine.load()
             engine.close()
             engine.close()  # must not raise
@@ -212,7 +200,6 @@ class TestContextManager:
 class TestDetect:
     def test_detect_returns_detection_per_frame(self) -> None:
         """detect() returns exactly one Detection per input Frame."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
 
         # YOLO26 NMS-free output — (B, num_dets, 6). B=2, 0 detections.
@@ -223,12 +210,10 @@ class TestDetect:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            InferenceEngine() as engine,
         ):
-            from yowo.engine import InferenceEngine
-
-            with InferenceEngine(spec) as engine:
-                frames = [_make_frame(0), _make_frame(1)]
-                results = engine.detect(frames)
+            frames = [_make_frame(0), _make_frame(1)]
+            results = engine.detect(frames)
 
         assert len(results) == 2
         assert all(isinstance(d, Detection) for d in results)
@@ -237,7 +222,6 @@ class TestDetect:
 
     def test_detect_requires_loaded(self) -> None:
         """Calling detect() before load() raises InferenceError."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -245,16 +229,13 @@ class TestDetect:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
 
         with pytest.raises(InferenceError, match="not loaded"):
             engine.detect([_make_frame()])
 
     def test_detect_attaches_backend_to_detection(self) -> None:
         """Detection.backend matches the selected backend."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         dummy_output = np.zeros((1, 0, 6), dtype=np.float32)
         mock_backend = _make_mock_backend(infer_output=dummy_output)
@@ -263,17 +244,14 @@ class TestDetect:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            InferenceEngine() as engine,
         ):
-            from yowo.engine import InferenceEngine
-
-            with InferenceEngine(spec) as engine:
-                results = engine.detect([_make_frame()])
+            results = engine.detect([_make_frame()])
 
         assert results[0].backend == BackendType.PYTORCH
 
     def test_detect_exceeds_buffer_capacity_falls_back_to_preprocess(self) -> None:
         """detect() with more frames than buffer capacity falls back to fresh preprocess()."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         # batch_size=1 → buffer capacity=1; pass 3 frames to exceed it
         dummy_output = np.zeros((3, 0, 6), dtype=np.float32)
@@ -283,12 +261,10 @@ class TestDetect:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            InferenceEngine(batch_size=1) as engine,
         ):
-            from yowo.engine import InferenceEngine
-
-            with InferenceEngine(spec, batch_size=1) as engine:
-                # 3 frames > capacity of 1 — must not crash, falls back to preprocess()
-                results = engine.detect([_make_frame(0), _make_frame(1), _make_frame(2)])
+            # 3 frames > capacity of 1 — must not crash, falls back to preprocess()
+            results = engine.detect([_make_frame(0), _make_frame(1), _make_frame(2)])
 
         assert len(results) == 3
 
@@ -310,9 +286,7 @@ class TestStream:
             patch("yowo.engine.create_backend", return_value=_make_mock_backend()),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec, batch_size=2)
+            engine = InferenceEngine(batch_size=2)
             engine.load()
 
         # 5 frames -> batches of [2, 2, 1]
@@ -393,7 +367,6 @@ class TestStream:
 
     def test_stream_requires_loaded(self) -> None:
         """stream() before load() raises InferenceError."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -401,9 +374,7 @@ class TestStream:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
 
         mock_source = MagicMock()
         mock_source.close = MagicMock()
@@ -420,7 +391,6 @@ class TestStream:
 class TestFallback:
     def test_load_fallback_on_backend_failure(self) -> None:
         """When primary backend raises BackendLoadError, falls back to next backend."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
 
         primary_backend = _make_mock_backend(
@@ -456,9 +426,7 @@ class TestFallback:
                 return_value=[BackendType.PYTORCH],
             ),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
             engine.load()
 
         assert engine.is_loaded
@@ -469,7 +437,6 @@ class TestFallback:
 
     def test_all_backends_fail_raises_backend_load_error(self) -> None:
         """When every backend in the fallback chain fails, BackendLoadError is raised."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
 
         failing_backend = _make_mock_backend(load_raises=BackendLoadError("always fails"))
@@ -480,9 +447,7 @@ class TestFallback:
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
             patch("yowo.engine.get_fallback_backends", return_value=[]),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
 
             with pytest.raises(BackendLoadError, match="All backends failed"):
                 engine.load()
@@ -509,8 +474,6 @@ def _make_mock_source(
 
 
 def _make_loaded_engine(
-    spec: ModelSpec,
-    hw: object,
     mock_backend: MagicMock,
     *,
     batch_size: int = 1,
@@ -523,13 +486,11 @@ def _make_loaded_engine(
 
     policy = frame_drop_policy if frame_drop_policy is not None else FDP.LATEST
     engine = InferenceEngine(
-        spec,
         batch_size=batch_size,
         prefetch=prefetch,
         pipeline_workers=pipeline_workers,
         frame_drop_policy=policy,  # type: ignore[arg-type]
     )
-    engine._hw = hw  # type: ignore[attr-defined]
     engine._backend = mock_backend
     engine._loaded = True
     # Allocate buffers (mirrors what load() does)
@@ -564,9 +525,8 @@ class TestStreamStrategies:
         with (
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
-            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
         ):
-            engine = _make_loaded_engine(spec, hw, mock_backend)
+            engine = _make_loaded_engine(mock_backend)
 
         frame = _make_frame(0)
         source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
@@ -599,7 +559,7 @@ class TestStreamStrategies:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            engine = _make_loaded_engine(spec, hw, mock_backend)
+            engine = _make_loaded_engine(mock_backend)
 
         frame = _make_frame(0)
         source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
@@ -653,8 +613,6 @@ class TestStreamStrategies:
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
             engine = _make_loaded_engine(
-                spec,
-                hw,
                 mock_backend,
                 frame_drop_policy=FrameDropPolicy.SKIP_OLDEST,
             )
@@ -703,7 +661,7 @@ class TestStreamStrategies:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            engine = _make_loaded_engine(spec, hw, mock_backend, pipeline_workers=1)
+            engine = _make_loaded_engine(mock_backend, pipeline_workers=1)
 
         frames = [_make_frame(i) for i in range(4)]
         source = _make_mock_source(frames=frames, is_live=False, total_frames=4)
@@ -747,7 +705,7 @@ class TestStreamStrategies:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            engine = _make_loaded_engine(spec, hw, mock_backend, prefetch=False)
+            engine = _make_loaded_engine(mock_backend, prefetch=False)
 
         frames = [_make_frame(i) for i in range(3)]
         source = _make_mock_source(frames=frames, is_live=False, total_frames=3)
@@ -801,9 +759,7 @@ class TestStreamStrategies:
                 patch("yowo.engine.get_hardware_profile", return_value=hw),
                 patch("yowo.engine.create_backend", return_value=mock_backend),
             ):
-                return _make_loaded_engine(
-                    spec, hw, mock_backend, prefetch=prefetch, pipeline_workers=1
-                )
+                return _make_loaded_engine(mock_backend, prefetch=prefetch, pipeline_workers=1)
 
         with (
             patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
@@ -827,7 +783,6 @@ class TestStreamStrategies:
 
     def test_buffer_lifecycle(self) -> None:
         """PreprocessBuffer and PostprocessBuffer allocated at load(), None after close()."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -836,9 +791,7 @@ class TestStreamStrategies:
             patch("yowo.engine.create_backend", return_value=mock_backend),
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
+            engine = InferenceEngine()
             assert engine._preprocess_buf is None  # type: ignore[attr-defined]
             assert engine._postprocess_buf is None  # type: ignore[attr-defined]
 
@@ -852,7 +805,6 @@ class TestStreamStrategies:
 
     def test_pipeline_workers_auto_resolves(self) -> None:
         """pipeline_workers=0 auto-resolves after load(): 2 for free-threaded, 1 otherwise."""
-        spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
 
@@ -863,9 +815,7 @@ class TestStreamStrategies:
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
             patch("yowo.engine.is_free_threaded", return_value=False),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine_gil = InferenceEngine(spec, pipeline_workers=0)
+            engine_gil = InferenceEngine(pipeline_workers=0)
             engine_gil.load()
 
         assert engine_gil._pipeline_workers == 1  # type: ignore[attr-defined]
@@ -879,13 +829,29 @@ class TestStreamStrategies:
             patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
             patch("yowo.engine.is_free_threaded", return_value=True),
         ):
-            engine_ft = InferenceEngine(spec, pipeline_workers=0)
+            engine_ft = InferenceEngine(pipeline_workers=0)
             engine_ft.load()
 
         assert engine_ft._pipeline_workers == 2  # type: ignore[attr-defined]
 
     def test_stream_requires_loaded_for_all_strategies(self) -> None:
         """stream() before load() raises InferenceError regardless of source type."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine()
+
+        for is_live, total in [(False, 1), (True, None), (False, 5)]:
+            source = _make_mock_source(frames=[], is_live=is_live, total_frames=total)
+            with pytest.raises(InferenceError, match="not loaded"):
+                list(engine.stream(source))
+
+    def test_stream_calls_clear_kv_cache(self) -> None:
+        """stream() calls clear_kv_cache() once per invocation."""
         spec = _make_spec()
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
@@ -894,24 +860,7 @@ class TestStreamStrategies:
             patch("yowo.engine.get_hardware_profile", return_value=hw),
             patch("yowo.engine.create_backend", return_value=mock_backend),
         ):
-            from yowo.engine import InferenceEngine
-
-            engine = InferenceEngine(spec)
-
-        for is_live, total in [(False, 1), (True, None), (False, 5)]:
-            source = _make_mock_source(frames=[], is_live=is_live, total_frames=total)
-            with pytest.raises(InferenceError, match="not loaded"):
-                list(engine.stream(source))
-
-    def test_stream_calls_clear_kv_cache_when_backend_supports_it(self) -> None:
-        """stream() calls clear_kv_cache() once per invocation when the backend exposes it."""
-        spec = _make_spec()
-        hw = _make_cpu_only_profile(torch=True)
-        mock_backend = _make_mock_backend()
-        # Give the backend a clear_kv_cache attribute (simulates PyTorch backend with KV cache)
-        mock_backend.clear_kv_cache = MagicMock()
-
-        engine = _make_loaded_engine(spec, hw, mock_backend)
+            engine = _make_loaded_engine(mock_backend)
         frame = _make_frame(0)
         source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
 
@@ -933,3 +882,319 @@ class TestStreamStrategies:
             list(engine.stream(source))
 
         mock_backend.clear_kv_cache.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: config-based and kwargs-based constructor
+# ---------------------------------------------------------------------------
+
+
+class TestConfigInit:
+    """InferenceEngine accepts InferenceConfig or individual kwargs."""
+
+    def test_config_init(self) -> None:
+        """InferenceEngine(InferenceConfig()) works."""
+        from yowo.config import InferenceConfig
+
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        cfg = InferenceConfig()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine(cfg)
+
+        assert engine._spec.family == ModelFamily.YOLO26
+        assert engine._spec.size == ModelSize.NANO
+
+    def test_config_maps_confidence_threshold(self) -> None:
+        """cfg.confidence_threshold propagates to engine._confidence."""
+        from yowo.config import InferenceConfig
+
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        cfg = InferenceConfig(confidence_threshold=0.8)
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine(cfg)
+
+        assert engine._confidence == pytest.approx(0.8)  # type: ignore[attr-defined]
+
+    def test_config_maps_model_identity(self) -> None:
+        """cfg.model_family/size map to the correct engine._spec."""
+        from yowo.config import InferenceConfig
+
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        cfg = InferenceConfig(model_family=ModelFamily.YOLO11, model_size=ModelSize.LARGE)
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine(cfg)
+
+        assert engine._spec.family == ModelFamily.YOLO11
+        assert engine._spec.size == ModelSize.LARGE
+
+    def test_default_is_yolo26n(self) -> None:
+        """InferenceEngine() defaults to YOLO26 NANO."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine()
+
+        assert engine._spec.family == ModelFamily.YOLO26
+        assert engine._spec.size == ModelSize.NANO
+
+    def test_kwargs_override_defaults(self) -> None:
+        """Individual kwargs are used when no config is passed."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine(
+                model_family=ModelFamily.YOLO11,
+                model_size=ModelSize.SMALL,
+                confidence_threshold=0.5,
+                batch_size=4,
+            )
+
+        assert engine._spec.family == ModelFamily.YOLO11
+        assert engine._spec.size == ModelSize.SMALL
+        assert engine._confidence == pytest.approx(0.5)  # type: ignore[attr-defined]
+        assert engine._batch_size == 4  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Test: detect([]) empty frames (H-3)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectEmptyFrames:
+    def test_detect_empty_list_raises_value_error(self) -> None:
+        """detect([]) raises ValueError from preprocess() — empty input is invalid."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+            patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")),
+            InferenceEngine() as engine,
+            pytest.raises(ValueError, match="empty"),
+        ):
+            engine.detect([])
+
+
+# ---------------------------------------------------------------------------
+# Test: concurrent pipeline path (H-1/H-2)
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentPipeline:
+    def test_pipeline_workers_gt1_produces_correct_results(self) -> None:
+        """pipeline_workers=2 (concurrent path) yields the same results as sync."""
+        spec = _make_spec()
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, batch_size=2, pipeline_workers=2)
+
+        frames = [_make_frame(i) for i in range(6)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=6)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch(
+                "yowo.engine.postprocess",
+                side_effect=lambda raw, tensor, fs, **kw: [_make_detection(f, spec) for f in fs],
+            ),
+        ):
+            results = list(engine.stream(source))
+
+        assert len(results) == 6
+        indices = sorted(d.frame.frame_index for d in results)
+        assert indices == list(range(6))
+        source.close.assert_called_once()
+
+    def test_pipeline_worker_exception_propagates(self) -> None:
+        """If a worker raises during inference, the exception propagates to the caller."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        mock_backend.infer.side_effect = RuntimeError("GPU OOM")
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, batch_size=1, pipeline_workers=2)
+
+        frames = [_make_frame(0)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=1)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+        dummy_tensor.data = np.zeros((1, 3, 640, 640), dtype=np.float32)
+
+        with (
+            patch("yowo.engine.preprocess", return_value=dummy_tensor),
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            pytest.raises(RuntimeError, match="GPU OOM"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: source.close() called on exceptions (H-11)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceCloseOnExceptions:
+    def test_stream_single_closes_on_detect_error(self) -> None:
+        """_stream_single calls source.close() even when detect() raises."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend)
+
+        frame = _make_frame(0)
+        source = _make_mock_source(frames=[frame], is_live=False, total_frames=1)
+
+        with (
+            patch.object(engine, "detect", side_effect=InferenceError("boom")),
+            pytest.raises(InferenceError, match="boom"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+    def test_stream_sync_closes_on_detect_error(self) -> None:
+        """_stream_sync calls source.close() even when detect() raises."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, prefetch=False)
+
+        frames = [_make_frame(i) for i in range(3)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=3)
+
+        with (
+            patch.object(engine, "detect", side_effect=InferenceError("boom")),
+            pytest.raises(InferenceError, match="boom"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+    def test_stream_pipeline_closes_on_detect_error(self) -> None:
+        """_stream_pipeline calls source.close() even when detect() raises in worker."""
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+        mock_backend.infer.side_effect = InferenceError("worker crash")
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend, pipeline_workers=1)
+
+        frames = [_make_frame(i) for i in range(2)]
+        source = _make_mock_source(frames=frames, is_live=False, total_frames=2)
+
+        dummy_tensor = MagicMock(spec=PreprocessedTensor)
+        dummy_tensor.original_shapes = ((480, 640),)
+        dummy_tensor.scale_factors = ((1.0, 1.0),)
+        dummy_tensor.pad_offsets = ((0, 0),)
+        dummy_tensor.input_shape = (640, 640)
+        dummy_tensor.batch_size = 1
+        dummy_tensor.data = np.zeros((1, 3, 640, 640), dtype=np.float32)
+
+        with (
+            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            pytest.raises(InferenceError, match="worker crash"),
+        ):
+            list(engine.stream(source))
+
+        source.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test: _stream_live idle timeout (H-5)
+# ---------------------------------------------------------------------------
+
+
+class TestStreamLiveIdleTimeout:
+    def test_live_stream_terminates_on_idle_timeout(self) -> None:
+        """_stream_live breaks after max idle time with no frames."""
+        import time as time_mod
+
+        hw = _make_cpu_only_profile(torch=True)
+        mock_backend = _make_mock_backend()
+
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = _make_loaded_engine(mock_backend)
+
+        # Source that never yields any frames
+        source = _make_mock_source(frames=[], is_live=True, total_frames=None)
+
+        # Patch time.monotonic to simulate rapid passage of time
+        # and ThreadedFrameReader to return None (timeout) immediately
+        mono_times = iter([0.0, 0.0, 31.0])  # first call sets idle_since=0, third triggers break
+
+        with (
+            patch("yowo.engine.ThreadedFrameReader") as mock_reader_cls,
+            patch("yowo.engine.time") as mock_time,
+        ):
+            mock_reader = MagicMock()
+            mock_reader.get.return_value = None
+            mock_reader.is_exhausted = False
+            mock_reader_cls.return_value = mock_reader
+            mock_time.perf_counter = time_mod.perf_counter
+            mock_time.monotonic = lambda: next(mono_times)
+
+            results = list(engine.stream(source))
+
+        assert results == []
+        source.close.assert_called_once()

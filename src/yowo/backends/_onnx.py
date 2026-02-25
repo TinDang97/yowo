@@ -242,6 +242,9 @@ class OnnxBackend:
         """Clear KV state for streaming reset (e.g. new video source)."""
         self._kv_state = {}
 
+    def set_source_id(self, source_id: str) -> None:
+        """No-op — feature caching not supported."""
+
     def unload(self) -> None:
         """Release the ONNX Runtime session."""
         self._kv_state = {}

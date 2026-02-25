@@ -13,10 +13,13 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_CONFIDENCE          -> InferenceConfig.confidence_threshold
     YOWO_IOU                 -> InferenceConfig.iou_threshold
     YOWO_BATCH_SIZE          -> InferenceConfig.batch_size
-    YOWO_MAX_MEMORY_MB       -> InferenceConfig.max_memory_mb
-    YOWO_RECONNECT_TIMEOUT   -> InferenceConfig.reconnect_timeout_s
-    YOWO_FRAME_SKIP          -> InferenceConfig.frame_skip
-    YOWO_MAX_FRAMES          -> InferenceConfig.max_frames
+    YOWO_CACHE               -> InferenceConfig.cache
+    YOWO_CACHE_DIR           -> InferenceConfig.cache_dir
+    YOWO_KV_CACHE            -> InferenceConfig.kv_cache
+    YOWO_FRAME_DROP_POLICY   -> InferenceConfig.frame_drop_policy
+    YOWO_MAX_QUEUE_SIZE      -> InferenceConfig.max_queue_size
+    YOWO_PREFETCH            -> InferenceConfig.prefetch
+    YOWO_PIPELINE_WORKERS    -> InferenceConfig.pipeline_workers
 """
 
 from __future__ import annotations
@@ -58,13 +61,11 @@ class InferenceConfig:
             Must be in [0.0, 1.0].
         iou_threshold: NMS IoU threshold. Must be in [0.0, 1.0].
         batch_size: Number of frames per inference batch. Must be >= 1.
-        max_memory_mb: Maximum GPU memory budget in megabytes. ``None``
-            means no limit is enforced.
-        reconnect_timeout_s: Seconds to wait for stream reconnection before
-            raising ``SourceTimeoutError``.
-        frame_skip: Skip every N frames; 0 disables skipping.
-        max_frames: Stop after processing this many frames. ``None`` runs
-            until the source is exhausted.
+        cache: Enable in-memory feature map caching (PyTorch backend only).
+        cache_dir: Feature map mmap cache directory. When set, enables
+            mmap-backed caching regardless of ``cache``.
+        kv_cache: Enable attention KV cache for streaming inference
+            (PyTorch backend only).
         frame_drop_policy: Backlog policy for ThreadedFrameReader when the
             queue is full. ``NONE`` applies backpressure (offline default);
             ``LATEST`` keeps only the newest frame (live default).
@@ -84,11 +85,10 @@ class InferenceConfig:
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.45
     batch_size: int = 1
-    max_memory_mb: int | None = None
-    reconnect_timeout_s: float = 30.0
-    frame_skip: int = 0
-    max_frames: int | None = None
-    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.NONE
+    cache: bool = False
+    cache_dir: Path | None = None
+    kv_cache: bool = False
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST
     max_queue_size: int = 2
     prefetch: bool = True
     pipeline_workers: int = 0
@@ -102,10 +102,6 @@ class InferenceConfig:
             raise ConfigError(f"iou_threshold must be in [0.0, 1.0], got {self.iou_threshold}")
         if self.batch_size < 1:
             raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
-        if self.frame_skip < 0:
-            raise ConfigError(f"frame_skip must be >= 0, got {self.frame_skip}")
-        if self.reconnect_timeout_s <= 0:
-            raise ConfigError(f"reconnect_timeout_s must be > 0, got {self.reconnect_timeout_s}")
         if self.max_queue_size < 1:
             raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
         if self.pipeline_workers < 0:
@@ -185,14 +181,20 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.iou_threshold = float(v)
     if (v := env.get("YOWO_BATCH_SIZE")) is not None:
         cfg.batch_size = int(v)
-    if (v := env.get("YOWO_MAX_MEMORY_MB")) is not None:
-        cfg.max_memory_mb = int(v)
-    if (v := env.get("YOWO_RECONNECT_TIMEOUT")) is not None:
-        cfg.reconnect_timeout_s = float(v)
-    if (v := env.get("YOWO_FRAME_SKIP")) is not None:
-        cfg.frame_skip = int(v)
-    if (v := env.get("YOWO_MAX_FRAMES")) is not None:
-        cfg.max_frames = int(v)
+    if (v := env.get("YOWO_CACHE")) is not None:
+        cfg.cache = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_CACHE_DIR")) is not None:
+        cfg.cache_dir = Path(v)
+    if (v := env.get("YOWO_KV_CACHE")) is not None:
+        cfg.kv_cache = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_FRAME_DROP_POLICY")) is not None:
+        cfg.frame_drop_policy = FrameDropPolicy(v)
+    if (v := env.get("YOWO_MAX_QUEUE_SIZE")) is not None:
+        cfg.max_queue_size = int(v)
+    if (v := env.get("YOWO_PREFETCH")) is not None:
+        cfg.prefetch = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_PIPELINE_WORKERS")) is not None:
+        cfg.pipeline_workers = int(v)
 
 
 def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
@@ -218,24 +220,22 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
     # Numeric scalars — copy as-is with type coercion for safety.
     for int_field in (
         "batch_size",
-        "max_memory_mb",
-        "frame_skip",
-        "max_frames",
         "max_queue_size",
         "pipeline_workers",
     ):
         if int_field in data and data[int_field] is not None:
             kwargs[int_field] = int(data[int_field])
-        elif int_field in data:
-            kwargs[int_field] = None
 
-    for float_field in ("confidence_threshold", "iou_threshold", "reconnect_timeout_s"):
+    for float_field in ("confidence_threshold", "iou_threshold"):
         if float_field in data:
             kwargs[float_field] = float(data[float_field])
 
-    for bool_field in ("prefetch",):
+    for bool_field in ("prefetch", "cache", "kv_cache"):
         if bool_field in data:
             kwargs[bool_field] = bool(data[bool_field])
+
+    if "cache_dir" in data and data["cache_dir"] is not None:
+        kwargs["cache_dir"] = Path(data["cache_dir"])
 
     return InferenceConfig(**kwargs)
 

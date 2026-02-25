@@ -44,9 +44,13 @@ class PreprocessBuffer:
 
     Eliminates per-frame cv2.copyMakeBorder allocation by pre-allocating
     per-slot staging arrays filled with the letterbox fill value.
+
+    Tracks last-used resize dimensions per slot so that full memset can be
+    skipped when consecutive frames share the same resolution (the common
+    case for video streams).
     """
 
-    __slots__ = ("_capacity", "_staging", "_target_size")
+    __slots__ = ("_capacity", "_last_dims", "_staging", "_target_size")
 
     def __init__(self, max_batch: int, target_size: tuple[int, int]) -> None:
         h, w = target_size
@@ -55,10 +59,16 @@ class PreprocessBuffer:
         ]
         self._capacity = max_batch
         self._target_size = target_size
+        # (new_h, new_w, pad_y, pad_x) per slot; None means first use.
+        self._last_dims: list[tuple[int, int, int, int] | None] = [None] * max_batch
 
     @property
     def capacity(self) -> int:
         return self._capacity
+
+    @property
+    def target_size(self) -> tuple[int, int]:
+        return self._target_size
 
     @property
     def memory_bytes(self) -> int:
@@ -67,6 +77,14 @@ class PreprocessBuffer:
 
     def get_staging(self, index: int) -> NDArray[np.uint8]:
         return self._staging[index]
+
+    def needs_reset(self, index: int, new_h: int, new_w: int, pad_y: int, pad_x: int) -> bool:
+        """Return True if the staging slot must be reset before use."""
+        dims = (new_h, new_w, pad_y, pad_x)
+        if self._last_dims[index] == dims:
+            return False
+        self._last_dims[index] = dims
+        return True
 
 
 def preprocess(
@@ -182,6 +200,10 @@ def preprocess_into(
         raise ValueError("frames list must not be empty")
     if len(frames) > buffer.capacity:
         raise ValueError(f"batch size {len(frames)} exceeds buffer capacity {buffer.capacity}")
+    if buffer.target_size != target_size:
+        raise ValueError(
+            f"buffer target_size {buffer.target_size} does not match target_size {target_size}"
+        )
 
     target_h, target_w = target_size
     staging_views: list[cv2.typing.MatLike] = []
@@ -202,8 +224,10 @@ def preprocess_into(
 
         # Get pre-allocated staging slot (already filled with 114)
         staging = buffer.get_staging(i)
-        # Reset fill (handles the case where previous call left residual pixels)
-        staging[:] = _LETTERBOX_FILL[0]
+        # Only reset when frame dimensions changed — skip the 1.2 MB memset
+        # on the hot path where consecutive video frames share resolution.
+        if buffer.needs_reset(i, new_h, new_w, pad_y, pad_x):
+            staging[:] = _LETTERBOX_FILL[0]
 
         # Ensure C-contiguous input
         pixels = (

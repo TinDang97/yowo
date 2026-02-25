@@ -51,6 +51,10 @@ class TestPreprocessBuffer:
         second_call_id = id(buf.get_staging(0))
         assert first_call_id == second_call_id  # same object
 
+    def test_target_size_property(self) -> None:
+        buf = PreprocessBuffer(max_batch=1, target_size=(480, 640))
+        assert buf.target_size == (480, 640)
+
 
 class TestPreprocessInto:
     def test_output_shape_matches_preprocess(self) -> None:
@@ -108,6 +112,13 @@ class TestPreprocessInto:
         result = preprocess_into([frame], (640, 640), buf)
         reference = preprocess([frame], (640, 640))
         assert np.allclose(result.data, reference.data, atol=1e-5)
+
+    def test_target_size_mismatch_raises(self) -> None:
+        """preprocess_into() rejects buffer with mismatched target_size."""
+        frame = _make_frame()
+        buf = PreprocessBuffer(max_batch=1, target_size=(480, 640))
+        with pytest.raises(ValueError, match="target_size"):
+            preprocess_into([frame], (640, 640), buf)
 
 
 class TestPostprocessBuffer:
@@ -172,6 +183,33 @@ class TestPostprocessBuffer:
         # Must have the requested size, not be silently clipped to 10
         assert out.shape == (20, 4)
         assert out.dtype == np.float32
+
+
+class TestPreprocessBufferNeedsReset:
+    def test_first_call_returns_true(self) -> None:
+        """First call always needs reset (slot not yet used)."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        assert buf.needs_reset(0, 60, 60, 2, 2) is True
+
+    def test_same_dims_returns_false(self) -> None:
+        """Repeated call with same dimensions skips reset."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        assert buf.needs_reset(0, 60, 60, 2, 2) is False
+
+    def test_changed_dims_returns_true(self) -> None:
+        """When dimensions change, reset is needed."""
+        buf = PreprocessBuffer(max_batch=1, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        assert buf.needs_reset(0, 30, 30, 17, 17) is True
+
+    def test_different_slots_are_independent(self) -> None:
+        """Each slot tracks its own last dimensions."""
+        buf = PreprocessBuffer(max_batch=2, target_size=(64, 64))
+        buf.needs_reset(0, 60, 60, 2, 2)
+        buf.needs_reset(1, 40, 40, 12, 12)
+        assert buf.needs_reset(0, 60, 60, 2, 2) is False
+        assert buf.needs_reset(1, 40, 40, 12, 12) is False
 
 
 class TestPreprocessIntoStagingReset:
