@@ -258,7 +258,16 @@ class InferenceEngine:
             source.close()
 
     def _stream_live(self, source: FrameSource) -> Iterator[Detection]:
-        """Live source path: threaded reader with frame drop policy, batch=1."""
+        """Live source path: threaded reader with frame drop policy, batch=1.
+
+        Always uses batch=1 regardless of configured batch_size to minimise
+        latency on live sources.
+        """
+        if self._batch_size > 1:
+            logger.debug(
+                "Live source: using batch=1 for latency (configured batch_size=%d ignored)",
+                self._batch_size,
+            )
         reader = ThreadedFrameReader(
             source,
             max_queue_size=self._max_queue_size,
@@ -266,8 +275,13 @@ class InferenceEngine:
         )
         reader.start()
         try:
-            while (frame := reader.get(timeout=1.0)) is not None:
-                yield from self.detect([frame])
+            while True:
+                frame = reader.get(timeout=1.0)
+                if frame is not None:
+                    yield from self.detect([frame])
+                elif reader.is_exhausted:
+                    break
+                # else: timeout — retry
         finally:
             reader.stop()
             source.close()
@@ -276,10 +290,17 @@ class InferenceEngine:
         """Offline source path: threaded prefetch + pipeline overlap.
 
         Uses concurrent.futures.ThreadPoolExecutor to overlap frame reading
-        with inference. On free-threaded Python 3.14t, preprocess + postprocess
-        also run in parallel with I/O (true CPU parallelism). On GIL Python,
-        inference C++ code releases the GIL enabling I/O overlap.
+        with inference. Maintains up to ``pipeline_workers`` futures in flight
+        so that batch N+1 can preprocess while batch N infers.
+
+        On free-threaded Python 3.14t, worker threads achieve true CPU
+        parallelism. On GIL Python, inference C++ code releases the GIL
+        enabling I/O overlap.
+
+        When ``pipeline_workers > 1``, shared preprocess/postprocess buffers
+        are bypassed to avoid data races between concurrent worker threads.
         """
+        from collections import deque as Deque
         from concurrent.futures import Future, ThreadPoolExecutor
 
         reader = ThreadedFrameReader(
@@ -289,12 +310,32 @@ class InferenceEngine:
         )
         reader.start()
 
+        concurrent = self._pipeline_workers > 1
+
         def _infer_batch(frames: list[Frame]) -> list[Detection]:
+            if concurrent:
+                # Per-call allocation — no shared buffers across workers.
+                target_size = (self._model_meta.input_height, self._model_meta.input_width)
+                tensor = preprocess(frames, target_size)
+                t0 = time.perf_counter()
+                raw_output = self._backend.infer(tensor)
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                return postprocess(
+                    raw_output,
+                    tensor,
+                    frames,
+                    model_spec=self._spec,
+                    backend=self._selection.backend,
+                    confidence_threshold=self._confidence,
+                    iou_threshold=self._iou_threshold,
+                    inference_time_ms=elapsed_ms,
+                )
             return self.detect(frames)
 
         try:
-            pending: Future[list[Detection]] | None = None
+            pending: Deque[Future[list[Detection]]] = Deque()
             batch: list[Frame] = []
+            max_pending = self._pipeline_workers
 
             with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
                 while True:
@@ -303,16 +344,18 @@ class InferenceEngine:
                         batch.append(frame)
 
                     if len(batch) >= self._batch_size or (frame is None and batch):
-                        if pending is not None:
-                            yield from pending.result()
-                        pending = pool.submit(_infer_batch, batch.copy())
+                        # Drain oldest future if pipeline is full.
+                        if len(pending) >= max_pending:
+                            yield from pending.popleft().result()
+                        pending.append(pool.submit(_infer_batch, batch.copy()))
                         batch.clear()
 
-                    if frame is None:
+                    if frame is None and reader.is_exhausted:
                         break
 
-                if pending is not None:
-                    yield from pending.result()
+                # Drain remaining futures in submission order.
+                while pending:
+                    yield from pending.popleft().result()
         finally:
             reader.stop()
             source.close()

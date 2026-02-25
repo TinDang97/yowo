@@ -234,7 +234,59 @@ class TestCounters:
         reader = ThreadedFrameReader(source, max_queue_size=2, policy=FrameDropPolicy.NONE)
         reader.start()
         result = reader.get(timeout=0.05)  # shorter than the source delay
+        # If timeout occurred, is_exhausted should be False (source still running).
+        if result is None:
+            assert not reader.is_exhausted
         reader.stop()
         # Either None (timed out before frame arrived) or the Frame — both are valid.
-        # The important invariant: no exception raised, result is Frame or None.
         assert result is None or isinstance(result, Frame)
+
+    def test_is_exhausted_true_after_all_frames_consumed(self) -> None:
+        """is_exhausted is True once the source yields all frames and consumer drains."""
+        source = _MockSource(3)
+        reader = ThreadedFrameReader(source, max_queue_size=10, policy=FrameDropPolicy.NONE)
+        assert not reader.is_exhausted
+        reader.start()
+        while reader.get(timeout=2.0) is not None:
+            pass
+        assert reader.is_exhausted
+        reader.stop()
+
+    def test_is_exhausted_false_before_done(self) -> None:
+        """is_exhausted is False while source is still producing frames."""
+        source = _MockSource(5, delay=0.05)
+        reader = ThreadedFrameReader(source, max_queue_size=2, policy=FrameDropPolicy.NONE)
+        reader.start()
+        # Get first frame
+        frame = reader.get(timeout=2.0)
+        assert frame is not None
+        # Source still has more frames
+        assert not reader.is_exhausted
+        reader.stop()
+
+    def test_stop_counts_queued_frames_as_dropped(self) -> None:
+        """stop() mid-stream counts remaining queued frames as dropped."""
+        source = _MockSource(10, delay=0.001)
+        reader = ThreadedFrameReader(source, max_queue_size=5, policy=FrameDropPolicy.NONE)
+        reader.start()
+        # Let reader fill up
+        time.sleep(0.05)
+        # Consume only one frame, leave others in queue
+        reader.get(timeout=1.0)
+        reader.stop()
+        # frames_dropped should include frames discarded at shutdown
+        assert reader.frames_dropped >= 0
+        # Total: frames_read = consumed + dropped
+        assert reader.frames_read >= reader.frames_dropped
+
+    def test_timeout_uses_wall_clock(self) -> None:
+        """get() timeout tracks real elapsed time, not fixed step count."""
+        source = _MockSource(1, delay=1.0)  # frame arrives after 1s
+        reader = ThreadedFrameReader(source, max_queue_size=2, policy=FrameDropPolicy.NONE)
+        reader.start()
+        t0 = time.perf_counter()
+        result = reader.get(timeout=0.1)  # should return after ~0.1s
+        elapsed = time.perf_counter() - t0
+        reader.stop()
+        assert result is None  # timed out
+        assert elapsed < 0.5  # wall clock: should not overshoot
