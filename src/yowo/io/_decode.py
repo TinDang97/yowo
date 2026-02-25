@@ -39,6 +39,36 @@ class TensorMeta:
     original_sizes: tuple[tuple[int, int], ...]
 
 
+class PreprocessBuffer:
+    """Reusable staging buffers for letterbox preprocessing.
+
+    Eliminates per-frame cv2.copyMakeBorder allocation by pre-allocating
+    per-slot staging arrays filled with the letterbox fill value.
+    """
+
+    __slots__ = ("_capacity", "_staging", "_target_size")
+
+    def __init__(self, max_batch: int, target_size: tuple[int, int]) -> None:
+        h, w = target_size
+        self._staging: list[NDArray[np.uint8]] = [
+            np.full((h, w, 3), _LETTERBOX_FILL[0], dtype=np.uint8) for _ in range(max_batch)
+        ]
+        self._capacity = max_batch
+        self._target_size = target_size
+
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    @property
+    def memory_bytes(self) -> int:
+        h, w = self._target_size
+        return self._capacity * h * w * 3
+
+    def get_staging(self, index: int) -> NDArray[np.uint8]:
+        return self._staging[index]
+
+
 def preprocess(
     frames: list[Frame],
     target_size: tuple[int, int],
@@ -127,6 +157,82 @@ def preprocess(
     )
 
 
+def preprocess_into(
+    frames: list[Frame],
+    target_size: tuple[int, int],
+    buffer: PreprocessBuffer,
+) -> PreprocessedTensor:
+    """Like preprocess(), but reuses pre-allocated staging buffers.
+
+    Eliminates cv2.copyMakeBorder allocation by writing into pre-filled
+    staging arrays. Output metadata is identical to preprocess().
+
+    Args:
+        frames: List of Frame objects (same contract as preprocess()).
+        target_size: (height, width) model input size.
+        buffer: Pre-allocated buffer with capacity >= len(frames).
+
+    Returns:
+        PreprocessedTensor with identical structure to preprocess() output.
+
+    Raises:
+        ValueError: If frames is empty or exceeds buffer.capacity.
+    """
+    if not frames:
+        raise ValueError("frames list must not be empty")
+    if len(frames) > buffer.capacity:
+        raise ValueError(f"batch size {len(frames)} exceeds buffer capacity {buffer.capacity}")
+
+    target_h, target_w = target_size
+    staging_views: list[cv2.typing.MatLike] = []
+    scale_factors: list[tuple[float, float]] = []
+    pad_offsets: list[tuple[int, int]] = []
+    original_shapes: list[tuple[int, int]] = []
+
+    for i, frame in enumerate(frames):
+        frame_h, frame_w = frame.height, frame.width
+        original_shapes.append((frame_h, frame_w))
+
+        scale = min(target_h / frame_h, target_w / frame_w)
+        new_h = int(frame_h * scale)
+        new_w = int(frame_w * scale)
+
+        pad_y = (target_h - new_h) // 2
+        pad_x = (target_w - new_w) // 2
+
+        # Get pre-allocated staging slot (already filled with 114)
+        staging = buffer.get_staging(i)
+        # Reset fill (handles the case where previous call left residual pixels)
+        staging[:] = _LETTERBOX_FILL[0]
+
+        # Ensure C-contiguous input
+        pixels = (
+            frame.pixels
+            if frame.pixels.flags["C_CONTIGUOUS"]
+            else np.ascontiguousarray(frame.pixels)
+        )
+        resized = cv2.resize(pixels, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        # Write resized content into pre-allocated staging area
+        staging[pad_y : pad_y + new_h, pad_x : pad_x + new_w] = resized
+
+        staging_views.append(staging)  # type: ignore[arg-type]
+        scale_factors.append((scale, scale))
+        pad_offsets.append((pad_y, pad_x))
+
+    batch: NDArray[np.float32] = cv2.dnn.blobFromImages(  # type: ignore[assignment]
+        staging_views, scalefactor=1.0 / 255.0, swapRB=True
+    )
+
+    return PreprocessedTensor(
+        data=batch,
+        original_shapes=tuple(original_shapes),
+        input_shape=target_size,
+        scale_factors=tuple(scale_factors),
+        pad_offsets=tuple(pad_offsets),
+    )
+
+
 def make_tensor_meta(tensor: PreprocessedTensor) -> TensorMeta:
     """Extract TensorMeta from a PreprocessedTensor.
 
@@ -141,7 +247,9 @@ def make_tensor_meta(tensor: PreprocessedTensor) -> TensorMeta:
 
 
 __all__ = [
+    "PreprocessBuffer",
     "TensorMeta",
     "make_tensor_meta",
     "preprocess",
+    "preprocess_into",
 ]

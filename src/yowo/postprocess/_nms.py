@@ -109,6 +109,34 @@ COCO_CLASSES: list[str] = [
 ]
 
 
+class PostprocessBuffer:
+    """Reusable scratch arrays for postprocessing.
+
+    Eliminates np.empty() allocation in _inverse_letterbox hot path.
+    Single-writer pattern: must not be shared across concurrent detect() calls.
+    """
+
+    __slots__ = ("_inverse_out", "_max_detections")
+
+    def __init__(self, max_detections: int = 8400) -> None:
+        self._max_detections = max_detections
+        self._inverse_out = np.empty((max_detections, 4), dtype=np.float32)
+
+    @property
+    def memory_bytes(self) -> int:
+        return self._max_detections * 4 * 4  # max_detections * 4 coords * 4 bytes
+
+    def get_inverse_out(self, n: int) -> NDArray[np.float32]:
+        """Get writable view of first n rows of pre-allocated inverse output.
+
+        Falls back to a fresh allocation when n exceeds the pre-allocated capacity
+        rather than silently truncating, which would corrupt coordinate outputs.
+        """
+        if n <= self._max_detections:
+            return self._inverse_out[:n]
+        return np.empty((n, 4), dtype=np.float32)
+
+
 def _class_aware_nms(
     boxes_xyxy: NDArray[np.float32],
     scores: NDArray[np.float32],
@@ -166,6 +194,8 @@ def _inverse_letterbox(
     pad_left: int,
     orig_h: int,
     orig_w: int,
+    *,
+    scratch: PostprocessBuffer | None = None,
 ) -> NDArray[np.float32]:
     """Map boxes from tensor space back to original frame pixel coordinates.
 
@@ -179,6 +209,7 @@ def _inverse_letterbox(
         pad_left: Left padding pixels added during letterbox.
         orig_h: Original frame height.
         orig_w: Original frame width.
+        scratch: Optional pre-allocated buffer to eliminate np.empty() call.
 
     Returns:
         (N, 4) clipped to [0, orig_w] / [0, orig_h].
@@ -190,9 +221,12 @@ def _inverse_letterbox(
     pad_l = np.float32(pad_left)
     pad_t = np.float32(pad_top)
 
-    # Use explicit shape/dtype (not empty_like) to always produce C-contiguous
-    # output regardless of the input's memory layout.
-    out = np.empty(boxes_xyxy.shape, dtype=np.float32)
+    n = boxes_xyxy.shape[0]
+    # Use scratch buffer to avoid allocation; fall back to np.empty when absent.
+    # explicit (n, 4) shape/dtype (not empty_like) always produces C-contiguous output.
+    out: NDArray[np.float32] = (
+        scratch.get_inverse_out(n) if scratch is not None else np.empty((n, 4), dtype=np.float32)
+    )
 
     # x1: subtract pad, multiply inv_scale, clip — all in-place into out[:, 0].
     np.subtract(boxes_xyxy[:, 0], pad_l, out=out[:, 0])
@@ -227,6 +261,7 @@ def _decode_standard(
     orig_h: int,
     orig_w: int,
     names: list[str],
+    scratch: PostprocessBuffer | None = None,
 ) -> tuple[BoundingBox, ...]:
     """Decode one batch item from standard YOLO output.
 
@@ -270,7 +305,9 @@ def _decode_standard(
     class_ids = np.argmax(filtered[:, 4:], axis=1).astype(np.intp)
 
     # Inverse letterbox transform.
-    boxes_orig = _inverse_letterbox(boxes_xyxy, scale, pad_top, pad_left, orig_h, orig_w)
+    boxes_orig = _inverse_letterbox(
+        boxes_xyxy, scale, pad_top, pad_left, orig_h, orig_w, scratch=scratch
+    )
 
     # Class-aware NMS.
     kept = _class_aware_nms(boxes_orig, max_scores, class_ids, iou_threshold)
@@ -301,6 +338,7 @@ def _decode_yolo26(
     orig_h: int,
     orig_w: int,
     names: list[str],
+    scratch: PostprocessBuffer | None = None,
 ) -> tuple[BoundingBox, ...]:
     """Decode one batch item from YOLO26 NMS-free output.
 
@@ -332,7 +370,9 @@ def _decode_yolo26(
     conf = filtered[:, 4]
     class_ids = filtered[:, 5].astype(np.intp)
 
-    boxes_orig = _inverse_letterbox(boxes_xyxy, scale, pad_top, pad_left, orig_h, orig_w)
+    boxes_orig = _inverse_letterbox(
+        boxes_xyxy, scale, pad_top, pad_left, orig_h, orig_w, scratch=scratch
+    )
 
     result: list[BoundingBox] = []
     for i in range(len(filtered)):
@@ -362,6 +402,7 @@ def postprocess(
     iou_threshold: float = 0.45,
     class_names: list[str] | None = None,
     inference_time_ms: float = 0.0,
+    scratch: PostprocessBuffer | None = None,
 ) -> list[Detection]:
     """Decode raw YOLO output into Detection objects.
 
@@ -424,6 +465,7 @@ def postprocess(
                     orig_h,
                     orig_w,
                     names,
+                    scratch,
                 )
             elif item.ndim == 2 and item.shape[0] == 6:
                 boxes = _decode_yolo26(
@@ -435,6 +477,7 @@ def postprocess(
                     orig_h,
                     orig_w,
                     names,
+                    scratch,
                 )
             else:
                 boxes = ()
@@ -460,6 +503,7 @@ def postprocess(
                     orig_h,
                     orig_w,
                     names,
+                    scratch,
                 )
 
         detections.append(
@@ -477,5 +521,6 @@ def postprocess(
 
 __all__ = [
     "COCO_CLASSES",
+    "PostprocessBuffer",
     "postprocess",
 ]

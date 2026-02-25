@@ -47,6 +47,7 @@ from yowo.types import (
     ExportFormat,
     ExportResult,
     Frame,
+    FrameDropPolicy,
     GPUArch,
     ModelFamily,
     ModelSize,
@@ -646,3 +647,56 @@ class TestExportConfigValidation:
     def test_dynamic_batch_default_false(self) -> None:
         cfg = ExportConfig()
         assert cfg.dynamic_batch is False
+
+
+# ---------------------------------------------------------------------------
+# FrameDropPolicy tests
+# ---------------------------------------------------------------------------
+
+
+class TestFrameDropPolicy:
+    def test_enum_values(self) -> None:
+        assert FrameDropPolicy.NONE.value == "none"
+        assert FrameDropPolicy.LATEST.value == "latest"
+        assert FrameDropPolicy.SKIP_OLDEST.value == "skip_oldest"
+
+    def test_from_string(self) -> None:
+        assert FrameDropPolicy("none") == FrameDropPolicy.NONE
+        assert FrameDropPolicy("latest") == FrameDropPolicy.LATEST
+        assert FrameDropPolicy("skip_oldest") == FrameDropPolicy.SKIP_OLDEST
+
+    def test_invalid_value(self) -> None:
+        with pytest.raises(ValueError):
+            FrameDropPolicy("invalid")
+
+    def test_all_members(self) -> None:
+        members = {p.value for p in FrameDropPolicy}
+        assert members == {"none", "latest", "skip_oldest"}
+
+
+# ---------------------------------------------------------------------------
+# is_free_threaded tests
+# ---------------------------------------------------------------------------
+
+
+def test_is_free_threaded_returns_bool() -> None:
+    from yowo.types import is_free_threaded
+
+    result = is_free_threaded()
+    assert isinstance(result, bool)
+
+
+def test_is_free_threaded_false_on_standard_python() -> None:
+    """On standard (GIL) Python, should return False."""
+    import sys
+
+    try:
+        gil_enabled = sys._is_gil_enabled()  # type: ignore[attr-defined]
+        from yowo.types import is_free_threaded
+
+        assert is_free_threaded() == (not gil_enabled)
+    except AttributeError:
+        # Python < 3.13 — no _is_gil_enabled, is_free_threaded returns False
+        from yowo.types import is_free_threaded
+
+        assert is_free_threaded() is False
