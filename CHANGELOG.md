@@ -15,6 +15,30 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [2.0.0] — 2026-02-26
+
+### Added
+
+- **export**: INT8 export completion — TensorRT calibrator (`IInt8EntropyCalibrator2`)
+  with device buffer reuse and cache persistence, ONNX static quantization via
+  `quantize_onnx_static()`, and `calibration_batches()` iterator using
+  `cv2.dnn.blobFromImages`. Wire calibrator into `_convert_tensorrt()`.
+
+- **engine**: Open backend factory — `backend_instance` parameter on
+  `InferenceEngine.__init__()` allows injecting custom `InferenceBackend`
+  implementations without modifying the library. Skips auto-selection when provided.
+
+- **backends**: Native CoreML backend and export for Apple Silicon — `CoreMLBackend`
+  class implementing `InferenceBackend` Protocol, direct PyTorch-to-CoreML export
+  via `coremltools.convert()` (no ONNX intermediate), `COREML` enum values in
+  `BackendType` and `ExportFormat`, auto-selection priority 3 on macOS ARM64.
+
+- **io**: Source metadata — lazy `_probe()` on `VideoFileSource` consolidating
+  `total_frames`, `resolution`, and `fps` into single `VideoCapture` open.
+  `resolution` and `fps` properties on all concrete source classes.
+
+---
+
 ## [1.3.1] — 2026-02-26
 
 ### Fixed

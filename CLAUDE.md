@@ -14,3 +14,5 @@ Simultaneously:
 ```
 
 Only proceed to commit after all three return APPROVE / no P0 issues / no uncovered error paths.
+
+### Release - update changelog & readme after merge PR. Then prefer release
