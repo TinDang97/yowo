@@ -37,6 +37,8 @@ class CoreMLBackend:
         self._input_shape: tuple[int, int] = (640, 640)
         self._input_name: str = "images"
         self._output_name: str = "output0"
+        # Batch dimension info (set in load())
+        self._supported_batch_sizes: list[int] | None = None
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -86,15 +88,23 @@ class CoreMLBackend:
                 compute_units=ct.ComputeUnit.ALL,
             )
 
-            # Derive input shape from model spec
+            # Derive input shape and batch support from model spec
             spec = self._model.get_spec()
+            self._supported_batch_sizes = None
             for inp in spec.description.input:
                 if inp.name == self._input_name or inp.type.HasField("imageType"):
                     # Try multiarray first
                     if inp.type.HasField("multiArrayType"):
-                        shape = list(inp.type.multiArrayType.shape)
+                        ma = inp.type.multiArrayType
+                        shape = list(ma.shape)
                         if len(shape) == 4:  # BCHW
                             self._input_shape = (int(shape[2]), int(shape[3]))
+                        # Detect EnumeratedShapes for batch flexibility
+                        if ma.HasField("enumeratedShapes"):
+                            enum_shapes = ma.enumeratedShapes.shapes
+                            self._supported_batch_sizes = [
+                                int(s.shape[0]) for s in enum_shapes if len(s.shape) >= 1
+                            ]
                     elif inp.type.HasField("imageType"):
                         self._input_shape = (
                             int(inp.type.imageType.height),
@@ -103,10 +113,11 @@ class CoreMLBackend:
                     break
 
             logger.info(
-                "CoreML model loaded: %s (input: %dx%d)",
+                "CoreML model loaded: %s (input: %dx%d, batch: %s)",
                 path.name,
                 self._input_shape[0],
                 self._input_shape[1],
+                self._supported_batch_sizes or "fixed=1",
             )
         except Exception as exc:
             self._model = None
@@ -152,6 +163,21 @@ class CoreMLBackend:
         """Run dummy inference to prime the Neural Engine."""
         if self._model is None:
             return
+
+        if self._supported_batch_sizes is not None:
+            if batch_size not in self._supported_batch_sizes:
+                logger.warning(
+                    "CoreMLBackend: model supports batch sizes %s but requested batch=%d; "
+                    "inference may fail",
+                    self._supported_batch_sizes,
+                    batch_size,
+                )
+        elif batch_size > 1:
+            logger.warning(
+                "CoreMLBackend: model has fixed batch=1 but requested batch=%d; inference may fail",
+                batch_size,
+            )
+
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)

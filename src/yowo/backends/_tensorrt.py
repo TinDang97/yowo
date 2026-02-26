@@ -72,6 +72,9 @@ class TensorRTBackend:
         # Standard (non-KV) OrtValue path (set in load())
         self._use_ortvalue: bool = False
         self._ortvalue_fn: Any = None
+        # Batch dimension info (set in load())
+        self._dynamic_batch: bool = True
+        self._static_batch: int | None = None
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -164,6 +167,10 @@ class TensorRTBackend:
                 and isinstance(input_shape[3], int)
             ):
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
+            # Detect dynamic vs static batch dimension
+            batch_dim = input_shape[0] if input_shape and len(input_shape) >= 1 else None
+            self._dynamic_batch = not isinstance(batch_dim, int)
+            self._static_batch = int(batch_dim) if isinstance(batch_dim, int) else None
             # Cache output names for run_with_ort_values()
             self._output_names = [o.name for o in self._session.get_outputs()]
             # OrtValue zero-copy path: TRT backend always has CUDA EP,
@@ -302,6 +309,15 @@ class TensorRTBackend:
         """
         if self._session is None:
             return
+
+        if not self._dynamic_batch and batch_size > (self._static_batch or 1):
+            logger.warning(
+                "TensorRTBackend: model has static batch=%d but requested batch=%d; "
+                "inference may fail for batch > %d",
+                self._static_batch or 1,
+                batch_size,
+                self._static_batch or 1,
+            )
 
         try:
             h, w = self._input_shape

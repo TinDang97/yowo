@@ -24,10 +24,11 @@ def export_model(
     output_dir: Path,
     *,
     precision: Precision = Precision.FP16,
-    dynamic_batch: bool = False,
+    dynamic_batch: bool = True,
     imgsz: int = 640,
     calibration_data: str | None = None,
     kv_cache: bool = False,
+    batch_sizes: list[int] | None = None,
 ) -> ExportMetadata:
     """Export a YOLO model to an optimized inference format.
 
@@ -41,10 +42,13 @@ def export_model(
         output_dir: Where to write the exported model.
         precision: FP32, FP16, or INT8.
         dynamic_batch: Enable dynamic batch dimension (ONNX only).
+            Enabled by default. Use ``--no-dynamic-batch`` to disable.
         imgsz: Input image size.
         calibration_data: Required for INT8; path to image directory.
         kv_cache: Export with K,V as explicit ONNX I/O for stateful
             streaming inference across all runtimes.
+        batch_sizes: Pre-compiled batch sizes for CoreML export via
+            ``ct.EnumeratedShapes``. ``None`` means fixed batch=1.
 
     Returns:
         ExportMetadata record with file path and sidecar written to disk.
@@ -97,7 +101,11 @@ def export_model(
     # CoreML exports directly from PyTorch — skip ONNX intermediate
     if target_format == ExportFormat.COREML:
         exported_path = _convert_coreml(
-            model, dummy, output_dir / f"{model_stem}.mlpackage", precision
+            model,
+            dummy,
+            output_dir / f"{model_stem}.mlpackage",
+            precision,
+            batch_sizes=batch_sizes,
         )
     else:
         # Step 1: Produce ONNX first
@@ -165,7 +173,10 @@ def export_model(
         yowo_version=getattr(yowo, "__version__", "0.1.0"),
         gpu_name=hw.primary_gpu.name if hw.primary_gpu else None,
         calibration_data=calibration_data,
-        extra={"kv_cache": True} if kv_cache else {},
+        extra={
+            **({"kv_cache": True} if kv_cache else {}),
+            **({"batch_sizes": batch_sizes} if batch_sizes else {}),
+        },
     )
     meta.save()
 
@@ -390,6 +401,8 @@ def _convert_coreml(
     dummy: Any,
     output_path: Path,
     precision: Precision,
+    *,
+    batch_sizes: list[int] | None = None,
 ) -> Path:
     """Convert PyTorch model directly to CoreML .mlpackage.
 
@@ -401,6 +414,8 @@ def _convert_coreml(
         dummy: Dummy input tensor for tracing.
         output_path: Target ``.mlpackage`` path.
         precision: FP16 or FP32 compute precision.
+        batch_sizes: Pre-compiled batch sizes via ``ct.EnumeratedShapes``.
+            ``None`` means fixed shape matching ``dummy``.
 
     Returns:
         The output path (a directory for ``.mlpackage``).
@@ -428,9 +443,17 @@ def _convert_coreml(
         # Convert with ML Program format (modern CoreML)
         ct_precision = ct.precision.FLOAT16 if precision == Precision.FP16 else ct.precision.FLOAT32
 
+        # Build input spec: EnumeratedShapes for multi-batch, fixed for single
+        if batch_sizes:
+            spatial = list(dummy.shape[1:])  # [C, H, W]
+            shapes = [tuple([b, *spatial]) for b in batch_sizes]
+            ct_inputs = [ct.TensorType(name="images", shape=ct.EnumeratedShapes(shapes=shapes))]
+        else:
+            ct_inputs = [ct.TensorType(name="images", shape=dummy.shape)]
+
         mlmodel = ct.convert(
             traced,
-            inputs=[ct.TensorType(name="images", shape=dummy.shape)],
+            inputs=ct_inputs,
             convert_to="mlprogram",
             compute_precision=ct_precision,
             compute_units=ct.ComputeUnit.ALL,

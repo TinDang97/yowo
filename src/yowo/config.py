@@ -143,7 +143,11 @@ class ExportConfig:
         target_format: Output format for the exported artifact.
         precision: Numerical precision of the exported artifact.
         dynamic_batch: Enable dynamic batch dimension in the ONNX graph.
-            Has no effect for TensorRT or OpenVINO exports.
+            Enabled by default. Has no effect for TensorRT or OpenVINO exports.
+        batch_sizes: Pre-compiled batch sizes for CoreML EnumeratedShapes
+            export. When provided, CoreML will pre-compile optimized kernels
+            for each listed batch size. ``None`` means fixed batch=1.
+            Only applies to CoreML exports.
         output_dir: Directory where exported artifacts are written.
             Defaults to ``~/.yowo/models``.
         imgsz: Input image size (square). Must match training configuration.
@@ -156,7 +160,8 @@ class ExportConfig:
     weights_path: Path | None = None
     target_format: ExportFormat = ExportFormat.ONNX
     precision: Precision = Precision.FP16
-    dynamic_batch: bool = False
+    dynamic_batch: bool = True
+    batch_sizes: list[int] | None = None
     output_dir: Path = field(default_factory=lambda: Path.home() / ".yowo" / "models")
     imgsz: int = 640
     calibration_data: str | None = None
@@ -169,6 +174,12 @@ class ExportConfig:
             )
         if self.imgsz <= 0:
             raise ConfigError(f"imgsz must be > 0, got {self.imgsz}")
+        if self.batch_sizes is not None:
+            if not self.batch_sizes:
+                raise ConfigError("batch_sizes must not be empty")
+            if any(b <= 0 for b in self.batch_sizes):
+                raise ConfigError("batch_sizes values must be > 0")
+            self.batch_sizes = sorted(set(self.batch_sizes))
 
 
 # ---------------------------------------------------------------------------

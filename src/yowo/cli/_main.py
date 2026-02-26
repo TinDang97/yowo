@@ -177,7 +177,7 @@ def detect_command(
     "-f",
     "fmt",
     required=True,
-    type=click.Choice(["onnx", "tensorrt", "openvino"]),
+    type=click.Choice(["onnx", "tensorrt", "openvino", "coreml"]),
 )
 @click.option(
     "--precision",
@@ -187,8 +187,13 @@ def detect_command(
 )
 @click.option("--calibration-data", default=None, type=click.Path(exists=True))
 @click.option("--output-dir", "-o", default=None, type=click.Path())
-@click.option("--dynamic-batch/--no-dynamic-batch", default=False)
+@click.option("--dynamic-batch/--no-dynamic-batch", default=True)
 @click.option("--imgsz", default=640, type=int)
+@click.option(
+    "--batch-sizes",
+    default=None,
+    help="Comma-separated batch sizes for CoreML EnumeratedShapes (e.g. '1,4,8').",
+)
 def export_command(
     model: str,
     weights: str | None,
@@ -198,6 +203,7 @@ def export_command(
     output_dir: str | None,
     dynamic_batch: bool,
     imgsz: int,
+    batch_sizes: str | None,
 ) -> None:
     """Export MODEL to an optimized inference format."""
     from yowo.export import export_model
@@ -211,6 +217,14 @@ def export_command(
         else Path.home() / ".yowo" / "models" / model / f"{fmt}_{precision}"
     )
 
+    parsed_batch_sizes: list[int] | None = None
+    if batch_sizes:
+        try:
+            parsed_batch_sizes = [int(x.strip()) for x in batch_sizes.split(",")]
+        except ValueError:
+            click.echo("--batch-sizes must be comma-separated integers (e.g. '1,4,8')", err=True)
+            sys.exit(1)
+
     try:
         meta = export_model(
             spec,
@@ -220,6 +234,7 @@ def export_command(
             dynamic_batch=dynamic_batch,
             imgsz=imgsz,
             calibration_data=calibration_data,
+            batch_sizes=parsed_batch_sizes,
         )
         click.echo(f"Exported: {meta.file_path}")
         click.echo(f"Size: {meta.file_size_bytes / 1_048_576:.1f} MB")
