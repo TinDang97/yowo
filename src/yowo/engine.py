@@ -572,10 +572,11 @@ class InferenceEngine:
                 buf = buffer_pool.acquire()
                 try:
                     tensor = preprocess_into(frames, target_size, buf)
-                    if infer_lock is not None:
-                        with infer_lock:
-                            return self._detect_from_tensor(tensor, frames, scratch=None)
-                    return self._detect_from_tensor(tensor, frames, scratch=None)
+                    with infer_lock:  # type: ignore[union-attr]
+                        return self._detect_from_tensor(tensor, frames, scratch=None)
+                except Exception:
+                    self._metrics.record_error()
+                    raise
                 finally:
                     buffer_pool.release(buf)
             return self.detect(frames)
@@ -654,10 +655,8 @@ class InferenceEngine:
                 stop_event.set()
 
         deadline = time.monotonic() + timeout
-        remaining = deadline - time.monotonic()
-        if remaining > 0:
-            self._streams_drained.wait(timeout=remaining)
-
+        self._streams_drained.wait(timeout=max(0.0, deadline - time.monotonic()))
+        self._event_bus.emit("health_change", HealthStatus.SHUTTING_DOWN)
         # Drain and close event bus
         self._event_bus.close(timeout=max(0.1, deadline - time.monotonic()))
 

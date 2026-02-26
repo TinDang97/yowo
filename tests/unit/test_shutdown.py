@@ -190,6 +190,19 @@ class TestActiveStreamTracking:
 
         assert stop.is_set(), "close() did not signal active stream stop-event"
 
+    def test_close_emits_health_change_shutting_down(self) -> None:
+        """close() emits 'health_change' with SHUTTING_DOWN before event bus closes."""
+        import time
+
+        engine = _loaded_engine(_make_mock_backend())
+        health_events: list[HealthStatus] = []
+        engine.on("health_change", health_events.append)
+        engine.close()
+        deadline = time.monotonic() + 2.0
+        while len(health_events) < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert HealthStatus.SHUTTING_DOWN in health_events
+
     def test_unload_raises_state_still_cleaned_up(self) -> None:
         """backend.unload() raising must not prevent _loaded=False and health=CLOSED."""
         mock_be = _make_mock_backend()
