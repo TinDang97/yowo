@@ -1198,3 +1198,129 @@ class TestStreamLiveIdleTimeout:
 
         assert results == []
         source.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Custom backend injection
+# ---------------------------------------------------------------------------
+
+
+class TestCustomBackendInjection:
+    """Tests for user-provided backend_instance injection."""
+
+    def test_skips_auto_selection(self) -> None:
+        """When backend_instance provided, select_backend is not called."""
+        mock_backend = _make_mock_backend()
+        with (
+            patch("yowo.engine.select_backend") as mock_select,
+            patch("yowo.engine.create_backend") as mock_create,
+            patch("yowo.engine.get_hardware_profile") as mock_hw,
+        ):
+            InferenceEngine(backend_instance=mock_backend)
+            mock_select.assert_not_called()
+            mock_create.assert_not_called()
+            mock_hw.assert_not_called()
+
+    def test_selection_reflects_backend_type(self) -> None:
+        """BackendSelection.backend matches injected backend's type."""
+        mock_backend = _make_mock_backend(backend_type=BackendType.ONNX)
+        engine = InferenceEngine(backend_instance=mock_backend)
+        assert engine.selection.backend == BackendType.ONNX
+        assert engine.selection.reason == "User-provided backend instance"
+
+    def test_selection_defaults_to_cpu_fp32(self) -> None:
+        """Injected backend selection defaults to CPU/FP32 (user manages device)."""
+        mock_backend = _make_mock_backend()
+        engine = InferenceEngine(backend_instance=mock_backend)
+        assert engine.selection.device_type == DeviceType.CPU
+        assert engine.selection.precision == Precision.FP32
+
+    def test_load_calls_backend_load_and_warmup(self) -> None:
+        """load() calls backend.load() and warmup() on injected backend."""
+        mock_backend = _make_mock_backend()
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
+            engine = InferenceEngine(backend_instance=mock_backend)
+            engine.load()
+            mock_backend.load.assert_called_once()
+            mock_backend.warmup.assert_called_once()
+            assert engine.is_loaded
+
+    def test_no_fallback_on_load_failure(self) -> None:
+        """Injected backend failures propagate directly — no fallback chain."""
+        mock_backend = _make_mock_backend(load_raises=BackendLoadError("custom fail"))
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
+            engine = InferenceEngine(backend_instance=mock_backend)
+            with pytest.raises(BackendLoadError, match="custom fail"):
+                engine.load()
+
+    def test_detect_works_with_injected_backend(self) -> None:
+        """detect() works end-to-end with injected backend."""
+        mock_backend = _make_mock_backend()
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
+            engine = InferenceEngine(backend_instance=mock_backend)
+            engine.load()
+            frames = [_make_frame(0)]
+            result = engine.detect(frames)
+            assert len(result) == 1
+            mock_backend.infer.assert_called_once()
+
+    def test_none_uses_normal_auto_selection_path(self) -> None:
+        """backend_instance=None (default) uses auto-selection."""
+        hw = _make_cpu_only_profile()
+        mock_backend = _make_mock_backend()
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw) as mock_hw,
+            patch("yowo.engine.select_backend") as mock_select,
+            patch("yowo.engine.create_backend", return_value=mock_backend) as mock_create,
+        ):
+            mock_select.return_value = BackendSelection(
+                backend=BackendType.PYTORCH,
+                device_type=DeviceType.CPU,
+                precision=Precision.FP32,
+                reason="auto",
+            )
+            InferenceEngine()  # no backend_instance
+            mock_hw.assert_called_once()
+            mock_select.assert_called_once()
+            mock_create.assert_called_once()
+
+    def test_close_calls_unload_on_injected_backend(self) -> None:
+        """close() calls unload() on injected backend."""
+        mock_backend = _make_mock_backend()
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
+            engine = InferenceEngine(backend_instance=mock_backend)
+            engine.load()
+            engine.close()
+            mock_backend.unload.assert_called_once()
+            assert not engine.is_loaded
+
+    def test_context_manager_with_injected_backend(self) -> None:
+        """Context manager loads and closes injected backend."""
+        mock_backend = _make_mock_backend()
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
+            with InferenceEngine(backend_instance=mock_backend) as engine:
+                assert engine.is_loaded
+            mock_backend.unload.assert_called_once()
+
+    def test_kv_cache_flag_propagates(self) -> None:
+        """kv_cache config propagates when using injected backend."""
+        mock_backend = _make_mock_backend()
+        engine = InferenceEngine(backend_instance=mock_backend, kv_cache=True)
+        assert engine._kv_cache is True
+
+    def test_user_provided_backend_flag_set(self) -> None:
+        """_user_provided_backend flag is True when backend injected."""
+        mock_backend = _make_mock_backend()
+        engine = InferenceEngine(backend_instance=mock_backend)
+        assert engine._user_provided_backend is True
+
+    def test_user_provided_backend_flag_false_by_default(self) -> None:
+        """_user_provided_backend flag is False when using auto-selection."""
+        hw = _make_cpu_only_profile()
+        mock_backend = _make_mock_backend()
+        with (
+            patch("yowo.engine.get_hardware_profile", return_value=hw),
+            patch("yowo.engine.create_backend", return_value=mock_backend),
+        ):
+            engine = InferenceEngine()
+            assert engine._user_provided_backend is False
