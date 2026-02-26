@@ -220,6 +220,70 @@ class TestOnnxStandardOrtValue:
             backend.load("fake.onnx", device="cpu")
         assert backend._use_ortvalue is False
 
+    def test_ortvalue_fn_cached_on_load(self) -> None:
+        """_ortvalue_fn must be set to the shared function when OrtValue is active."""
+        from yowo.backends._onnx import OnnxBackend
+        from yowo.backends._ortvalue import infer_standard_ortvalue
+
+        hw = _make_hw_onnx()
+        backend = OnnxBackend(hw)
+
+        session = _make_ort_session(
+            has_run_with_ort_values=True,
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        ort_mod = _make_mock_ort_module(session)
+
+        with patch.dict(sys.modules, {"onnxruntime": ort_mod}):
+            backend.load("fake.onnx", device="cpu")
+
+        assert backend._ortvalue_fn is infer_standard_ortvalue
+
+    def test_ortvalue_fn_none_when_disabled(self) -> None:
+        """_ortvalue_fn must be None when OrtValue path is not active."""
+        from yowo.backends._onnx import OnnxBackend
+
+        hw = _make_hw_onnx()
+        backend = OnnxBackend(hw)
+
+        session = _make_ort_session(
+            has_run_with_ort_values=True,
+            providers=["CPUExecutionProvider"],
+        )
+        ort_mod = _make_mock_ort_module(session)
+
+        with patch.dict(sys.modules, {"onnxruntime": ort_mod}):
+            backend.load("fake.onnx", device="cpu")
+
+        assert backend._ortvalue_fn is None
+
+    def test_ortvalue_fn_reset_on_reload(self) -> None:
+        """_ortvalue_fn must reset when reloading with different EP."""
+        from yowo.backends._onnx import OnnxBackend
+
+        hw = _make_hw_onnx()
+        backend = OnnxBackend(hw)
+
+        # First load with CUDA EP — fn cached
+        session_gpu = _make_ort_session(
+            has_run_with_ort_values=True,
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        ort_mod1 = _make_mock_ort_module(session_gpu)
+        with patch.dict(sys.modules, {"onnxruntime": ort_mod1}):
+            backend.load("fake.onnx", device="cpu")
+        assert backend._ortvalue_fn is not None
+
+        # Reload with CPU-only EP — fn cleared
+        session_cpu = _make_ort_session(
+            has_run_with_ort_values=True,
+            providers=["CPUExecutionProvider"],
+        )
+        ort_mod2 = _make_mock_ort_module(session_cpu)
+        with patch.dict(sys.modules, {"onnxruntime": ort_mod2}):
+            backend.load("fake.onnx", device="cpu")
+        assert backend._ortvalue_fn is None
+
 
 # ---------------------------------------------------------------------------
 # Part 1: OrtValue standard path — TensorRTBackend

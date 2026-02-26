@@ -35,6 +35,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections import deque
@@ -155,8 +156,15 @@ def _run_overlapped(
                 fut, prev_batch = pending.popleft()
                 router.route(fut.result(), prev_batch)
     finally:
+        # Cancel futures that haven't started, then wait for any
+        # in-flight future to finish so the worker thread is not left
+        # accessing engine state after we return.
         for fut, _ in pending:
             fut.cancel()
+        for fut, _ in pending:
+            if not fut.cancelled():
+                with contextlib.suppress(Exception):
+                    fut.result(timeout=10.0)
         collector.close()
 
 

@@ -387,12 +387,11 @@ class InferenceEngine:
                 if item is not None:
                     idle_since = None
                     if isinstance(item, PreparedItem):
-                        dets = self._detect_from_tensor(
+                        yield from self._detect_from_tensor(
                             item.tensor,
                             [item.frame],
                             scratch=self._postprocess_buf,
                         )
-                        yield dets[0]
                     else:
                         yield from self.detect([item])
                 elif reader.is_exhausted:
@@ -477,9 +476,8 @@ class InferenceEngine:
                 while True:
                     item = reader.get(timeout=5.0)
                     # Pipeline path never uses preprocess_fn, so items are always Frame.
-                    assert not isinstance(item, PreparedItem), (
-                        "pipeline path must not use preprocess_fn"
-                    )
+                    if isinstance(item, PreparedItem):
+                        raise TypeError("pipeline path must not use preprocess_fn")
                     frame: Frame | None = item
                     if frame is not None:
                         batch.append(frame)

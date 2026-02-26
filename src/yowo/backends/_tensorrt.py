@@ -71,6 +71,7 @@ class TensorRTBackend:
         self._kv_zeros_ort: dict[str, Any] = {}
         # Standard (non-KV) OrtValue path (set in load())
         self._use_ortvalue: bool = False
+        self._ortvalue_fn: Any = None
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -120,6 +121,7 @@ class TensorRTBackend:
         self._kv_zeros = {}
         self._kv_zeros_ort = {}
         self._use_ortvalue = False
+        self._ortvalue_fn = None
 
         try:
             import onnxruntime as ort_mod  # type: ignore[import-untyped]
@@ -169,6 +171,10 @@ class TensorRTBackend:
             _active = self._session.get_providers()
             _has_gpu_ep = any("CUDA" in p or "TensorRT" in p for p in _active)
             self._use_ortvalue = _has_gpu_ep and hasattr(self._session, "run_with_ort_values")
+            if self._use_ortvalue:
+                from yowo.backends._ortvalue import infer_standard_ortvalue
+
+                self._ortvalue_fn = infer_standard_ortvalue
             # Detect KV cache I/O by inspecting input names
             kv_inputs = [i for i in inputs if i.name.startswith("past_")]
             if kv_inputs:
@@ -235,9 +241,7 @@ class TensorRTBackend:
 
     def _infer_standard_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Standard inference using OrtValue for zero-copy input wrapping."""
-        from yowo.backends._ortvalue import infer_standard_ortvalue
-
-        return infer_standard_ortvalue(
+        return self._ortvalue_fn(
             self._ort,
             self._session,
             self._input_name,

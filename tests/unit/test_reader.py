@@ -363,6 +363,56 @@ class TestPreprocessInReaderThread:
             assert isinstance(args[0][0], Frame)
             assert args[1] == target
 
+    def test_reader_latest_policy_drops_stale_preprocessed_item(self) -> None:
+        """LATEST policy: stale item preprocessed while newer one enqueued is dropped."""
+        import threading
+
+        # preprocess_fn blocks on the first call (simulating slow CPU work)
+        # so a second frame can be read and enqueued while the first preprocesses.
+        gate = threading.Event()
+        call_count = 0
+
+        def _slow_preprocess(frames: list[Frame], target: tuple[int, int]) -> PreprocessedTensor:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Block first call until the gate is released.
+                gate.wait(timeout=5.0)
+            return PreprocessedTensor(
+                data=np.zeros((1, 3, 640, 640), dtype=np.float32),
+                original_shapes=((4, 4),),
+                input_shape=(640, 640),
+                scale_factors=((160.0, 160.0),),
+                pad_offsets=((0, 0),),
+            )
+
+        source = _MockSource(3)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=2,
+            policy=FrameDropPolicy.LATEST,
+            preprocess_fn=_slow_preprocess,
+            target_size=(640, 640),
+        )
+        reader.start()
+
+        # Wait a moment for the reader thread to start preprocessing frame 0.
+        time.sleep(0.05)
+        # Release the gate — frame 0 finishes preprocessing, but frames 1+
+        # may already have advanced the enqueue sequence.
+        gate.set()
+
+        items: list[PreparedItem] = []
+        while (item := reader.get(timeout=2.0)) is not None:
+            assert isinstance(item, PreparedItem)
+            items.append(item)
+        reader.stop()
+
+        # Verify monotonic frame_index ordering — no stale frame delivered
+        # out-of-order due to slow preprocessing of an earlier frame.
+        indices = [it.frame.frame_index for it in items]
+        assert indices == sorted(indices), f"Out-of-order frame indices: {indices}"
+
     def test_reader_preprocess_error_propagated(self) -> None:
         """Errors in preprocess_fn propagate via get() like source errors."""
         mock_fn = MagicMock(side_effect=ValueError("bad preprocess"))

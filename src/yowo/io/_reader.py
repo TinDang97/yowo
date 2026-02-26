@@ -68,6 +68,7 @@ class ThreadedFrameReader:
 
     __slots__ = (
         "_deque",
+        "_enqueue_seq",
         "_error",
         "_exhausted",
         "_frames_dropped",
@@ -101,6 +102,7 @@ class ThreadedFrameReader:
         self._preprocess_fn = preprocess_fn
         self._target_size = target_size
         self._deque: deque[Frame | PreparedItem] = deque()
+        self._enqueue_seq: int = 0
         self._lock = threading.Lock()
         self._not_empty: threading.Condition = threading.Condition(self._lock)
         self._not_full: threading.Condition = threading.Condition(self._lock)
@@ -126,19 +128,30 @@ class ThreadedFrameReader:
                 # blocking the consumer while CPU-bound resize executes.
                 item: Frame | PreparedItem
                 if self._preprocess_fn is not None and self._target_size is not None:
+                    # Snapshot the sequence counter before CPU-bound work so we
+                    # can detect if a newer frame was enqueued while we were
+                    # preprocessing (only relevant for LATEST drop policy).
+                    seq_before = self._enqueue_seq
                     tensor = self._preprocess_fn([frame], self._target_size)
                     item = PreparedItem(tensor=tensor, frame=frame)
                 else:
+                    seq_before = None
                     item = frame
 
                 with self._not_empty:
                     self._frames_read += 1
                     if self._policy == FrameDropPolicy.LATEST:
+                        # If a newer frame was already enqueued while we were
+                        # preprocessing, this item is stale — drop it.
+                        if seq_before is not None and self._enqueue_seq != seq_before:
+                            self._frames_dropped += 1
+                            continue
                         # Drop everything queued; keep only this latest frame.
                         dropped = len(self._deque)
                         self._deque.clear()
                         self._frames_dropped += dropped
                         self._deque.append(item)
+                        self._enqueue_seq += 1
                         self._not_empty.notify()
                     elif self._policy == FrameDropPolicy.SKIP_OLDEST:
                         if len(self._deque) >= self._max_size:
