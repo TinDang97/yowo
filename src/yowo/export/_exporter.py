@@ -102,13 +102,30 @@ def export_model(
     else:
         _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
 
+    # Step 1b: INT8 quantization for ONNX target
+    if target_format == ExportFormat.ONNX and precision == Precision.INT8:
+        from yowo.export._int8 import quantize_onnx_static
+
+        quantized_path = output_dir / f"{model_stem}_int8.onnx"
+        quantize_onnx_static(
+            onnx_path,
+            quantized_path,
+            calibration_data,  # type: ignore[arg-type]  # validated non-None above
+            input_size=imgsz,
+        )
+        onnx_path = quantized_path
+
     # Step 2: Convert if needed
     match target_format:
         case ExportFormat.ONNX:
             exported_path = onnx_path
         case ExportFormat.TENSORRT:
             exported_path = _convert_tensorrt(
-                onnx_path, output_dir / f"{model_stem}.engine", precision, calibration_data
+                onnx_path,
+                output_dir / f"{model_stem}.engine",
+                precision,
+                calibration_data,
+                imgsz=imgsz,
             )
         case ExportFormat.OPENVINO:
             exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
@@ -294,6 +311,8 @@ def _convert_tensorrt(
     engine_path: Path,
     precision: Precision,
     calibration_data: str | None,
+    *,
+    imgsz: int = 640,
 ) -> Path:
     """Convert ONNX to TensorRT engine."""
     try:
@@ -322,8 +341,15 @@ def _convert_tensorrt(
     if precision == Precision.INT8:
         config.set_flag(trt.BuilderFlag.INT8)
         if calibration_data:
-            _images = resolve_calibration_images(calibration_data)
-            logger.info("INT8 calibration with %d images", len(_images))
+            from yowo.export._int8 import create_tensorrt_calibrator
+
+            images = resolve_calibration_images(calibration_data)
+            cache_file = engine_path.with_suffix(".calib")
+            calibrator = create_tensorrt_calibrator(
+                images, batch_size=8, input_size=imgsz, cache_file=cache_file
+            )
+            config.int8_calibrator = calibrator
+            logger.info("INT8 calibration with %d images (cache: %s)", len(images), cache_file)
 
     serialized = builder.build_serialized_network(network, config)
     if serialized is None:
