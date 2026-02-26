@@ -73,11 +73,12 @@ def export_model(
     load_weights(model, weights_path)
     model = model.fuse().eval()
 
-    if precision == Precision.FP16:
+    # CoreML handles FP16 via compute_precision — keep model/dummy FP32
+    if precision == Precision.FP16 and target_format != ExportFormat.COREML:
         model = model.half()
 
     dummy = torch.zeros(1, 3, imgsz, imgsz)
-    if precision == Precision.FP16:
+    if precision == Precision.FP16 and target_format != ExportFormat.COREML:
         dummy = dummy.half()
 
     logger.info(
@@ -120,6 +121,7 @@ def export_model(
                 quantized_path,
                 calibration_data,  # type: ignore[arg-type]  # validated non-None above
                 input_size=imgsz,
+                batch_size=1 if not dynamic_batch else 8,
             )
             onnx_path = quantized_path
 
@@ -414,6 +416,12 @@ def _convert_coreml(
         raise DependencyError("coremltools", "uv add coremltools>=7.0") from exc
 
     try:
+        # Warmup forward pass to initialize Detect head caches (strides,
+        # anchors) so torch.jit.trace sees identical graphs on both its
+        # internal sanity-check invocations.
+        with torch.no_grad():
+            model(dummy)
+
         # Trace for coremltools (it works with traced models)
         traced = torch.jit.trace(model, dummy)
 
@@ -429,7 +437,7 @@ def _convert_coreml(
         )
 
         # Save as .mlpackage
-        mlmodel.save(str(output_path))
+        mlmodel.save(str(output_path))  # type: ignore[union-attr]
         return output_path
 
     except Exception as exc:
