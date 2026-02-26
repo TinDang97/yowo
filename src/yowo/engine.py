@@ -43,6 +43,7 @@ from yowo.types import (
     BackendSelection,
     BackendType,
     Detection,
+    DeviceType,
     Frame,
     FrameDropPolicy,
     ModelFamily,
@@ -65,12 +66,18 @@ class InferenceEngine:
       4. close(): release resources
 
     Context manager support (load on enter, close on exit).
+
+    Custom backends: pass ``backend_instance`` to inject a user-provided
+    :class:`InferenceBackend` implementation.  Hardware detection, backend
+    selection, and the fallback chain are all bypassed; the caller owns
+    device placement and error handling.
     """
 
     def __init__(
         self,
         config: InferenceConfig | None = None,
         *,
+        backend_instance: InferenceBackend | None = None,
         model_family: ModelFamily = ModelFamily.YOLO26,
         model_size: ModelSize = ModelSize.NANO,
         weights_path: Path | None = None,
@@ -126,26 +133,40 @@ class InferenceEngine:
 
             self._feature_cache = FeatureCache(cache_dir=cfg.cache_dir)
 
-        # Detect hardware once
-        self._hw = get_hardware_profile()
+        # Track whether user injected a backend (disables fallback in load)
+        self._user_provided_backend = backend_instance is not None
 
-        # Select backend (may be overridden by user)
-        self._selection: BackendSelection = select_backend(
-            self._hw,
-            model_size=spec.size.value,
-            backend_override=cfg.backend.value if cfg.backend else None,
-            device_override=cfg.device if cfg.device != "auto" else None,
-            precision_override=cfg.precision.value if cfg.precision else None,
-        )
+        if backend_instance is not None:
+            # User-provided backend — skip hardware detection, selection, factory
+            self._backend: InferenceBackend = backend_instance
+            self._selection: BackendSelection = BackendSelection(
+                backend=backend_instance.backend_type,
+                device_type=DeviceType.CPU,
+                precision=Precision.FP32,
+                device_index=0,
+                reason="User-provided backend instance",
+            )
+            self._hw = None
+            self._kv_cache = cfg.kv_cache
+        else:
+            # Auto-selection: detect hardware, select backend, create via factory
+            self._hw = get_hardware_profile()
+            self._selection = select_backend(
+                self._hw,
+                model_size=spec.size.value,
+                backend_override=cfg.backend.value if cfg.backend else None,
+                device_override=cfg.device if cfg.device != "auto" else None,
+                precision_override=cfg.precision.value if cfg.precision else None,
+            )
+            self._kv_cache = cfg.kv_cache
+            self._backend = create_backend(
+                self._selection.backend,
+                self._hw,
+                model_spec=self._spec,
+                feature_cache=self._feature_cache,
+                kv_cache=cfg.kv_cache,
+            )
 
-        self._kv_cache = cfg.kv_cache
-        self._backend: InferenceBackend = create_backend(
-            self._selection.backend,
-            self._hw,
-            model_spec=self._spec,
-            feature_cache=self._feature_cache,
-            kv_cache=cfg.kv_cache,
-        )
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
 
@@ -170,6 +191,15 @@ class InferenceEngine:
         """Resolve weights, load into backend, warmup. Falls back on failure."""
         weights_path = resolve_weights(self._spec)
 
+        if self._user_provided_backend:
+            # Direct load — no fallback chain; user owns error handling
+            self._backend.load(weights_path, device=self._device)
+            self._backend.warmup(batch_size=self._batch_size)
+            self._finalize_load()
+            return
+
+        # _hw is always set when _user_provided_backend is False
+        assert self._hw is not None
         backends_to_try = [self._selection.backend, *get_fallback_backends(self._selection.backend)]
         last_exc: Exception | None = None
 
@@ -209,16 +239,7 @@ class InferenceEngine:
                         reason=f"Fallback from {self._selection.backend.value}",
                     )
 
-                # Allocate reusable buffers for streaming
-                target_size = (self._model_meta.input_height, self._model_meta.input_width)
-                self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
-                self._postprocess_buf = PostprocessBuffer()
-
-                # Resolve pipeline worker count
-                if self._pipeline_workers == 0:
-                    self._pipeline_workers = 2 if is_free_threaded() else 1
-
-                self._loaded = True
+                self._finalize_load()
                 return
             except (BackendLoadError, BackendError) as exc:
                 last_exc = exc
@@ -228,6 +249,15 @@ class InferenceEngine:
             f"All backends failed for {self._spec.family.value}{self._spec.size.value}. "
             f"Last error: {last_exc}"
         )
+
+    def _finalize_load(self) -> None:
+        """Allocate reusable buffers and resolve pipeline workers."""
+        target_size = (self._model_meta.input_height, self._model_meta.input_width)
+        self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
+        self._postprocess_buf = PostprocessBuffer()
+        if self._pipeline_workers == 0:
+            self._pipeline_workers = 2 if is_free_threaded() else 1
+        self._loaded = True
 
     def detect(self, frames: list[Frame]) -> list[Detection]:
         """Run detection on a list of frames. Returns one Detection per frame."""
