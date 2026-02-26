@@ -50,6 +50,8 @@ class ImageFileSource:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._yielded = False
+        self._resolution: tuple[int, int] | None = None
+        self._probed_resolution: bool = False
 
     @property
     def is_live(self) -> bool:
@@ -58,6 +60,21 @@ class ImageFileSource:
     @property
     def total_frames(self) -> int | None:
         return 1
+
+    @property
+    def resolution(self) -> tuple[int, int] | None:
+        """Native image resolution (height, width), or None if unreadable."""
+        if not self._probed_resolution:
+            img = cv2.imread(str(self._path), cv2.IMREAD_UNCHANGED)
+            if img is not None:
+                self._resolution = (img.shape[0], img.shape[1])
+            self._probed_resolution = True
+        return self._resolution
+
+    @property
+    def fps(self) -> float | None:
+        """Always None for single images."""
+        return None
 
     def __iter__(self) -> Iterator[Frame]:
         pixels = cv2.imread(str(self._path))
@@ -101,6 +118,16 @@ class ImageDirectorySource:
     @property
     def total_frames(self) -> int | None:
         return len(self._files)
+
+    @property
+    def resolution(self) -> tuple[int, int] | None:
+        """Always None for image directories (heterogeneous sizes)."""
+        return None
+
+    @property
+    def fps(self) -> float | None:
+        """Always None for image directories."""
+        return None
 
     def __iter__(self) -> Iterator[Frame]:
         for idx, path in enumerate(self._files):
@@ -146,19 +173,45 @@ class VideoFileSource:
         self._max_frames = max_frames
         self._cap: cv2.VideoCapture | None = None
         self._total: int | None = None
+        self._probed: bool = False
+        self._resolution: tuple[int, int] | None = None
+        self._fps: float | None = None
 
     @property
     def is_live(self) -> bool:
         return False
 
+    def _probe(self) -> None:
+        """Read all video metadata in a single VideoCapture open."""
+        if self._probed:
+            return
+        cap = cv2.VideoCapture(str(self._path))
+        count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps_val = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        self._total = count if count > 0 else None
+        self._resolution = (h, w) if h > 0 and w > 0 else None
+        self._fps = fps_val if fps_val and fps_val > 0 else None
+        self._probed = True
+
     @property
     def total_frames(self) -> int | None:
-        if self._total is None:
-            cap = cv2.VideoCapture(str(self._path))
-            count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            cap.release()
-            self._total = count if count > 0 else None
+        self._probe()
         return self._total
+
+    @property
+    def resolution(self) -> tuple[int, int] | None:
+        """Native source resolution (height, width), or None if unavailable."""
+        self._probe()
+        return self._resolution
+
+    @property
+    def fps(self) -> float | None:
+        """Source frame rate, or None if unknown."""
+        self._probe()
+        return self._fps
 
     def _open(self) -> cv2.VideoCapture:
         cap = cv2.VideoCapture(str(self._path))
@@ -240,6 +293,16 @@ class RTSPStreamSource:
 
     @property
     def total_frames(self) -> int | None:
+        return None
+
+    @property
+    def resolution(self) -> tuple[int, int] | None:
+        """Always None for RTSP streams (unknown until connected)."""
+        return None
+
+    @property
+    def fps(self) -> float | None:
+        """Always None for RTSP streams (unknown until connected)."""
         return None
 
     def _open_cap(self) -> cv2.VideoCapture:
@@ -331,6 +394,16 @@ class WebcamSource:
 
     @property
     def total_frames(self) -> int | None:
+        return None
+
+    @property
+    def resolution(self) -> tuple[int, int] | None:
+        """Always None for webcam (unknown until streaming)."""
+        return None
+
+    @property
+    def fps(self) -> float | None:
+        """Always None for webcam (unknown until streaming)."""
         return None
 
     def __iter__(self) -> Iterator[Frame]:
