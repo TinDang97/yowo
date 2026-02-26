@@ -54,7 +54,9 @@ def cli() -> None:
     default=False,
     help="Auto-tune config for detected device and source type",
 )
+@click.pass_context
 def detect_command(
+    ctx: click.Context,
     source: str,
     model: str,
     weights: str | None,
@@ -78,29 +80,34 @@ def detect_command(
     weights_path = Path(weights) if weights else spec.weights_path
 
     if preset:
+        from click.core import ParameterSource
+
         from yowo.config import classify_source, preset_config
         from yowo.hardware import get_hardware_profile
 
         hw = get_hardware_profile()
         source_cat = classify_source(source)
 
-        # Collect explicit CLI overrides (non-default values only)
+        def _is_explicit(name: str) -> bool:
+            return ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE
+
+        # Collect explicit CLI overrides (user-provided values only)
         cli_overrides: dict[str, object] = {
             "model_family": spec.family,
             "model_size": spec.size,
             "weights_path": weights_path,
         }
-        if backend != "auto":
-            cli_overrides["backend"] = BackendType(backend)
-        if device != "auto":
+        if _is_explicit("backend"):
+            cli_overrides["backend"] = BackendType(backend) if backend != "auto" else None
+        if _is_explicit("device"):
             cli_overrides["device"] = device
-        if precision != "auto":
-            cli_overrides["precision"] = Precision(precision)
-        if batch != 1:
+        if _is_explicit("precision"):
+            cli_overrides["precision"] = Precision(precision) if precision != "auto" else None
+        if _is_explicit("batch"):
             cli_overrides["batch_size"] = batch
-        if confidence != 0.25:
+        if _is_explicit("confidence"):
             cli_overrides["confidence_threshold"] = confidence
-        if iou != 0.45:
+        if _is_explicit("iou"):
             cli_overrides["iou_threshold"] = iou
 
         config = preset_config(hw, source_cat, **cli_overrides)

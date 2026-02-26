@@ -46,6 +46,9 @@ yowo detect video.mp4 --model yolo26n
 # Use a local weights file (skips download)
 yowo detect image.jpg --model yolo26n --weights /path/to/YOLO26.pt
 
+# Auto-tune config for your device and source type
+yowo detect video.mp4 --model yolo26n --preset
+
 # RTSP stream
 yowo detect rtsp://camera-ip:554/stream --model yolo26n --confidence 0.4
 
@@ -242,6 +245,30 @@ config = InferenceConfig(
 )
 with InferenceEngine(config) as engine:
     ...
+```
+
+### Preset config (auto-tuning)
+
+Auto-select pipeline knobs (batch size, caching, prefetch, frame drop policy) based on detected hardware and source type:
+
+```python
+from yowo import classify_source, preset_config
+from yowo.hardware import get_hardware_profile
+
+hw = get_hardware_profile()
+source_cat = classify_source("rtsp://192.168.1.10/stream")
+config = preset_config(hw, source_cat)
+
+with InferenceEngine(config) as engine:
+    ...
+```
+
+CLI equivalent — `--preset` auto-tunes, explicit flags override preset values:
+
+```bash
+yowo detect video.mp4 --preset                    # fully automatic
+yowo detect video.mp4 --preset --batch 8           # override batch size
+yowo detect rtsp://cam/stream --preset --confidence 0.4
 ```
 
 ### Override backend and precision

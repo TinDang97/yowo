@@ -8,9 +8,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from yowo.types import IMAGE_EXTS
 
-_IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
+logger = logging.getLogger(__name__)
 _MIN_CALIBRATION_IMAGES = 10
 _RECOMMENDED_CALIBRATION_IMAGES = 300
 
@@ -39,13 +39,13 @@ def resolve_calibration_images(calibration_data: str) -> list[Path]:
     if not src.is_dir():
         raise ValueError(f"Calibration source must be an image directory, got: {src}")
 
-    image_files = sorted(f for f in src.iterdir() if f.suffix.lower() in _IMAGE_EXTS)
+    image_files = sorted(f for f in src.iterdir() if f.suffix.lower() in IMAGE_EXTS)
     count = len(image_files)
 
     if count == 0:
         raise ValueError(
             f"No supported image files found in calibration directory: {src}. "
-            f"Supported extensions: {sorted(_IMAGE_EXTS)}"
+            f"Supported extensions: {sorted(IMAGE_EXTS)}"
         )
 
     if count < _MIN_CALIBRATION_IMAGES:

@@ -14,7 +14,15 @@ from yowo.errors import ConfigError
 from yowo.hardware import HardwareProfile
 from yowo.hardware._capabilities import InstalledLibraries
 from yowo.hardware._device import Device
-from yowo.types import CPUArch, DeviceCategory, DeviceType, FrameDropPolicy, GPUArch, SourceCategory
+from yowo.types import (
+    BackendType,
+    CPUArch,
+    DeviceCategory,
+    DeviceType,
+    FrameDropPolicy,
+    GPUArch,
+    SourceCategory,
+)
 
 
 class TestSourceCategory:
@@ -160,7 +168,10 @@ def _hw(
 
 class TestClassifyDevice:
     def test_jetson(self) -> None:
-        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True))
+        hw = _hw(
+            gpus=(_gpu_device(vram_mb=8192, is_jetson=True),),
+            cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True),
+        )
         assert classify_device(hw) == DeviceCategory.JETSON
 
     def test_cuda_high_vram(self) -> None:
@@ -202,6 +213,14 @@ class TestClassifyDevice:
             cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True),
         )
         assert classify_device(hw) == DeviceCategory.JETSON
+
+    def test_jetson_gpu_flag_ignored_when_cpu_not_jetson(self) -> None:
+        """classify_device reads cpu.is_jetson, not gpu.is_jetson."""
+        hw = _hw(
+            gpus=(_gpu_device(vram_mb=8192, is_jetson=True),),
+            cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=False),
+        )
+        assert classify_device(hw) == DeviceCategory.CUDA_HIGH
 
 
 # ---------------------------------------------------------------------------
@@ -282,13 +301,19 @@ class TestPresetConfig:
         assert cfg.max_queue_size == 2
 
     def test_jetson_video(self) -> None:
-        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True))
+        hw = _hw(
+            gpus=(_gpu_device(vram_mb=8192, is_jetson=True),),
+            cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True),
+        )
         cfg = preset_config(hw, SourceCategory.VIDEO)
         assert cfg.batch_size == 1
         assert cfg.prefetch is True
 
     def test_jetson_live(self) -> None:
-        hw = _hw(cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True))
+        hw = _hw(
+            gpus=(_gpu_device(vram_mb=8192, is_jetson=True),),
+            cpu=_cpu_device(arch=CPUArch.AARCH64, is_jetson=True),
+        )
         cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
         assert cfg.kv_cache is True
         assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
@@ -404,3 +429,126 @@ class TestPresetCLI:
 
         call_kwargs = mock_preset.call_args[1]
         assert call_kwargs["batch_size"] == 8
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_confidence_explicit_at_default_is_forwarded(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        """--confidence 0.25 equals the Click default but must be forwarded."""
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig()
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset", "--confidence", "0.25"])
+
+        call_kwargs = mock_preset.call_args[1]
+        assert "confidence_threshold" in call_kwargs
+        assert call_kwargs["confidence_threshold"] == pytest.approx(0.25)
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_no_explicit_flags_forwards_no_pipeline_overrides(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        """With no explicit CLI flags, only model identity is forwarded."""
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig()
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset"])
+
+        call_kwargs = mock_preset.call_args[1]
+        assert "model_family" in call_kwargs
+        assert "model_size" in call_kwargs
+        for key in (
+            "backend",
+            "device",
+            "precision",
+            "batch_size",
+            "confidence_threshold",
+            "iou_threshold",
+        ):
+            assert key not in call_kwargs, f"{key!r} should not be forwarded when omitted"
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_backend_explicit_auto_forwards_none(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        """Explicitly passing --backend auto forwards backend=None."""
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig()
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset", "--backend", "auto"])
+
+        call_kwargs = mock_preset.call_args[1]
+        assert "backend" in call_kwargs
+        assert call_kwargs["backend"] is None
+
+    @patch("yowo.engine.InferenceEngine")
+    @patch("yowo.io.open_source")
+    @patch("yowo.hardware.get_hardware_profile")
+    @patch("yowo.config.preset_config")
+    def test_preset_backend_explicit_pytorch_forwards_enum(
+        self,
+        mock_preset: MagicMock,
+        mock_hw: MagicMock,
+        mock_open: MagicMock,
+        mock_engine_cls: MagicMock,
+    ) -> None:
+        from yowo.config import InferenceConfig
+
+        mock_preset.return_value = InferenceConfig()
+        mock_hw.return_value = _hw()
+        mock_open.return_value = iter([])
+        engine = MagicMock()
+        engine.stream.return_value = iter([])
+        mock_engine_cls.return_value.__enter__ = MagicMock(return_value=engine)
+        mock_engine_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        runner = CliRunner()
+        runner.invoke(cli, ["detect", "video.mp4", "--preset", "--backend", "pytorch"])
+
+        call_kwargs = mock_preset.call_args[1]
+        assert call_kwargs["backend"] == BackendType.PYTORCH

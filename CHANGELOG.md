@@ -15,6 +15,36 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [1.3.1] — 2026-02-26
+
+### Fixed
+
+- **config, io, export**: Consolidate duplicated media format constants
+  (`IMAGE_EXTS`, `VIDEO_EXTS`, `RTSP_SCHEMES`) into `types.py`. Previously
+  defined independently in `config.py`, `io/_source.py`, and
+  `export/_calibration.py` — any divergence would cause `classify_source()`
+  and `open_source()` to disagree silently. Now a single source of truth.
+
+- **cli**: Replace fragile default-value comparison with
+  `ctx.get_parameter_source()` for CLI `--preset` override detection.
+  Previously, `--confidence 0.25` (identical to Click default) was
+  indistinguishable from "not specified" and silently dropped. Now uses
+  Click's `ParameterSource.COMMANDLINE` to correctly detect all explicit
+  user input regardless of value.
+
+- **tests**: Fix Jetson test fixtures to include GPU device, matching real
+  Jetson hardware topology (CPU + Tegra iGPU). Previously `test_jetson`,
+  `test_jetson_video`, and `test_jetson_live` constructed profiles without
+  a GPU, which did not exercise the `is_jetson` vs `has_nvidia_gpu` priority
+  in `classify_device()`.
+
+### Added
+
+- **types**: `IMAGE_EXTS`, `VIDEO_EXTS`, `RTSP_SCHEMES` public constants —
+  canonical set of supported media file extensions and RTSP scheme prefixes.
+
+---
+
 ## [1.3.0] — 2026-02-26
 
 ### Added
@@ -260,6 +290,7 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 Initial beta release.
 
+[1.3.1]: https://github.com/TinDang97/yowo/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/TinDang97/yowo/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/TinDang97/yowo/compare/v1.1.1...v1.2.0
 [1.1.0]: https://github.com/TinDang97/yowo/compare/v1.0.2...v1.1.0

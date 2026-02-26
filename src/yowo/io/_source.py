@@ -15,11 +15,7 @@ import cv2
 import numpy as np
 
 from yowo.errors import SourceError, SourceTimeoutError
-from yowo.types import Frame
-
-_IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
-_VIDEO_EXTS = frozenset({".mp4", ".avi", ".mov", ".mkv", ".ts"})
-_RTSP_SCHEMES = ("rtsp://", "rtsps://")
+from yowo.types import IMAGE_EXTS, RTSP_SCHEMES, VIDEO_EXTS, Frame
 
 
 @runtime_checkable
@@ -93,7 +89,7 @@ class ImageDirectorySource:
     """Yields frames from all supported image files in a directory, sorted."""
 
     def __init__(self, directory: Path) -> None:
-        files = sorted(p for p in directory.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
+        files = sorted(p for p in directory.iterdir() if p.suffix.lower() in IMAGE_EXTS)
         if not files:
             raise SourceError(f"No supported image files found in directory: {directory}")
         self._files = files
@@ -418,7 +414,7 @@ def open_source(
         return WebcamSource(int(source), max_frames=max_frames, frame_skip=frame_skip)
 
     # RTSP stream.
-    if source_str.startswith(_RTSP_SCHEMES):
+    if source_str.startswith(RTSP_SCHEMES):
         return RTSPStreamSource(
             source_str,
             reconnect_timeout_s=reconnect_timeout_s,
@@ -432,12 +428,12 @@ def open_source(
     if path.is_dir():
         return ImageDirectorySource(path)
 
-    if suffix in _IMAGE_EXTS:
+    if suffix in IMAGE_EXTS:
         if not path.exists():
             raise SourceError(f"Image file not found: {path}")
         return ImageFileSource(path)
 
-    if suffix in _VIDEO_EXTS:
+    if suffix in VIDEO_EXTS:
         if not path.exists():
             raise SourceError(f"Video file not found: {path}")
         return VideoFileSource(
@@ -449,8 +445,8 @@ def open_source(
 
     raise SourceError(
         f"Cannot determine source type for: {source!r}. "
-        f"Supported: image files {sorted(_IMAGE_EXTS)}, "
-        f"video files {sorted(_VIDEO_EXTS)}, "
+        f"Supported: image files {sorted(IMAGE_EXTS)}, "
+        f"video files {sorted(VIDEO_EXTS)}, "
         f'RTSP URLs (rtsp://), webcam indices ("0", "1", ...).'
     )
 

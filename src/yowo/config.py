@@ -34,6 +34,9 @@ import yaml
 
 from yowo.errors import ConfigError
 from yowo.types import (
+    IMAGE_EXTS,
+    RTSP_SCHEMES,
+    VIDEO_EXTS,
     BackendType,
     CPUArch,
     DeviceCategory,
@@ -304,10 +307,6 @@ def load_config(path: Path | None = None) -> InferenceConfig:
 # Preset inference: source classification
 # ---------------------------------------------------------------------------
 
-_IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
-_VIDEO_EXTS = frozenset({".mp4", ".avi", ".mov", ".mkv", ".ts"})
-_RTSP_SCHEMES = ("rtsp://", "rtsps://")
-
 
 def classify_source(source: str | Path) -> SourceCategory:
     """Classify a source string into a SourceCategory without opening it.
@@ -330,7 +329,7 @@ def classify_source(source: str | Path) -> SourceCategory:
         return SourceCategory.LIVE_STREAM
 
     # RTSP -> live
-    if source_str.startswith(_RTSP_SCHEMES):
+    if source_str.startswith(RTSP_SCHEMES):
         return SourceCategory.LIVE_STREAM
 
     path = Path(source_str)
@@ -340,16 +339,16 @@ def classify_source(source: str | Path) -> SourceCategory:
     if path.is_dir():
         return SourceCategory.IMAGE
 
-    if suffix in _IMAGE_EXTS:
+    if suffix in IMAGE_EXTS:
         return SourceCategory.IMAGE
 
-    if suffix in _VIDEO_EXTS:
+    if suffix in VIDEO_EXTS:
         return SourceCategory.VIDEO
 
     raise ConfigError(
         f"Cannot classify source type for: {source!r}. "
-        f"Supported: image files {sorted(_IMAGE_EXTS)}, "
-        f"video files {sorted(_VIDEO_EXTS)}, "
+        f"Supported: image files {sorted(IMAGE_EXTS)}, "
+        f"video files {sorted(VIDEO_EXTS)}, "
         f'RTSP URLs (rtsp://), webcam indices ("0", "1", ...).'
     )
 

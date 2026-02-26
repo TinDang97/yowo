@@ -39,6 +39,9 @@ from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.types import (
+    IMAGE_EXTS,
+    RTSP_SCHEMES,
+    VIDEO_EXTS,
     BackendSelection,
     BackendType,
     BoundingBox,
@@ -62,9 +65,12 @@ from yowo.types import (
     is_free_threaded,
 )
 
-__version__ = "0.1.0"
+__version__ = "1.3.1"
 
 __all__ = [
+    "IMAGE_EXTS",
+    "RTSP_SCHEMES",
+    "VIDEO_EXTS",
     "BackendError",
     "BackendLoadError",
     "BackendSelection",

@@ -131,6 +131,15 @@ class DeviceCategory(enum.StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# Media format constants (shared by config, io, and export modules)
+# ---------------------------------------------------------------------------
+
+IMAGE_EXTS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
+VIDEO_EXTS: frozenset[str] = frozenset({".mp4", ".avi", ".mov", ".mkv", ".ts"})
+RTSP_SCHEMES: tuple[str, ...] = ("rtsp://", "rtsps://")
+
+
+# ---------------------------------------------------------------------------
 # Frozen dataclasses (pure data, no numpy)
 # ---------------------------------------------------------------------------
 
@@ -368,6 +377,9 @@ def is_free_threaded() -> bool:
 
 # Suppress "unused import" warnings — field is re-exported for subpackages.
 __all__ = [
+    "IMAGE_EXTS",
+    "RTSP_SCHEMES",
+    "VIDEO_EXTS",
     "BackendSelection",
     "BackendType",
     "BoundingBox",
