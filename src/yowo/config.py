@@ -91,6 +91,10 @@ class InferenceConfig:
         prefetch: Enable threaded frame prefetch in ``stream()``.
         pipeline_workers: Worker thread count for the pipeline. ``0`` means
             auto-detect (2 on free-threaded Python, 1 otherwise).
+        metrics_enabled: Collect latency, throughput, and error metrics.
+            Disable to save ~2µs per frame on extremely latency-sensitive paths.
+        error_threshold: Number of cumulative errors before ``engine.health``
+            transitions to ``DEGRADED``. Must be >= 1.
     """
 
     model_family: ModelFamily = ModelFamily.YOLO26
@@ -109,6 +113,8 @@ class InferenceConfig:
     max_queue_size: int = 2
     prefetch: bool = True
     pipeline_workers: int = 0
+    metrics_enabled: bool = True
+    error_threshold: int = 10
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.confidence_threshold <= 1.0):
@@ -123,6 +129,8 @@ class InferenceConfig:
             raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
         if self.pipeline_workers < 0:
             raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
+        if self.error_threshold < 1:
+            raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
 
 
 # ---------------------------------------------------------------------------

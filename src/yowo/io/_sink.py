@@ -41,16 +41,9 @@ _PALETTE: list[tuple[int, int, int]] = [
 def write_json(detections: list[Detection], path: Path) -> None:
     """Write detections to a JSON file atomically.
 
-    Each detection serializes as::
-
-        {
-          "frame_index": int,
-          "source_id":   str,
-          "boxes": [
-            {"x1": float, "y1": float, "x2": float, "y2": float,
-             "class_id": int, "class_name": str, "confidence": float}
-          ]
-        }
+    Each detection serializes via :meth:`Detection.to_dict`, which includes
+    ``source_id``, ``frame_index``, ``timestamp_ms``, ``inference_time_ms``,
+    ``backend``, ``model``, and ``boxes``.
 
     Writes via a sibling ``.tmp`` file and ``os.replace()`` for atomicity.
 
@@ -60,27 +53,7 @@ def write_json(detections: list[Detection], path: Path) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".json.tmp")
-
-    records = [
-        {
-            "frame_index": det.frame.frame_index,
-            "source_id": det.frame.source_id,
-            "boxes": [
-                {
-                    "x1": box.x1,
-                    "y1": box.y1,
-                    "x2": box.x2,
-                    "y2": box.y2,
-                    "class_id": box.class_id,
-                    "class_name": box.class_name,
-                    "confidence": box.confidence,
-                }
-                for box in det.boxes
-            ],
-        }
-        for det in detections
-    ]
-
+    records = [det.to_dict() for det in detections]
     try:
         tmp_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
         os.replace(tmp_path, path)

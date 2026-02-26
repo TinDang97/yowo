@@ -20,11 +20,13 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 from yowo.backends import (
     InferenceBackend,
@@ -33,7 +35,8 @@ from yowo.backends import (
     select_backend,
 )
 from yowo.config import InferenceConfig
-from yowo.errors import BackendError, BackendLoadError, InferenceError
+from yowo.errors import BackendError, BackendLoadError, InferenceError, ShutdownError
+from yowo.events import EventBus
 from yowo.hardware import get_hardware_profile
 from yowo.io import (
     FrameSource,
@@ -43,6 +46,7 @@ from yowo.io import (
     preprocess,
     preprocess_into,
 )
+from yowo.metrics import EngineMetrics, MetricsCollector
 from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
 from yowo.postprocess import PostprocessBuffer, postprocess
@@ -53,6 +57,7 @@ from yowo.types import (
     DeviceType,
     Frame,
     FrameDropPolicy,
+    HealthStatus,
     ModelFamily,
     ModelSize,
     ModelSpec,
@@ -102,6 +107,8 @@ class InferenceEngine:
         max_queue_size: int = 2,
         prefetch: bool = True,
         pipeline_workers: int = 0,
+        metrics_enabled: bool = True,
+        error_threshold: int = 10,
     ) -> None:
         if config is not None:
             cfg = config
@@ -123,6 +130,8 @@ class InferenceEngine:
                 max_queue_size=max_queue_size,
                 prefetch=prefetch,
                 pipeline_workers=pipeline_workers,
+                metrics_enabled=metrics_enabled,
+                error_threshold=error_threshold,
             )
 
         spec = ModelSpec(cfg.model_family, cfg.model_size, weights_path=cfg.weights_path)
@@ -186,6 +195,17 @@ class InferenceEngine:
         self._preprocess_buf: PreprocessBuffer | None = None
         self._postprocess_buf: PostprocessBuffer | None = None
 
+        # Metrics + health
+        self._metrics = MetricsCollector(enabled=cfg.metrics_enabled)
+        self._error_threshold = cfg.error_threshold
+        self._health_state: HealthStatus = HealthStatus.STARTING
+
+        # Events + shutdown coordination
+        self._event_bus = EventBus()
+        self._shutting_down = False
+        self._shutdown_lock = threading.Lock()
+        self._active_streams: set[threading.Event] = set()
+
     @property
     def selection(self) -> BackendSelection:
         """The resolved backend selection (backend, device, precision)."""
@@ -194,6 +214,66 @@ class InferenceEngine:
     @property
     def is_loaded(self) -> bool:
         return self._loaded
+
+    @property
+    def health(self) -> HealthStatus:
+        """Derived engine health status.
+
+        Computed from internal state — no active probing:
+
+        - ``CLOSED``: after ``close()`` completes.
+        - ``STARTING``: before ``load()`` succeeds.
+        - ``DEGRADED``: cumulative errors >= ``error_threshold``,
+          or no frames received for >30 s during active streaming.
+        - ``READY``: otherwise.
+        """
+        if self._health_state == HealthStatus.CLOSED:
+            return HealthStatus.CLOSED
+        if self._health_state == HealthStatus.SHUTTING_DOWN:
+            return HealthStatus.SHUTTING_DOWN
+        if not self._loaded:
+            return HealthStatus.STARTING
+        if self._metrics.errors_total >= self._error_threshold:
+            return HealthStatus.DEGRADED
+        last = self._metrics.last_frame_time
+        if self._metrics.frames_total > 0 and last > 0 and time.monotonic() - last > 30.0:
+            return HealthStatus.DEGRADED
+        return HealthStatus.READY
+
+    @property
+    def metrics(self) -> EngineMetrics:
+        """Snapshot of current engine metrics."""
+        return self._metrics.snapshot()
+
+    def reset_metrics(self) -> None:
+        """Zero all metric counters and the latency histogram."""
+        self._metrics.reset()
+
+    # ------------------------------------------------------------------
+    # Event bus delegation
+    # ------------------------------------------------------------------
+
+    def on(self, event: str, callback: Callable[..., Any]) -> None:
+        """Register a synchronous event callback."""
+        self._event_bus.on(event, callback)
+
+    def on_async(
+        self,
+        event: str,
+        callback: Callable[..., Any],
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        """Register an async event callback."""
+        self._event_bus.on_async(event, callback, loop=loop)
+
+    def remove(self, event: str, callback: Callable[..., Any]) -> None:
+        """Unregister an event callback."""
+        self._event_bus.remove(event, callback)
+
+    @property
+    def events_dropped(self) -> int:
+        """Number of events dropped due to queue overflow."""
+        return self._event_bus.events_dropped
 
     def load(self) -> None:
         """Resolve weights, load into backend, warmup. Falls back on failure."""
@@ -266,19 +346,25 @@ class InferenceEngine:
         if self._pipeline_workers == 0:
             self._pipeline_workers = 2 if is_free_threaded() else 1
         self._loaded = True
+        self._health_state = HealthStatus.READY
 
     def detect(self, frames: list[Frame]) -> list[Detection]:
         """Run detection on a list of frames. Returns one Detection per frame."""
+        if self._shutting_down:
+            raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
-        if self._preprocess_buf is not None and len(frames) <= self._preprocess_buf.capacity:
-            tensor = preprocess_into(frames, target_size, self._preprocess_buf)
-        else:
-            tensor = preprocess(frames, target_size)
-
-        return self._detect_from_tensor(tensor, frames, scratch=self._postprocess_buf)
+        try:
+            if self._preprocess_buf is not None and len(frames) <= self._preprocess_buf.capacity:
+                tensor = preprocess_into(frames, target_size, self._preprocess_buf)
+            else:
+                tensor = preprocess(frames, target_size)
+            return self._detect_from_tensor(tensor, frames, scratch=self._postprocess_buf)
+        except Exception:
+            self._metrics.record_error()
+            raise
 
     def _detect_from_tensor(
         self,
@@ -287,17 +373,7 @@ class InferenceEngine:
         *,
         scratch: PostprocessBuffer | None,
     ) -> list[Detection]:
-        """Run inference + postprocess on an already-preprocessed tensor.
-
-        Shared by :meth:`detect`, :meth:`_stream_live` (PreparedItem fast-path),
-        and :meth:`_stream_pipeline` (concurrent worker path). Centralises
-        feature-cache source_id assignment and timing so callers cannot diverge.
-
-        Args:
-            tensor: Output of ``preprocess()`` or ``preprocess_into()``.
-            frames: Original frames matching the tensor batch.
-            scratch: Postprocess buffer for reuse, or ``None`` to allocate.
-        """
+        """Run inference + postprocess on an already-preprocessed tensor."""
         # Set source_id for feature caching (PyTorch backend only; no-op on others)
         if self._feature_cache is not None and frames:
             sid = frames[0].source_id
@@ -308,7 +384,9 @@ class InferenceEngine:
         raw_output = self._backend.infer(tensor)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        return postprocess(
+        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size)
+
+        results = postprocess(
             raw_output,
             tensor,
             frames,
@@ -319,6 +397,13 @@ class InferenceEngine:
             inference_time_ms=elapsed_ms,
             scratch=scratch,
         )
+        # Emit detection event (off hot-path cost: SimpleQueue.put ~1µs)
+        self._event_bus.emit("detection", results)
+        return results
+
+    async def adetect(self, frames: list[Frame]) -> list[Detection]:
+        """Async wrapper — offloads detect() to a thread pool."""
+        return await asyncio.to_thread(self.detect, frames)
 
     def stream(self, source: FrameSource) -> Iterator[Detection]:
         """Yield detections from a FrameSource, batching internally.
@@ -329,6 +414,8 @@ class InferenceEngine:
         - Offline multi-frame → _stream_pipeline (prefetch + infer overlap)
         - prefetch=False → _stream_sync (legacy sequential path)
         """
+        if self._shutting_down:
+            raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
@@ -344,12 +431,35 @@ class InferenceEngine:
         else:
             yield from self._stream_pipeline(source)
 
+    async def astream(self, source: FrameSource) -> AsyncIterator[Detection]:
+        """Yield detections asynchronously from any source.
+
+        Background thread runs sync stream(). Cancellation sets stop_event.
+        Raises :class:`ShutdownError` immediately if the engine is closing.
+        """
+        if self._shutting_down:
+            raise ShutdownError("Engine is shutting down")
+        if not self._loaded:
+            raise InferenceError("Engine not loaded. Call load() or use as context manager.")
+        from yowo._async import astream as _astream
+
+        async for detection in _astream(self.stream, source, self._event_bus.emit):
+            yield detection
+
     def _stream_single(self, source: FrameSource) -> Iterator[Detection]:
         """Fast path for single-image sources — no threading overhead."""
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down:
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
         try:
             for frame in source:
+                if _stop.is_set():
+                    break
                 yield from self.detect([frame])
         finally:
+            self._active_streams.discard(_stop)
             source.close()
 
     def _stream_live(self, source: FrameSource) -> Iterator[Detection]:
@@ -379,10 +489,15 @@ class InferenceEngine:
             preprocess_fn=preprocess,
             target_size=target_size,
         )
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down:
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
         reader.start()
         try:
             idle_since: float | None = None
-            while True:
+            while not _stop.is_set():
                 item = reader.get(timeout=_POLL_TIMEOUT)
                 if item is not None:
                     idle_since = None
@@ -408,29 +523,27 @@ class InferenceEngine:
                         )
                         break
         finally:
+            self._active_streams.discard(_stop)
             reader.stop()
             source.close()
 
     def _stream_pipeline(self, source: FrameSource) -> Iterator[Detection]:
         """Offline source path: threaded prefetch + pipeline overlap.
 
-        Uses concurrent.futures.ThreadPoolExecutor to overlap frame reading
-        with inference. Maintains up to ``pipeline_workers`` futures in flight
-        so that batch N+1 can preprocess while batch N infers.
-
-        On free-threaded Python 3.14t, worker threads achieve true CPU
-        parallelism. On GIL Python, inference C++ code releases the GIL
-        enabling I/O overlap.
-
-        When ``pipeline_workers > 1``, a :class:`PreprocessBufferPool` gives
-        each worker its own pre-allocated buffer for zero-copy preprocessing.
-        A lock serialises ``backend.infer()`` calls to protect backends with
-        mutable state (e.g. PyTorch BatchNorm, feature cache).
+        Overlaps frame reading with inference via ThreadPoolExecutor.
+        When ``pipeline_workers > 1``, a PreprocessBufferPool gives each
+        worker its own buffer; a lock serialises backend.infer() calls.
         """
         from collections import deque as Deque
         from concurrent.futures import Future, ThreadPoolExecutor
 
         from yowo.io._decode import PreprocessBufferPool
+
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down:
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
 
         reader = ThreadedFrameReader(
             source,
@@ -440,13 +553,10 @@ class InferenceEngine:
         reader.start()
 
         concurrent = self._pipeline_workers > 1
-        # Serialise backend.infer() across worker threads to prevent data
-        # races in backends with mutable state (PyTorch BatchNorm, KV cache).
-        # Preprocessing still runs in parallel across workers.
+        # Serialise backend.infer() to prevent data races in mutable backends.
         infer_lock = threading.Lock() if concurrent else None
 
-        # Pre-allocate one buffer per worker so preprocess_into() can be used
-        # instead of per-call heap allocation via preprocess().
+        # Pre-allocate one buffer per worker for zero-copy preprocessing.
         buffer_pool: PreprocessBufferPool | None = None
         if concurrent:
             target = (self._model_meta.input_height, self._model_meta.input_width)
@@ -473,7 +583,7 @@ class InferenceEngine:
             max_pending = self._pipeline_workers
 
             with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
-                while True:
+                while not _stop.is_set():
                     item = reader.get(timeout=5.0)
                     # Pipeline path never uses preprocess_fn, so items are always Frame.
                     if isinstance(item, PreparedItem):
@@ -499,31 +609,66 @@ class InferenceEngine:
             # Cancel any undrained futures to prevent leaked threads.
             for fut in pending:
                 fut.cancel()
+            self._active_streams.discard(_stop)
             reader.stop()
             source.close()
 
     def _stream_sync(self, source: FrameSource) -> Iterator[Detection]:
         """Legacy sequential streaming path (prefetch=False)."""
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down:
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
         batch: list[Frame] = []
         try:
             for frame in source:
+                if _stop.is_set():
+                    break
                 batch.append(frame)
                 if len(batch) >= self._batch_size:
                     yield from self.detect(batch)
                     batch.clear()
-            if batch:
+            if batch and not _stop.is_set():
                 yield from self.detect(batch)
         finally:
+            self._active_streams.discard(_stop)
             source.close()
 
-    def close(self) -> None:
-        """Release all backend resources."""
-        self._backend.unload()
-        if self._feature_cache is not None:
-            self._feature_cache.clear()
-        self._preprocess_buf = None
-        self._postprocess_buf = None
-        self._loaded = False
+    def close(self, timeout: float = 5.0) -> None:
+        """Gracefully shut down: signal streams, drain event bus, release backend."""
+        with self._shutdown_lock:
+            if self._health_state == HealthStatus.CLOSED:
+                return
+            self._shutting_down = True
+            self._health_state = HealthStatus.SHUTTING_DOWN
+            # Signal streams inside the lock to close the race: any stream that
+            # tries to add its stop-event after this point sees _shutting_down=True
+            # and raises ShutdownError before adding to _active_streams.
+            for stop_event in list(self._active_streams):
+                stop_event.set()
+
+        # Wait for streams to drain (best-effort)
+        deadline = time.monotonic() + timeout
+        while self._active_streams and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        # Drain and close event bus
+        self._event_bus.close(timeout=max(0.1, deadline - time.monotonic()))
+
+        # Release backend resources — always update state even if unload() raises.
+        try:
+            if self._loaded:
+                self._backend.unload()
+        except Exception:
+            pass  # unload errors must not prevent state cleanup
+        finally:
+            self._loaded = False
+            self._health_state = HealthStatus.CLOSED
+            if self._feature_cache is not None:
+                self._feature_cache.clear()
+            self._preprocess_buf = None
+            self._postprocess_buf = None
 
     def __enter__(self) -> InferenceEngine:
         self.load()
@@ -531,6 +676,20 @@ class InferenceEngine:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    async def __aenter__(self) -> InferenceEngine:
+        """Load asynchronously."""
+        await asyncio.to_thread(self.load)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Close asynchronously."""
+        await asyncio.to_thread(self.close)
 
 
 __all__ = ["InferenceEngine"]

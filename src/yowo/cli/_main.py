@@ -54,6 +54,19 @@ def cli() -> None:
     default=False,
     help="Auto-tune config for detected device and source type",
 )
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Stream detections as JSONL to stdout (one JSON object per detection)",
+)
+@click.option(
+    "--no-metrics",
+    is_flag=True,
+    default=False,
+    help="Disable metrics collection (saves ~2µs/frame on critical paths)",
+)
 @click.pass_context
 def detect_command(
     ctx: click.Context,
@@ -70,6 +83,8 @@ def detect_command(
     output_format: str,
     save_frames: str | None,
     preset: bool,
+    json_output: bool,
+    no_metrics: bool,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
     from yowo.config import InferenceConfig
@@ -111,6 +126,11 @@ def detect_command(
             cli_overrides["iou_threshold"] = iou
 
         config = preset_config(hw, source_cat, **cli_overrides)
+        # Propagate metrics flag into preset-derived config
+        if no_metrics:
+            from dataclasses import replace
+
+            config = replace(config, metrics_enabled=False)
     else:
         config = InferenceConfig(
             model_family=spec.family,
@@ -122,6 +142,7 @@ def detect_command(
             backend=BackendType(backend) if backend != "auto" else None,
             device=device,
             precision=Precision(precision) if precision != "auto" else None,
+            metrics_enabled=not no_metrics,
         )
 
     detections = []
@@ -130,9 +151,19 @@ def detect_command(
             src = open_source(source)
             for det in engine.stream(src):
                 detections.append(det)
+                if json_output:
+                    click.echo(det.to_json())
+                else:
+                    click.echo(
+                        f"Frame {det.frame.frame_index}: {det.num_boxes} detections "
+                        f"({det.inference_time_ms:.1f}ms)"
+                    )
+            if not no_metrics and not json_output:
+                m = engine.metrics
                 click.echo(
-                    f"Frame {det.frame.frame_index}: {det.num_boxes} detections "
-                    f"({det.inference_time_ms:.1f}ms)"
+                    f"\nMetrics: {m.frames_total} frames  {m.fps:.1f} FPS  "
+                    f"p50={m.inference_p50_ms:.1f}ms  p95={m.inference_p95_ms:.1f}ms  "
+                    f"p99={m.inference_p99_ms:.1f}ms  errors={m.errors_total}"
                 )
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
@@ -328,36 +359,12 @@ def _parse_model_spec(model_name: str) -> ModelSpec:
 
 
 def _write_json(detections: list[object], path: Path) -> None:
-    """Serialise detections to a JSON file."""
+    """Serialise detections to a JSON file via Detection.to_dict()."""
     import json
 
     from yowo.types import Detection
 
-    out = []
-    for det in detections:
-        if not isinstance(det, Detection):
-            continue
-        out.append(
-            {
-                "frame_index": det.frame.frame_index,
-                "source_id": det.frame.source_id,
-                "inference_time_ms": det.inference_time_ms,
-                "backend": det.backend.value,
-                "model": f"{det.model_spec.family.value}{det.model_spec.size.value}",
-                "boxes": [
-                    {
-                        "x1": b.x1,
-                        "y1": b.y1,
-                        "x2": b.x2,
-                        "y2": b.y2,
-                        "confidence": b.confidence,
-                        "class_id": b.class_id,
-                        "class_name": b.class_name,
-                    }
-                    for b in det.boxes
-                ],
-            }
-        )
+    out = [det.to_dict() for det in detections if isinstance(det, Detection)]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2), encoding="utf-8")
 

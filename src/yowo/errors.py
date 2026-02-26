@@ -185,6 +185,15 @@ class ConfigError(YowoError):
     """
 
 
+# ---------------------------------------------------------------------------
+# Shutdown errors
+# ---------------------------------------------------------------------------
+
+
+class ShutdownError(YowoError):
+    """Raised when an operation is rejected because the engine is shutting down."""
+
+
 __all__ = [
     "BackendError",
     "BackendLoadError",
@@ -197,6 +206,7 @@ __all__ = [
     "ModelError",
     "ModelLoadError",
     "ModelNotFoundError",
+    "ShutdownError",
     "SourceError",
     "SourceTimeoutError",
     "YowoError",

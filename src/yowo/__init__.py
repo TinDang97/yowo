@@ -31,12 +31,15 @@ from yowo.errors import (
     ModelError,
     ModelLoadError,
     ModelNotFoundError,
+    ShutdownError,
     SourceError,
     SourceTimeoutError,
     YowoError,
 )
+from yowo.events import EventBus
 from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
+from yowo.metrics import EngineMetrics, MetricsCollector
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.types import (
     IMAGE_EXTS,
@@ -54,6 +57,7 @@ from yowo.types import (
     Frame,
     FrameDropPolicy,
     GPUArch,
+    HealthStatus,
     ModelFamily,
     ModelSize,
     ModelSpec,
@@ -85,6 +89,8 @@ __all__ = [
     "DeviceCategory",
     "DeviceError",
     "DeviceType",
+    "EngineMetrics",
+    "EventBus",
     "ExportConfig",
     "ExportError",
     "ExportFormat",
@@ -95,9 +101,11 @@ __all__ = [
     "FrameCollector",
     "FrameDropPolicy",
     "GPUArch",
+    "HealthStatus",
     "InferenceConfig",
     "InferenceEngine",
     "InferenceError",
+    "MetricsCollector",
     "ModelError",
     "ModelFamily",
     "ModelLoadError",
@@ -106,6 +114,7 @@ __all__ = [
     "ModelSpec",
     "Precision",
     "PreprocessedTensor",
+    "ShutdownError",
     "SourceCategory",
     "SourceError",
     "SourceTimeoutError",
