@@ -69,6 +69,8 @@ class TensorRTBackend:
         self._ort: Any = None
         self._kv_zeros: dict[str, NDArray[np.float32]] = {}
         self._kv_zeros_ort: dict[str, Any] = {}
+        # Standard (non-KV) OrtValue path (set in load())
+        self._use_ortvalue: bool = False
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -117,6 +119,7 @@ class TensorRTBackend:
         self._ort = None
         self._kv_zeros = {}
         self._kv_zeros_ort = {}
+        self._use_ortvalue = False
 
         try:
             import onnxruntime as ort_mod  # type: ignore[import-untyped]
@@ -161,6 +164,11 @@ class TensorRTBackend:
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
             # Cache output names for run_with_ort_values()
             self._output_names = [o.name for o in self._session.get_outputs()]
+            # OrtValue zero-copy path: TRT backend always has CUDA EP,
+            # so the zero-copy benefit (avoids host→device copy) applies.
+            _active = self._session.get_providers()
+            _has_gpu_ep = any("CUDA" in p or "TensorRT" in p for p in _active)
+            self._use_ortvalue = _has_gpu_ep and hasattr(self._session, "run_with_ort_values")
             # Detect KV cache I/O by inspecting input names
             kv_inputs = [i for i in inputs if i.name.startswith("past_")]
             if kv_inputs:
@@ -216,12 +224,24 @@ class TensorRTBackend:
                 return self._infer_kv_ortvalue(tensor)
             if self._has_kv_io:
                 return self._infer_kv_numpy(tensor)
+            if self._use_ortvalue:
+                return self._infer_standard_ortvalue(tensor)
             outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
         except InferenceError:
             raise
         except Exception as exc:
             raise InferenceError(f"TensorRTBackend: inference failed: {exc}") from exc
+
+    def _infer_standard_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """Standard inference using OrtValue for zero-copy input wrapping."""
+        ort = self._ort
+        input_ort = ort.OrtValue.ortvalue_from_numpy(tensor.data)
+        ort_outputs = self._session.run_with_ort_values(
+            self._output_names, {self._input_name: input_ort}
+        )
+        out = ort_outputs[0].numpy()
+        return out if out.dtype == np.float32 else out.astype(np.float32)
 
     def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """KV-cache inference using numpy arrays (fallback path)."""

@@ -254,3 +254,68 @@ class TestPreprocessOptimizations:
         expected_fill = pytest.approx(114.0 / 255.0, abs=2e-3)
         # Top row is entirely in the top padding band.
         assert float(result.data[0, 0, 0, 0]) == expected_fill
+
+
+class TestPreprocessBufferPool:
+    """Tests for the thread-safe PreprocessBufferPool."""
+
+    def test_buffer_pool_acquire_release(self) -> None:
+        """Acquire one buffer and release it without hanging."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        pool.release(buf)
+
+    def test_buffer_pool_distinct_buffers(self) -> None:
+        """Acquiring two buffers from a size-2 pool yields distinct objects."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf1 = pool.acquire()
+        buf2 = pool.acquire()
+
+        assert id(buf1) != id(buf2)
+
+        pool.release(buf1)
+        pool.release(buf2)
+
+    def test_buffer_pool_exhaustion_blocks(self) -> None:
+        """Pool of size 1 blocks a second acquire until the first is released."""
+        import threading
+
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+
+        acquired = threading.Event()
+
+        def _worker() -> None:
+            b = pool.acquire()
+            acquired.set()
+            pool.release(b)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        # Worker should be blocked — event not set after a short wait.
+        assert not acquired.wait(timeout=0.1)
+
+        # Release from main thread unblocks the worker.
+        pool.release(buf)
+        assert acquired.wait(timeout=1.0)
+        t.join(timeout=2.0)
+
+    def test_buffer_pool_reuse(self) -> None:
+        """Released buffer is reused on the next acquire (pool size 1)."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        buf_id = id(buf)
+        pool.release(buf)
+
+        buf2 = pool.acquire()
+        assert id(buf2) == buf_id
+        pool.release(buf2)

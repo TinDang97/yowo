@@ -11,6 +11,8 @@ This avoids a circular dependency through types.py.
 
 from __future__ import annotations
 
+import threading
+from collections import deque
 from dataclasses import dataclass
 
 import cv2
@@ -85,6 +87,35 @@ class PreprocessBuffer:
             return False
         self._last_dims[index] = dims
         return True
+
+
+class PreprocessBufferPool:
+    """Thread-safe pool of PreprocessBuffer instances for concurrent workers.
+
+    Each worker acquires exclusive access to a buffer via acquire/release.
+    Blocks if all buffers are in use (backpressure).
+    """
+
+    __slots__ = ("_buffers", "_lock", "_sem")
+
+    def __init__(self, pool_size: int, max_batch: int, target_size: tuple[int, int]) -> None:
+        self._sem = threading.Semaphore(pool_size)
+        self._buffers: deque[PreprocessBuffer] = deque(
+            PreprocessBuffer(max_batch, target_size) for _ in range(pool_size)
+        )
+        self._lock = threading.Lock()
+
+    def acquire(self) -> PreprocessBuffer:
+        """Acquire a buffer, blocking if none available."""
+        self._sem.acquire()
+        with self._lock:
+            return self._buffers.popleft()
+
+    def release(self, buf: PreprocessBuffer) -> None:
+        """Return a buffer to the pool."""
+        with self._lock:
+            self._buffers.append(buf)
+        self._sem.release()
 
 
 def preprocess(
@@ -272,6 +303,7 @@ def make_tensor_meta(tensor: PreprocessedTensor) -> TensorMeta:
 
 __all__ = [
     "PreprocessBuffer",
+    "PreprocessBufferPool",
     "TensorMeta",
     "make_tensor_meta",
     "preprocess",

@@ -35,7 +35,14 @@ from yowo.backends import (
 from yowo.config import InferenceConfig
 from yowo.errors import BackendError, BackendLoadError, InferenceError
 from yowo.hardware import get_hardware_profile
-from yowo.io import FrameSource, PreprocessBuffer, ThreadedFrameReader, preprocess, preprocess_into
+from yowo.io import (
+    FrameSource,
+    PreparedItem,
+    PreprocessBuffer,
+    ThreadedFrameReader,
+    preprocess,
+    preprocess_into,
+)
 from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
 from yowo.postprocess import PostprocessBuffer, postprocess
@@ -330,6 +337,10 @@ class InferenceEngine:
         Always uses batch=1 regardless of configured batch_size to minimise
         latency on live sources.  Terminates after 30 s of consecutive
         timeouts (dead/hung source) to prevent infinite hangs.
+
+        When the backend is loaded the reader thread also preprocesses each
+        frame (resize + blobFromImages), overlapping CPU work with inference
+        on the main thread.
         """
         _MAX_IDLE_S = 30.0
         _POLL_TIMEOUT = 1.0
@@ -339,19 +350,39 @@ class InferenceEngine:
                 "Live source: using batch=1 for latency (configured batch_size=%d ignored)",
                 self._batch_size,
             )
+        target_size = (self._model_meta.input_height, self._model_meta.input_width)
         reader = ThreadedFrameReader(
             source,
             max_queue_size=self._max_queue_size,
             policy=self._frame_drop_policy,
+            preprocess_fn=preprocess,
+            target_size=target_size,
         )
         reader.start()
         try:
             idle_since: float | None = None
             while True:
-                frame = reader.get(timeout=_POLL_TIMEOUT)
-                if frame is not None:
+                item = reader.get(timeout=_POLL_TIMEOUT)
+                if item is not None:
                     idle_since = None
-                    yield from self.detect([frame])
+                    if isinstance(item, PreparedItem):
+                        t0 = time.perf_counter()
+                        raw_output = self._backend.infer(item.tensor)
+                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                        dets = postprocess(
+                            raw_output,
+                            item.tensor,
+                            [item.frame],
+                            model_spec=self._spec,
+                            backend=self._selection.backend,
+                            confidence_threshold=self._confidence,
+                            iou_threshold=self._iou_threshold,
+                            inference_time_ms=elapsed_ms,
+                            scratch=self._postprocess_buf,
+                        )
+                        yield dets[0]
+                    else:
+                        yield from self.detect([item])
                 elif reader.is_exhausted:
                     break
                 else:
@@ -380,13 +411,15 @@ class InferenceEngine:
         parallelism. On GIL Python, inference C++ code releases the GIL
         enabling I/O overlap.
 
-        When ``pipeline_workers > 1``, shared preprocess/postprocess buffers
-        are bypassed to avoid data races between concurrent worker threads.
+        When ``pipeline_workers > 1``, a :class:`PreprocessBufferPool` gives
+        each worker its own pre-allocated buffer for zero-copy preprocessing.
         A lock serialises ``backend.infer()`` calls to protect backends with
         mutable state (e.g. PyTorch BatchNorm, feature cache).
         """
         from collections import deque as Deque
         from concurrent.futures import Future, ThreadPoolExecutor
+
+        from yowo.io._decode import PreprocessBufferPool
 
         reader = ThreadedFrameReader(
             source,
@@ -401,30 +434,41 @@ class InferenceEngine:
         # Preprocessing still runs in parallel across workers.
         infer_lock = threading.Lock() if concurrent else None
 
+        # Pre-allocate one buffer per worker so preprocess_into() can be used
+        # instead of per-call heap allocation via preprocess().
+        buffer_pool: PreprocessBufferPool | None = None
+        if concurrent:
+            target = (self._model_meta.input_height, self._model_meta.input_width)
+            buffer_pool = PreprocessBufferPool(self._pipeline_workers, self._batch_size, target)
+
         def _infer_batch(frames: list[Frame]) -> list[Detection]:
             if concurrent:
-                # Per-call allocation — no shared buffers across workers.
                 target_size = (self._model_meta.input_height, self._model_meta.input_width)
-                tensor = preprocess(frames, target_size)
-                if infer_lock is not None:
-                    with infer_lock:
+                assert buffer_pool is not None
+                buf = buffer_pool.acquire()
+                try:
+                    tensor = preprocess_into(frames, target_size, buf)
+                    if infer_lock is not None:
+                        with infer_lock:
+                            t0 = time.perf_counter()
+                            raw_output = self._backend.infer(tensor)
+                            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                    else:
                         t0 = time.perf_counter()
                         raw_output = self._backend.infer(tensor)
                         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                else:
-                    t0 = time.perf_counter()
-                    raw_output = self._backend.infer(tensor)
-                    elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                return postprocess(
-                    raw_output,
-                    tensor,
-                    frames,
-                    model_spec=self._spec,
-                    backend=self._selection.backend,
-                    confidence_threshold=self._confidence,
-                    iou_threshold=self._iou_threshold,
-                    inference_time_ms=elapsed_ms,
-                )
+                    return postprocess(
+                        raw_output,
+                        tensor,
+                        frames,
+                        model_spec=self._spec,
+                        backend=self._selection.backend,
+                        confidence_threshold=self._confidence,
+                        iou_threshold=self._iou_threshold,
+                        inference_time_ms=elapsed_ms,
+                    )
+                finally:
+                    buffer_pool.release(buf)
             return self.detect(frames)
 
         pending: Deque[Future[list[Detection]]] = Deque()
@@ -434,7 +478,9 @@ class InferenceEngine:
 
             with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
                 while True:
-                    frame = reader.get(timeout=5.0)
+                    item = reader.get(timeout=5.0)
+                    # Pipeline path never uses preprocess_fn, so items are always Frame.
+                    frame: Frame | None = item if isinstance(item, Frame) else None
                     if frame is not None:
                         batch.append(frame)
 

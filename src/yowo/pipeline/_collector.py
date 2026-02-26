@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from yowo.io._reader import ThreadedFrameReader
-from yowo.types import FrameDropPolicy, StreamState, TaggedFrame
+from yowo.types import Frame, FrameDropPolicy, StreamState, TaggedFrame
 
 if TYPE_CHECKING:
     from yowo.io._source import FrameSource
@@ -191,15 +191,15 @@ class FrameCollector:
             return None
 
         try:
-            frame = entry.reader.get(timeout=_POLL_TIMEOUT)
+            item = entry.reader.get(timeout=_POLL_TIMEOUT)
         except Exception as exc:
             logger.exception("Stream %r error during get()", stream_id)
             entry.state = StreamState.ERROR
             entry.error = exc
             return None
 
-        if frame is not None:
-            return TaggedFrame(stream_id=stream_id, frame=frame)
+        if isinstance(item, Frame):
+            return TaggedFrame(stream_id=stream_id, frame=item)
 
         # No frame returned — check if exhausted.
         if entry.reader.is_exhausted:

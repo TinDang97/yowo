@@ -65,6 +65,8 @@ class OnnxBackend:
         self._ort: Any = None
         self._kv_zeros: dict[str, NDArray[np.float32]] = {}
         self._kv_zeros_ort: dict[str, Any] = {}
+        # Standard (non-KV) OrtValue path (set in load())
+        self._use_ortvalue: bool = False
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -110,6 +112,7 @@ class OnnxBackend:
         self._ort = None
         self._kv_zeros = {}
         self._kv_zeros_ort = {}
+        self._use_ortvalue = False
 
         try:
             import onnxruntime as ort  # type: ignore[import-untyped]
@@ -143,6 +146,12 @@ class OnnxBackend:
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
             # Cache output names for run_with_ort_values()
             self._output_names = [o.name for o in self._session.get_outputs()]
+            # OrtValue zero-copy path: only beneficial on CUDA/TRT EPs
+            # where it avoids host→device copy.  On CPU/CoreML the numpy
+            # round-trip through OrtValue adds Python overhead with no gain.
+            _active = self._session.get_providers()
+            _has_gpu_ep = any("CUDA" in p or "TensorRT" in p for p in _active)
+            self._use_ortvalue = _has_gpu_ep and hasattr(self._session, "run_with_ort_values")
             # Detect KV cache I/O by inspecting input names
             kv_inputs = [i for i in inputs if i.name.startswith("past_")]
             if kv_inputs:
@@ -198,12 +207,24 @@ class OnnxBackend:
                 return self._infer_kv_ortvalue(tensor)
             if self._has_kv_io:
                 return self._infer_kv_numpy(tensor)
+            if self._use_ortvalue:
+                return self._infer_standard_ortvalue(tensor)
             outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
         except InferenceError:
             raise
         except Exception as exc:
             raise InferenceError(f"OnnxBackend: inference failed: {exc}") from exc
+
+    def _infer_standard_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """Standard inference using OrtValue for zero-copy input wrapping."""
+        ort = self._ort
+        input_ort = ort.OrtValue.ortvalue_from_numpy(tensor.data)
+        ort_outputs = self._session.run_with_ort_values(
+            self._output_names, {self._input_name: input_ort}
+        )
+        out = ort_outputs[0].numpy()
+        return out if out.dtype == np.float32 else out.astype(np.float32)
 
     def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """KV-cache inference using numpy arrays (fallback path)."""
@@ -292,9 +313,12 @@ class OnnxBackend:
         cpu_count = os.cpu_count() or 1
         opts.intra_op_num_threads = max(1, cpu_count // 2)
         opts.inter_op_num_threads = max(1, cpu_count // 4)
+        opts.enable_mem_pattern = True
+        opts.enable_mem_reuse = True
+        opts.execution_mode = ort_mod.ExecutionMode.ORT_SEQUENTIAL
         return opts
 
-    def _select_providers(self, device: str) -> list[str]:
+    def _select_providers(self, device: str) -> list[str | tuple[str, dict[str, str]]]:
         """Return the ordered execution provider list.
 
         Selection priority:
@@ -307,7 +331,7 @@ class OnnxBackend:
             device: Requested device string.
 
         Returns:
-            List of ORT execution provider name strings.
+            List of ORT execution provider name strings or (name, options) tuples.
         """
         use_cuda = False
         if device.startswith("cuda"):
@@ -322,6 +346,9 @@ class OnnxBackend:
         # CoreML EP: 4-5x faster than CPU on Apple Silicon (Neural Engine)
         libs = self._hw.libraries
         if libs.onnxruntime_has_coreml:
-            return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+            return [
+                ("CoreMLExecutionProvider", {"MLComputeUnits": "ALL"}),
+                "CPUExecutionProvider",
+            ]
 
         return ["CPUExecutionProvider"]

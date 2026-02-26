@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from yowo.pipeline._collector import FrameCollector
@@ -45,6 +47,7 @@ from yowo.pipeline._scheduler import BatchScheduler
 
 if TYPE_CHECKING:
     from yowo.engine import InferenceEngine
+    from yowo.types import Detection, TaggedFrame
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +66,9 @@ def run_pipeline(
     router: DetectionRouter,
     *,
     stop_event: threading.Event | None = None,
+    overlap: bool = True,
 ) -> None:
-    """Wire collector → scheduler → engine.detect() → router.
+    """Wire collector -> scheduler -> engine.detect() -> router.
 
     This is a blocking call that runs until all streams are exhausted,
     ``stop_event`` is set, or an unhandled exception propagates.
@@ -74,6 +78,12 @@ def run_pipeline(
     (``detect()`` uses ``frames[0].source_id``). This function
     automatically disables it and logs a warning.
 
+    **Pipeline overlap** (``overlap=True``, the default): While
+    ``engine.detect(batch_N)`` runs on a worker thread, the main thread
+    assembles ``batch_N+1`` from the scheduler. This hides batch-assembly
+    latency behind inference and improves throughput for multi-stream
+    workloads.
+
     Args:
         engine: A loaded :class:`~yowo.engine.InferenceEngine`.
         collector: Manages the input streams.
@@ -82,6 +92,9 @@ def run_pipeline(
         stop_event: Optional external stop signal. When set, the scheduler
             flushes any partial batch and the pipeline returns. Also
             propagated into the scheduler for responsive cancellation.
+        overlap: When ``True`` (default), overlap batch assembly with
+            inference using a single-thread pool. When ``False``, process
+            batches synchronously (original behaviour).
     """
     _disable_feature_cache(engine)
 
@@ -91,13 +104,59 @@ def run_pipeline(
     if stop_event is not None:
         scheduler.set_stop_event(stop_event)
 
+    if overlap:
+        _run_overlapped(engine, collector, scheduler, router)
+    else:
+        _run_synchronous(engine, collector, scheduler, router)
+
+
+def _run_synchronous(
+    engine: InferenceEngine,
+    collector: FrameCollector,
+    scheduler: BatchScheduler,
+    router: DetectionRouter,
+) -> None:
+    """Process batches sequentially: assemble -> detect -> route."""
     try:
         for batch in scheduler:
-            # Extract raw Frame list (engine.detect expects list[Frame]).
             frames = [tagged.frame for tagged in batch]
             detections = engine.detect(frames)
             router.route(detections, batch)
     finally:
+        collector.close()
+
+
+def _run_overlapped(
+    engine: InferenceEngine,
+    collector: FrameCollector,
+    scheduler: BatchScheduler,
+    router: DetectionRouter,
+) -> None:
+    """Overlap batch assembly with inference via a single worker thread.
+
+    While ``engine.detect(batch_N)`` executes on the worker, the main
+    thread pulls frames and assembles ``batch_N+1``.  A
+    ``deque[tuple[Future, batch]]`` with at most one pending future
+    ensures back-pressure: we drain the oldest result before submitting
+    the next job.
+    """
+    pending: deque[tuple[Future[list[Detection]], list[TaggedFrame]]] = deque()
+    try:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="yowo-pipe") as pool:
+            for batch in scheduler:
+                frames = [tagged.frame for tagged in batch]
+                # Drain the oldest future before submitting new work.
+                if pending:
+                    fut, prev_batch = pending.popleft()
+                    router.route(fut.result(), prev_batch)
+                pending.append((pool.submit(engine.detect, frames), batch))
+            # Drain remaining futures after scheduler is exhausted.
+            while pending:
+                fut, prev_batch = pending.popleft()
+                router.route(fut.result(), prev_batch)
+    finally:
+        for fut, _ in pending:
+            fut.cancel()
         collector.close()
 
 

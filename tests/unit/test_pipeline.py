@@ -238,3 +238,118 @@ class TestRunPipeline:
 
         # Collector must be closed even after exception.
         assert source.closed
+
+
+# ---------------------------------------------------------------------------
+# TestRunPipelineOverlap
+# ---------------------------------------------------------------------------
+
+
+class TestRunPipelineOverlap:
+    """Tests for the overlap=True / overlap=False paths in run_pipeline()."""
+
+    def test_run_pipeline_overlap_ordering(self) -> None:
+        """overlap=True: 3 batches routed in correct sequential order."""
+        source = _MockSource("cam-0", n=3)
+        engine = _make_engine()
+        received: list[tuple[str, list[Detection]]] = []
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-0", source)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-0", lambda sid, dets: received.append((sid, dets)))
+
+        run_pipeline(engine, collector, scheduler, router, overlap=True)
+
+        # Must receive exactly 3 routed batches.
+        assert len(received) == 3
+        assert engine.detect.call_count == 3
+        # Verify frame_index ordering (batches routed in the order yielded).
+        for i, (stream_id, dets) in enumerate(received):
+            assert stream_id == "cam-0"
+            assert len(dets) == 1
+            assert dets[0].frame.frame_index == i
+
+    def test_run_pipeline_overlap_false_synchronous(self) -> None:
+        """overlap=False uses synchronous path, identical results."""
+        source = _MockSource("cam-0", n=3)
+        engine = _make_engine()
+        received: list[tuple[str, list[Detection]]] = []
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-0", source)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-0", lambda sid, dets: received.append((sid, dets)))
+
+        run_pipeline(engine, collector, scheduler, router, overlap=False)
+
+        assert len(received) == 3
+        assert engine.detect.call_count == 3
+        for i, (stream_id, dets) in enumerate(received):
+            assert stream_id == "cam-0"
+            assert len(dets) == 1
+            assert dets[0].frame.frame_index == i
+
+    def test_run_pipeline_overlap_error_propagation(self) -> None:
+        """overlap=True: error in detect() propagates, collector still closed."""
+        source = _MockSource("cam-0", n=3)
+        call_count = 0
+
+        def _fail_on_second(frames: list[Any]) -> list[Detection]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("batch-2 failure")
+            return [
+                Detection(
+                    frame=f,
+                    boxes=(),
+                    inference_time_ms=1.0,
+                    backend=BackendType.PYTORCH,
+                    model_spec=_SPEC,
+                )
+                for f in frames
+            ]
+
+        engine = _make_engine(detect_fn=MagicMock(side_effect=_fail_on_second))
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-0", source)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-0", lambda sid, dets: None)
+
+        with pytest.raises(RuntimeError, match="batch-2 failure"):
+            run_pipeline(engine, collector, scheduler, router, overlap=True)
+
+        # Collector must be closed even after error in overlapped path.
+        assert source.closed
+
+    def test_run_pipeline_overlap_stop_event(self) -> None:
+        """overlap=True: pre-set stop_event causes clean early termination."""
+        source = _MockSource("cam-0", n=100)
+        engine = _make_engine()
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-0", source)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-0", lambda sid, dets: None)
+
+        stop = threading.Event()
+        stop.set()
+
+        t0 = time.monotonic()
+        run_pipeline(engine, collector, scheduler, router, stop_event=stop, overlap=True)
+        elapsed = time.monotonic() - t0
+
+        # With stop_event pre-set, at most 1 batch is processed.
+        assert engine.detect.call_count <= 1
+        assert elapsed < 5.0
+        assert source.closed
