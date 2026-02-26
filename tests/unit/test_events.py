@@ -201,6 +201,26 @@ class TestEventBusThreading:
         assert bus._worker.daemon is True
         bus.close()
 
+    def test_register_after_close_does_not_restart_worker(self) -> None:
+        """on() after close() must not restart the daemon worker thread."""
+        bus = EventBus()
+        received: list[object] = []
+        bus.on("x", received.append)  # starts worker
+        bus.close(timeout=1.0)
+        assert bus.is_closed
+
+        # Register after close — should NOT start a new thread
+        bus.on("x", received.append)
+
+        # Verify: no live worker thread with name "yowo-events"
+        worker_alive = any(t.name == "yowo-events" and t.is_alive() for t in threading.enumerate())
+        assert not worker_alive, "Worker restarted after close()"
+
+        # Emit after close is a noop — callback never fires
+        bus.emit("x", "payload")
+        time.sleep(0.05)
+        assert received == []  # nothing delivered after close
+
 
 # ---------------------------------------------------------------------------
 # Async callbacks
@@ -223,3 +243,18 @@ class TestEventBusAsyncCallback:
         bus.close()
         # call_soon_threadsafe was called with a lambda — verify at least once
         assert mock_loop.call_soon_threadsafe.call_count >= 1
+
+    def test_on_async_without_running_loop_raises(self) -> None:
+        """on_async(loop=None) raises RuntimeError when called outside an async context."""
+        bus = EventBus()
+
+        async def cb(payload: object) -> None:
+            pass
+
+        # Not inside an event loop — asyncio.get_running_loop() should raise RuntimeError
+        import pytest
+
+        with pytest.raises(RuntimeError):
+            bus.on_async("x", cb)  # loop=None, no running loop
+
+        bus.close(timeout=0.1)

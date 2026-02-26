@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -173,6 +174,37 @@ class TestActiveStreamTracking:
         engine = _loaded_engine(_make_mock_backend())
         engine.close()
         assert engine._event_bus.is_closed is True
+
+    def test_close_signals_in_progress_stream(self) -> None:
+        """close() signals stop-events registered by active stream paths."""
+        mock_be = _make_mock_backend()
+        engine = _loaded_engine(mock_be)
+
+        # Manually inject a stop-event (simulating what _stream_* does)
+        stop = threading.Event()
+        with engine._shutdown_lock:
+            engine._active_streams.add(stop)
+
+        # close() should signal the stop-event
+        engine.close()
+
+        assert stop.is_set(), "close() did not signal active stream stop-event"
+
+    def test_unload_raises_state_still_cleaned_up(self) -> None:
+        """backend.unload() raising must not prevent _loaded=False and health=CLOSED."""
+        mock_be = _make_mock_backend()
+        engine = _loaded_engine(mock_be)
+
+        # Override side_effect AFTER engine is loaded to make unload() raise
+        mock_be.unload.side_effect = RuntimeError("unload boom")
+
+        assert engine.is_loaded
+        assert engine.health == HealthStatus.READY
+
+        engine.close()  # unload() will raise internally
+
+        assert not engine.is_loaded, "_loaded must be False even if unload() raised"
+        assert engine.health == HealthStatus.CLOSED, "health must be CLOSED even if unload() raised"
 
 
 # ---------------------------------------------------------------------------
