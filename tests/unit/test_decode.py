@@ -319,3 +319,24 @@ class TestPreprocessBufferPool:
         buf2 = pool.acquire()
         assert id(buf2) == buf_id
         pool.release(buf2)
+
+    def test_buffer_pool_double_release_raises(self) -> None:
+        """Releasing the same buffer twice raises ValueError."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        pool.release(buf)
+
+        with pytest.raises(ValueError, match="not acquired"):
+            pool.release(buf)
+
+    def test_buffer_pool_alien_buffer_raises(self) -> None:
+        """Releasing a buffer not from this pool raises ValueError."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        alien = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640)).acquire()
+
+        with pytest.raises(ValueError, match="not acquired"):
+            pool.release(alien)

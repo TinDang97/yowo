@@ -57,6 +57,7 @@ from yowo.types import (
     ModelSize,
     ModelSpec,
     Precision,
+    PreprocessedTensor,
     is_free_threaded,
 )
 
@@ -277,6 +278,26 @@ class InferenceEngine:
         else:
             tensor = preprocess(frames, target_size)
 
+        return self._detect_from_tensor(tensor, frames, scratch=self._postprocess_buf)
+
+    def _detect_from_tensor(
+        self,
+        tensor: PreprocessedTensor,
+        frames: list[Frame],
+        *,
+        scratch: PostprocessBuffer | None,
+    ) -> list[Detection]:
+        """Run inference + postprocess on an already-preprocessed tensor.
+
+        Shared by :meth:`detect`, :meth:`_stream_live` (PreparedItem fast-path),
+        and :meth:`_stream_pipeline` (concurrent worker path). Centralises
+        feature-cache source_id assignment and timing so callers cannot diverge.
+
+        Args:
+            tensor: Output of ``preprocess()`` or ``preprocess_into()``.
+            frames: Original frames matching the tensor batch.
+            scratch: Postprocess buffer for reuse, or ``None`` to allocate.
+        """
         # Set source_id for feature caching (PyTorch backend only; no-op on others)
         if self._feature_cache is not None and frames:
             sid = frames[0].source_id
@@ -296,7 +317,7 @@ class InferenceEngine:
             confidence_threshold=self._confidence,
             iou_threshold=self._iou_threshold,
             inference_time_ms=elapsed_ms,
-            scratch=self._postprocess_buf,
+            scratch=scratch,
         )
 
     def stream(self, source: FrameSource) -> Iterator[Detection]:
@@ -366,18 +387,9 @@ class InferenceEngine:
                 if item is not None:
                     idle_since = None
                     if isinstance(item, PreparedItem):
-                        t0 = time.perf_counter()
-                        raw_output = self._backend.infer(item.tensor)
-                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                        dets = postprocess(
-                            raw_output,
+                        dets = self._detect_from_tensor(
                             item.tensor,
                             [item.frame],
-                            model_spec=self._spec,
-                            backend=self._selection.backend,
-                            confidence_threshold=self._confidence,
-                            iou_threshold=self._iou_threshold,
-                            inference_time_ms=elapsed_ms,
                             scratch=self._postprocess_buf,
                         )
                         yield dets[0]
@@ -450,23 +462,8 @@ class InferenceEngine:
                     tensor = preprocess_into(frames, target_size, buf)
                     if infer_lock is not None:
                         with infer_lock:
-                            t0 = time.perf_counter()
-                            raw_output = self._backend.infer(tensor)
-                            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                    else:
-                        t0 = time.perf_counter()
-                        raw_output = self._backend.infer(tensor)
-                        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-                    return postprocess(
-                        raw_output,
-                        tensor,
-                        frames,
-                        model_spec=self._spec,
-                        backend=self._selection.backend,
-                        confidence_threshold=self._confidence,
-                        iou_threshold=self._iou_threshold,
-                        inference_time_ms=elapsed_ms,
-                    )
+                            return self._detect_from_tensor(tensor, frames, scratch=None)
+                    return self._detect_from_tensor(tensor, frames, scratch=None)
                 finally:
                     buffer_pool.release(buf)
             return self.detect(frames)
@@ -480,7 +477,10 @@ class InferenceEngine:
                 while True:
                     item = reader.get(timeout=5.0)
                     # Pipeline path never uses preprocess_fn, so items are always Frame.
-                    frame: Frame | None = item if isinstance(item, Frame) else None
+                    assert not isinstance(item, PreparedItem), (
+                        "pipeline path must not use preprocess_fn"
+                    )
+                    frame: Frame | None = item
                     if frame is not None:
                         batch.append(frame)
 

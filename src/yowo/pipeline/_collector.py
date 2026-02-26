@@ -201,6 +201,12 @@ class FrameCollector:
         if isinstance(item, Frame):
             return TaggedFrame(stream_id=stream_id, frame=item)
 
+        if item is not None:
+            raise TypeError(
+                f"FrameCollector expects Frame from reader, got {type(item).__name__}. "
+                "Do not pass preprocess_fn to readers used by FrameCollector."
+            )
+
         # No frame returned — check if exhausted.
         if entry.reader.is_exhausted:
             entry.state = StreamState.STOPPED

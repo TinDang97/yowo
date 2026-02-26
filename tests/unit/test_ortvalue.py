@@ -442,3 +442,68 @@ class TestCoreMLProviderOptions:
 
         assert providers == ["CPUExecutionProvider"]
         assert all(isinstance(p, str) for p in providers)
+
+
+# ---------------------------------------------------------------------------
+# Part 3: Shared infer_standard_ortvalue function
+# ---------------------------------------------------------------------------
+
+
+class TestSharedOrtValueFunction:
+    def test_infer_standard_ortvalue_calls_run_with_ort_values(self) -> None:
+        """Shared function must call run_with_ort_values on the session."""
+        from yowo.backends._ortvalue import infer_standard_ortvalue
+
+        tensor = _make_tensor()
+        raw_out = np.zeros((1, 84, 8400), dtype=np.float32)
+
+        ort_out = MagicMock()
+        ort_out.numpy.return_value = raw_out
+
+        session = MagicMock()
+        session.run_with_ort_values.return_value = [ort_out]
+
+        ort_mod = MagicMock()
+        ortvalue = MagicMock()
+        ort_mod.OrtValue.ortvalue_from_numpy.return_value = ortvalue
+
+        result = infer_standard_ortvalue(
+            ort_mod,
+            session,
+            "images",
+            ["output0"],
+            tensor,
+        )
+
+        ort_mod.OrtValue.ortvalue_from_numpy.assert_called_once_with(tensor.data)
+        session.run_with_ort_values.assert_called_once_with(
+            ["output0"],
+            {"images": ortvalue},
+        )
+        assert result.dtype == np.float32
+
+    def test_infer_standard_ortvalue_casts_fp16(self) -> None:
+        """Shared function must cast float16 output to float32."""
+        from yowo.backends._ortvalue import infer_standard_ortvalue
+
+        tensor = _make_tensor()
+        raw_fp16 = np.zeros((1, 84, 8400), dtype=np.float16)
+
+        ort_out = MagicMock()
+        ort_out.numpy.return_value = raw_fp16
+
+        session = MagicMock()
+        session.run_with_ort_values.return_value = [ort_out]
+
+        ort_mod = MagicMock()
+        ort_mod.OrtValue.ortvalue_from_numpy.return_value = MagicMock()
+
+        result = infer_standard_ortvalue(
+            ort_mod,
+            session,
+            "images",
+            ["output0"],
+            tensor,
+        )
+
+        assert result.dtype == np.float32

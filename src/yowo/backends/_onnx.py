@@ -218,13 +218,15 @@ class OnnxBackend:
 
     def _infer_standard_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Standard inference using OrtValue for zero-copy input wrapping."""
-        ort = self._ort
-        input_ort = ort.OrtValue.ortvalue_from_numpy(tensor.data)
-        ort_outputs = self._session.run_with_ort_values(
-            self._output_names, {self._input_name: input_ort}
+        from yowo.backends._ortvalue import infer_standard_ortvalue
+
+        return infer_standard_ortvalue(
+            self._ort,
+            self._session,
+            self._input_name,
+            self._output_names,
+            tensor,
         )
-        out = ort_outputs[0].numpy()
-        return out if out.dtype == np.float32 else out.astype(np.float32)
 
     def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """KV-cache inference using numpy arrays (fallback path)."""
