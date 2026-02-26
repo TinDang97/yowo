@@ -155,3 +155,7 @@ def create_backend(
             from yowo.backends._openvino import OpenVinoBackend
 
             return OpenVinoBackend(hw_profile)
+        case BackendType.COREML:
+            from yowo.backends._coreml import CoreMLBackend
+
+            return CoreMLBackend(hw_profile)

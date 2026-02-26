@@ -33,10 +33,11 @@ def export_model(
 
     Uses ``torch.onnx.export`` with the native ``yowo.arch`` module.
     TensorRT and OpenVINO exports first produce ONNX, then convert.
+    CoreML export converts directly from PyTorch (no ONNX intermediate).
 
     Args:
         spec: Model to export.
-        target_format: ONNX, TensorRT, or OpenVINO.
+        target_format: ONNX, TensorRT, OpenVINO, or CoreML.
         output_dir: Where to write the exported model.
         precision: FP32, FP16, or INT8.
         dynamic_batch: Enable dynamic batch dimension (ONNX only).
@@ -90,28 +91,35 @@ def export_model(
 
     t0 = time.monotonic()
 
-    # Step 1: Always produce ONNX first
     model_stem = f"{spec.family.value}{spec.size.value}"
-    onnx_path = output_dir / f"{model_stem}.onnx"
 
-    if kv_cache:
-        from yowo.export._kv_wrapper import YOLOKVWrapper
-
-        wrapper = YOLOKVWrapper(model)
-        _export_onnx_kv(wrapper, dummy, onnx_path, dynamic_batch=dynamic_batch)
+    # CoreML exports directly from PyTorch — skip ONNX intermediate
+    if target_format == ExportFormat.COREML:
+        exported_path = _convert_coreml(
+            model, dummy, output_dir / f"{model_stem}.mlpackage", precision
+        )
     else:
-        _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
+        # Step 1: Produce ONNX first
+        onnx_path = output_dir / f"{model_stem}.onnx"
 
-    # Step 2: Convert if needed
-    match target_format:
-        case ExportFormat.ONNX:
-            exported_path = onnx_path
-        case ExportFormat.TENSORRT:
-            exported_path = _convert_tensorrt(
-                onnx_path, output_dir / f"{model_stem}.engine", precision, calibration_data
-            )
-        case ExportFormat.OPENVINO:
-            exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
+        if kv_cache:
+            from yowo.export._kv_wrapper import YOLOKVWrapper
+
+            wrapper = YOLOKVWrapper(model)
+            _export_onnx_kv(wrapper, dummy, onnx_path, dynamic_batch=dynamic_batch)
+        else:
+            _export_onnx(model, dummy, onnx_path, dynamic_batch=dynamic_batch)
+
+        # Step 2: Convert if needed
+        match target_format:
+            case ExportFormat.ONNX:
+                exported_path = onnx_path
+            case ExportFormat.TENSORRT:
+                exported_path = _convert_tensorrt(
+                    onnx_path, output_dir / f"{model_stem}.engine", precision, calibration_data
+                )
+            case ExportFormat.OPENVINO:
+                exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
 
     elapsed = time.monotonic() - t0
 
@@ -347,6 +355,59 @@ def _convert_openvino(onnx_path: Path, output_dir: Path) -> Path:
         return output_dir
     except Exception as exc:
         raise ExportError(f"OpenVINO conversion failed: {exc}") from exc
+
+
+def _convert_coreml(
+    model: Any,
+    dummy: Any,
+    output_path: Path,
+    precision: Precision,
+) -> Path:
+    """Convert PyTorch model directly to CoreML .mlpackage.
+
+    Unlike other export formats, CoreML export goes directly from PyTorch
+    (not through an ONNX intermediate) using ``coremltools.convert()``.
+
+    Args:
+        model: Traced or eval-mode PyTorch model.
+        dummy: Dummy input tensor for tracing.
+        output_path: Target ``.mlpackage`` path.
+        precision: FP16 or FP32 compute precision.
+
+    Returns:
+        The output path (a directory for ``.mlpackage``).
+
+    Raises:
+        DependencyError: coremltools not installed.
+        ExportError: Conversion failed.
+    """
+    try:
+        import coremltools as ct  # type: ignore[import-untyped]
+        import torch  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise DependencyError("coremltools", "uv add coremltools>=7.0") from exc
+
+    try:
+        # Trace for coremltools (it works with traced models)
+        traced = torch.jit.trace(model, dummy)
+
+        # Convert with ML Program format (modern CoreML)
+        ct_precision = ct.precision.FLOAT16 if precision == Precision.FP16 else ct.precision.FLOAT32
+
+        mlmodel = ct.convert(
+            traced,
+            inputs=[ct.TensorType(name="images", shape=dummy.shape)],
+            convert_to="mlprogram",
+            compute_precision=ct_precision,
+            compute_units=ct.ComputeUnit.ALL,
+        )
+
+        # Save as .mlpackage
+        mlmodel.save(str(output_path))
+        return output_path
+
+    except Exception as exc:
+        raise ExportError(f"CoreML conversion failed: {exc}") from exc
 
 
 def _dir_size(path: Path) -> int:
