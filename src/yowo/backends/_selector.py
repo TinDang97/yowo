@@ -6,17 +6,21 @@ All selection logic is pure functions — no side effects, fully testable.
 Priority chain (auto, evaluated top-to-bottom):
   1. NVIDIA GPU + TensorRT installed  -> TensorRT (FP16)
   2. NVIDIA GPU + ONNX-CUDA EP        -> ONNX with CUDAExecutionProvider (FP16)
-  3. OpenVINO installed               -> OpenVINO (FP32)
-  4. ONNX Runtime installed           -> ONNX with CPUExecutionProvider (FP32)
-  5. PyTorch installed                -> PyTorch (FP32)
-  6. Nothing available                -> raises DependencyError
+  3. Apple Silicon + coremltools       -> CoreML native (Neural Engine)
+  4. ONNX + CoreML EP                 -> ONNX with CoreMLExecutionProvider
+  5. OpenVINO installed               -> OpenVINO (FP32)
+  6. ONNX Runtime installed           -> ONNX with CPUExecutionProvider (FP32)
+  7. PyTorch installed                -> PyTorch (FP32)
+  8. Nothing available                -> raises DependencyError
 """
 
 from __future__ import annotations
 
+import platform
+
 from yowo.errors import BackendError, DependencyError
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendSelection, BackendType, DeviceType, Precision
+from yowo.types import BackendSelection, BackendType, CPUArch, DeviceType, Precision
 
 __all__ = [
     "get_fallback_backends",
@@ -48,6 +52,7 @@ _FALLBACK_CHAIN: dict[BackendType, list[BackendType]] = {
     BackendType.TENSORRT: [BackendType.ONNX, BackendType.PYTORCH],
     BackendType.ONNX: [BackendType.PYTORCH],
     BackendType.OPENVINO: [BackendType.ONNX, BackendType.PYTORCH],
+    BackendType.COREML: [BackendType.ONNX, BackendType.PYTORCH],
     BackendType.PYTORCH: [],
 }
 
@@ -61,8 +66,14 @@ _INSTALL_HINTS = (
     "  ONNX (CPU):          uv add yowo[onnx]\n"
     "  ONNX (CUDA):         uv add yowo[onnx-gpu]\n"
     "  TensorRT:            uv add tensorrt\n"
-    "  OpenVINO:            uv add yowo[openvino]"
+    "  OpenVINO:            uv add yowo[openvino]\n"
+    "  CoreML (macOS):      uv add yowo[coreml]"
 )
+
+
+def _is_macos() -> bool:
+    """Return True when running on macOS."""
+    return platform.system() == "Darwin"
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +242,16 @@ def _run_priority_chain(
             f"NVIDIA GPU detected with ONNX Runtime {libs.onnxruntime_version} (CUDA EP)",
         )
 
-    # Priority 3: ONNX with CoreML EP (Apple Silicon Neural Engine)
+    # Priority 3: Native CoreML (Apple Silicon with coremltools)
+    if hw.cpu.cpu_arch == CPUArch.AARCH64 and _is_macos() and libs.coremltools_version:
+        return (
+            BackendType.COREML,
+            DeviceType.CPU,
+            "cpu",
+            f"CoreML native (coremltools {libs.coremltools_version})",
+        )
+
+    # Priority 4: ONNX with CoreML EP (Apple Silicon Neural Engine)
     if libs.onnxruntime_version and libs.onnxruntime_has_coreml:
         return (
             BackendType.ONNX,
@@ -240,7 +260,7 @@ def _run_priority_chain(
             f"ONNX Runtime {libs.onnxruntime_version} (CoreML EP — Apple Neural Engine)",
         )
 
-    # Priority 4: OpenVINO (CPU or Intel iGPU)
+    # Priority 5: OpenVINO (CPU or Intel iGPU)
     if libs.openvino_version:
         return (
             BackendType.OPENVINO,
@@ -249,7 +269,7 @@ def _run_priority_chain(
             f"OpenVINO {libs.openvino_version} installed",
         )
 
-    # Priority 5: ONNX CPU EP
+    # Priority 6: ONNX CPU EP
     if libs.onnxruntime_version:
         return (
             BackendType.ONNX,
@@ -258,7 +278,7 @@ def _run_priority_chain(
             f"ONNX Runtime {libs.onnxruntime_version} installed (CPU EP)",
         )
 
-    # Priority 6: PyTorch fallback
+    # Priority 7: PyTorch fallback
     if libs.torch_version:
         device_type = DeviceType.CUDA if libs.torch_cuda_available else DeviceType.CPU
         device_str = "cuda:0" if libs.torch_cuda_available else "cpu"
@@ -269,7 +289,7 @@ def _run_priority_chain(
             f"PyTorch {libs.torch_version} installed (fallback)",
         )
 
-    # Priority 7: nothing available
+    # Priority 8: nothing available
     raise DependencyError(
         package="inference backend",
         install_cmd=_INSTALL_HINTS,
@@ -342,6 +362,11 @@ def _check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
         case BackendType.OPENVINO:
             if not libs.openvino_version:
                 raise BackendError("OpenVINO is not installed. Install with: uv add openvino")
+        case BackendType.COREML:
+            if not libs.coremltools_version:
+                raise BackendError(
+                    "coremltools is not installed. Install with: uv add coremltools>=7.0"
+                )
 
 
 def _parse_precision(value: str | None) -> Precision | None:

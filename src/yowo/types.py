@@ -30,6 +30,7 @@ class BackendType(enum.StrEnum):
     ONNX = "onnx"
     TENSORRT = "tensorrt"
     OPENVINO = "openvino"
+    COREML = "coreml"
 
 
 class DeviceType(enum.StrEnum):
@@ -81,6 +82,7 @@ class ExportFormat(enum.StrEnum):
     ONNX = "onnx"
     TENSORRT = "tensorrt"
     OPENVINO = "openvino"
+    COREML = "coreml"
 
 
 class Precision(enum.StrEnum):

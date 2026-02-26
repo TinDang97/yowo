@@ -6,6 +6,8 @@ Tests cover backend auto-selection, precision selection, and the fallback chain.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from yowo.backends._selector import get_fallback_backends, select_backend, select_precision
@@ -46,13 +48,14 @@ def _make_cpu_device(
     memory_total_mb: int = 16384,
     memory_available_mb: int = 16384,
     is_jetson: bool = False,
+    cpu_arch: CPUArch = CPUArch.X86_64,
 ) -> Device:
     return Device(
         type=DeviceType.CPU,
         index=0,
         name="Test CPU",
         arch=None,
-        cpu_arch=CPUArch.X86_64,
+        cpu_arch=cpu_arch,
         memory_total_mb=memory_total_mb,
         memory_available_mb=memory_available_mb,
         is_jetson=is_jetson,
@@ -67,9 +70,11 @@ def make_profile(
     has_onnx_coreml: bool = False,
     has_openvino: bool = False,
     has_torch: bool = False,
+    has_coremltools: bool = False,
     gpu_memory_mb: int = 8192,
     cpu_memory_mb: int = 16384,
     is_jetson: bool = False,
+    cpu_arch: CPUArch = CPUArch.X86_64,
 ) -> HardwareProfile:
     """Build a synthetic HardwareProfile for testing.
 
@@ -87,6 +92,7 @@ def make_profile(
     cpu = _make_cpu_device(
         memory_total_mb=cpu_memory_mb,
         is_jetson=is_jetson,
+        cpu_arch=cpu_arch,
     )
 
     libs = InstalledLibraries(
@@ -97,6 +103,7 @@ def make_profile(
         onnxruntime_has_cuda=has_onnx_cuda,
         onnxruntime_has_coreml=has_onnx_coreml,
         openvino_version="2024.0" if has_openvino else None,
+        coremltools_version="7.0" if has_coremltools else None,
     )
 
     return HardwareProfile(
@@ -372,3 +379,91 @@ class TestBackendSelectionDataclass:
         assert isinstance(result.precision, Precision)
         assert isinstance(result.device_index, int)
         assert isinstance(result.reason, str)
+
+
+# ---------------------------------------------------------------------------
+# CoreML native backend selection
+# ---------------------------------------------------------------------------
+
+
+class TestCoreMLSelection:
+    """Test native CoreML backend auto-selection on Apple Silicon."""
+
+    @patch("yowo.backends._selector._is_macos", return_value=True)
+    def test_coreml_native_preferred_on_apple_silicon(self, _mock_macos: MagicMock) -> None:
+        profile = make_profile(
+            has_coremltools=True,
+            has_onnx=True,
+            has_onnx_coreml=True,
+            cpu_arch=CPUArch.AARCH64,
+        )
+        result = select_backend(profile, "n")
+        assert result.backend == BackendType.COREML
+        assert "CoreML native" in result.reason
+
+    @patch("yowo.backends._selector._is_macos", return_value=True)
+    def test_coreml_native_beats_onnx_coreml_ep(self, _mock_macos: MagicMock) -> None:
+        """Native CoreML (priority 3) takes precedence over ORT CoreML EP (priority 4)."""
+        profile = make_profile(
+            has_coremltools=True,
+            has_onnx=True,
+            has_onnx_coreml=True,
+            cpu_arch=CPUArch.AARCH64,
+        )
+        result = select_backend(profile, "n")
+        assert result.backend == BackendType.COREML
+
+    @patch("yowo.backends._selector._is_macos", return_value=False)
+    def test_coreml_not_selected_on_linux(self, _mock_macos: MagicMock) -> None:
+        """CoreML should not be selected on non-macOS even with AARCH64."""
+        profile = make_profile(
+            has_coremltools=True,
+            has_onnx=True,
+            has_onnx_coreml=True,
+            has_torch=True,
+            cpu_arch=CPUArch.AARCH64,
+        )
+        result = select_backend(profile, "n")
+        assert result.backend != BackendType.COREML
+
+    @patch("yowo.backends._selector._is_macos", return_value=True)
+    def test_coreml_not_selected_on_x86(self, _mock_macos: MagicMock) -> None:
+        """CoreML should not be selected on Intel Mac (x86_64)."""
+        profile = make_profile(
+            has_coremltools=True,
+            has_onnx=True,
+            has_onnx_coreml=True,
+            cpu_arch=CPUArch.X86_64,
+        )
+        result = select_backend(profile, "n")
+        # Should fall through to ORT CoreML EP or ONNX, not native CoreML
+        assert result.backend != BackendType.COREML
+
+    @patch("yowo.backends._selector._is_macos", return_value=True)
+    def test_nvidia_gpu_still_beats_coreml(self, _mock_macos: MagicMock) -> None:
+        """TensorRT/CUDA backends remain priority 1/2 even on macOS."""
+        profile = make_profile(
+            has_gpu=True,
+            has_tensorrt=True,
+            has_torch=True,
+            has_coremltools=True,
+            cpu_arch=CPUArch.AARCH64,
+        )
+        result = select_backend(profile, "n")
+        assert result.backend == BackendType.TENSORRT
+
+    def test_coreml_fallback_chain(self) -> None:
+        chain = get_fallback_backends(BackendType.COREML)
+        assert chain == [BackendType.ONNX, BackendType.PYTORCH]
+
+    def test_coreml_override_without_coremltools_raises(self) -> None:
+        profile = make_profile(has_torch=True)
+        with pytest.raises(BackendError, match="coremltools"):
+            select_backend(profile, "n", backend_override="coreml")
+
+    @patch("yowo.backends._selector._is_macos", return_value=True)
+    def test_coreml_override_with_coremltools_succeeds(self, _mock_macos: MagicMock) -> None:
+        profile = make_profile(has_coremltools=True, has_torch=True)
+        result = select_backend(profile, "n", backend_override="coreml")
+        assert result.backend == BackendType.COREML
+        assert "User override" in result.reason

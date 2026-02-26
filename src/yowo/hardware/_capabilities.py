@@ -16,6 +16,7 @@ from dataclasses import dataclass
 __all__ = [
     "InstalledLibraries",
     "detect_libraries",
+    "probe_coremltools",
     "probe_onnxruntime",
     "probe_openvino",
     "probe_tensorrt",
@@ -42,6 +43,7 @@ class InstalledLibraries:
         onnxruntime_has_cuda: True when CUDAExecutionProvider is available.
         onnxruntime_has_coreml: True when CoreMLExecutionProvider is available.
         openvino_version: OpenVINO runtime version string, or None.
+        coremltools_version: coremltools version string, or None.
     """
 
     torch_version: str | None = None
@@ -52,6 +54,7 @@ class InstalledLibraries:
     onnxruntime_has_cuda: bool = False
     onnxruntime_has_coreml: bool = False
     openvino_version: str | None = None
+    coremltools_version: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +140,23 @@ def probe_openvino() -> str | None:
         return None
 
 
+def probe_coremltools() -> str | None:
+    """Probe coremltools installation.
+
+    Returns:
+        Version string, or None if not installed.
+    """
+    if importlib.util.find_spec("coremltools") is None:
+        return None
+    try:
+        import coremltools as ct  # type: ignore[import-untyped]
+
+        return str(ct.__version__)
+    except Exception:
+        _log.debug("probe_coremltools: import failed", exc_info=True)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
@@ -169,4 +189,5 @@ def detect_libraries() -> InstalledLibraries:
         onnxruntime_has_cuda=ort_has_cuda,
         onnxruntime_has_coreml=ort_has_coreml,
         openvino_version=probe_openvino(),
+        coremltools_version=probe_coremltools(),
     )
