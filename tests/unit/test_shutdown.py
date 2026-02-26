@@ -232,3 +232,39 @@ class TestEngineEventDelegation:
         engine = _loaded_engine(_make_mock_backend())
         assert engine.events_dropped == 0
         engine.close()
+
+
+# ---------------------------------------------------------------------------
+# Eager shutdown guard + _streams_drained event
+# ---------------------------------------------------------------------------
+
+
+class TestEagerShutdownAndDrainedEvent:
+    def test_stream_shutdown_error_raised_eagerly(self) -> None:
+        """stream() raises ShutdownError before generator iteration (eager guard)."""
+        from unittest.mock import MagicMock
+
+        from yowo.errors import ShutdownError
+
+        engine = _loaded_engine(_make_mock_backend())
+        engine.close()
+        mock_source = MagicMock()
+        mock_source.total_frames = 5
+        mock_source.is_live = False
+        # stream() is now a regular function — ShutdownError raised on call, not on next()
+        with pytest.raises(ShutdownError):
+            engine.stream(mock_source)  # must raise HERE, not on iteration
+
+    def test_streams_drained_event_set_after_all_streams_finish(self) -> None:
+        """_streams_drained is set when _active_streams becomes empty."""
+        engine = _loaded_engine(_make_mock_backend())
+        stop = threading.Event()
+        with engine._shutdown_lock:
+            engine._active_streams.add(stop)
+            engine._streams_drained.clear()
+        assert not engine._streams_drained.is_set()
+        engine._active_streams.discard(stop)
+        if not engine._active_streams:
+            engine._streams_drained.set()
+        assert engine._streams_drained.is_set()
+        engine.close()

@@ -20,6 +20,8 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_MAX_QUEUE_SIZE      -> InferenceConfig.max_queue_size
     YOWO_PREFETCH            -> InferenceConfig.prefetch
     YOWO_PIPELINE_WORKERS    -> InferenceConfig.pipeline_workers
+    YOWO_METRICS_ENABLED     -> InferenceConfig.metrics_enabled
+    YOWO_ERROR_THRESHOLD     -> InferenceConfig.error_threshold
 """
 
 from __future__ import annotations
@@ -231,6 +233,10 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.prefetch = v.lower() in ("true", "1", "yes")
     if (v := env.get("YOWO_PIPELINE_WORKERS")) is not None:
         cfg.pipeline_workers = int(v)
+    if (v := env.get("YOWO_METRICS_ENABLED")) is not None:
+        cfg.metrics_enabled = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_ERROR_THRESHOLD")) is not None:
+        cfg.error_threshold = int(v)
 
 
 def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
@@ -258,6 +264,7 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
         "batch_size",
         "max_queue_size",
         "pipeline_workers",
+        "error_threshold",
     ):
         if int_field in data and data[int_field] is not None:
             kwargs[int_field] = int(data[int_field])
@@ -266,7 +273,7 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
         if float_field in data:
             kwargs[float_field] = float(data[float_field])
 
-    for bool_field in ("prefetch", "cache", "kv_cache"):
+    for bool_field in ("prefetch", "cache", "kv_cache", "metrics_enabled"):
         if bool_field in data:
             kwargs[bool_field] = bool(data[bool_field])
 

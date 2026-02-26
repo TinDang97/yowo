@@ -387,3 +387,18 @@ class TestStreamingConfig:
         monkeypatch.setenv("YOWO_MAX_QUEUE_SIZE", "0")
         with pytest.raises(ConfigError, match="max_queue_size"):
             load_config()
+
+    def test_env_metrics_enabled_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_METRICS_ENABLED", "false")
+        cfg = load_config()
+        assert cfg.metrics_enabled is False
+
+    def test_env_metrics_enabled_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_METRICS_ENABLED", "1")
+        cfg = load_config()
+        assert cfg.metrics_enabled is True
+
+    def test_env_error_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_ERROR_THRESHOLD", "3")
+        cfg = load_config()
+        assert cfg.error_threshold == 3

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
 from pathlib import Path
@@ -209,6 +210,52 @@ class TestAStream:
         with pytest.raises(ShutdownError):
             async for _ in engine.astream(mock_source):
                 pass
+
+    async def test_astream_stop_event_registered_in_active_streams(self) -> None:
+        """astream() registers its stop-event in engine._active_streams while running."""
+        mock_be = _make_mock_backend()
+        mock_be.infer.return_value = np.zeros((1, 0, 6), dtype=np.float32)
+        engine = _loaded_engine(mock_be)
+
+        seen_active: list[int] = []
+
+        # Infinite source so the stream stays alive long enough to observe
+        class _SlowSource:
+            total_frames = -1
+            is_live = True
+
+            def __iter__(self) -> object:
+                while True:
+                    yield _dummy_frame()
+
+            def close(self) -> None:
+                pass
+
+        source = _SlowSource()
+
+        async def _run() -> None:
+            async for _ in engine.astream(source):  # type: ignore[arg-type]
+                seen_active.append(len(engine._active_streams))
+                break
+
+        task = asyncio.create_task(_run())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        engine.close()
+        # At least one iteration saw the stop-event registered
+        assert any(n >= 1 for n in seen_active), "astream() did not register stop-event"
+
+    async def test_close_signals_astream_background_thread(self) -> None:
+        """engine.close() sets the astream stop-event registered in _active_streams."""
+        engine = _loaded_engine(_make_mock_backend())
+        stop = threading.Event()
+        with engine._shutdown_lock:
+            engine._active_streams.add(stop)
+            engine._streams_drained.clear()
+        engine.close()
+        assert stop.is_set(), "close() must signal astream stop-event"
 
 
 # ---------------------------------------------------------------------------

@@ -142,19 +142,15 @@ class InferenceEngine:
         self._iou_threshold = cfg.iou_threshold
         self._device = cfg.device
 
-        # Feature cache (opt-in, PyTorch backend only)
-        # cache=True → in-memory; cache_dir → mmap-backed
         self._feature_cache = None
         if cfg.cache or cfg.cache_dir is not None:
             from yowo.cache import FeatureCache
 
             self._feature_cache = FeatureCache(cache_dir=cfg.cache_dir)
 
-        # Track whether user injected a backend (disables fallback in load)
         self._user_provided_backend = backend_instance is not None
 
         if backend_instance is not None:
-            # User-provided backend — skip hardware detection, selection, factory
             self._backend: InferenceBackend = backend_instance
             self._selection: BackendSelection = BackendSelection(
                 backend=backend_instance.backend_type,
@@ -166,7 +162,6 @@ class InferenceEngine:
             self._hw = None
             self._kv_cache = cfg.kv_cache
         else:
-            # Auto-selection: detect hardware, select backend, create via factory
             self._hw = get_hardware_profile()
             self._selection = select_backend(
                 self._hw,
@@ -187,24 +182,21 @@ class InferenceEngine:
         self._model_meta = _registry_get(spec.family, spec.size)
         self._loaded = False
 
-        # Streaming pipeline parameters
         self._frame_drop_policy = cfg.frame_drop_policy
         self._max_queue_size = cfg.max_queue_size
         self._prefetch = cfg.prefetch
         self._pipeline_workers = cfg.pipeline_workers
         self._preprocess_buf: PreprocessBuffer | None = None
         self._postprocess_buf: PostprocessBuffer | None = None
-
-        # Metrics + health
         self._metrics = MetricsCollector(enabled=cfg.metrics_enabled)
         self._error_threshold = cfg.error_threshold
         self._health_state: HealthStatus = HealthStatus.STARTING
-
-        # Events + shutdown coordination
         self._event_bus = EventBus()
         self._shutting_down = False
         self._shutdown_lock = threading.Lock()
         self._active_streams: set[threading.Event] = set()
+        self._streams_drained = threading.Event()
+        self._streams_drained.set()  # starts as "drained" (no active streams)
 
     @property
     def selection(self) -> BackendSelection:
@@ -312,8 +304,6 @@ class InferenceEngine:
 
                 if bt != self._selection.backend:
                     logger.warning("Using fallback backend: %s", bt.value)
-                    # Re-derive device_type from the actual fallback backend
-                    # and hardware — not from the (now-failed) original selection.
                     _fallback_sel = select_backend(
                         self._hw,
                         model_size=self._spec.size.value,
@@ -418,10 +408,11 @@ class InferenceEngine:
             raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
+        return self._stream_dispatch(source)
 
-        # Reset KV state at the start of each new source
+    def _stream_dispatch(self, source: FrameSource) -> Iterator[Detection]:
+        """Internal generator: clear KV cache then delegate to stream strategy."""
         self._backend.clear_kv_cache()
-
         if not self._prefetch:
             yield from self._stream_sync(source)
         elif source.total_frames == 1:
@@ -432,19 +423,22 @@ class InferenceEngine:
             yield from self._stream_pipeline(source)
 
     async def astream(self, source: FrameSource) -> AsyncIterator[Detection]:
-        """Yield detections asynchronously from any source.
-
-        Background thread runs sync stream(). Cancellation sets stop_event.
-        Raises :class:`ShutdownError` immediately if the engine is closing.
-        """
-        if self._shutting_down:
-            raise ShutdownError("Engine is shutting down")
-        if not self._loaded:
-            raise InferenceError("Engine not loaded. Call load() or use as context manager.")
+        """Async stream; stop-event registered in _active_streams for close() signaling."""
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down:
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
+            self._streams_drained.clear()
         from yowo._async import astream as _astream
 
-        async for detection in _astream(self.stream, source, self._event_bus.emit):
-            yield detection
+        try:
+            async for det in _astream(self.stream, source, self._event_bus.emit, _stop):
+                yield det
+        finally:
+            self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
 
     def _stream_single(self, source: FrameSource) -> Iterator[Detection]:
         """Fast path for single-image sources — no threading overhead."""
@@ -453,6 +447,7 @@ class InferenceEngine:
             if self._shutting_down:
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
+            self._streams_drained.clear()
         try:
             for frame in source:
                 if _stop.is_set():
@@ -460,6 +455,8 @@ class InferenceEngine:
                 yield from self.detect([frame])
         finally:
             self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
             source.close()
 
     def _stream_live(self, source: FrameSource) -> Iterator[Detection]:
@@ -494,6 +491,7 @@ class InferenceEngine:
             if self._shutting_down:
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
+            self._streams_drained.clear()
         reader.start()
         try:
             idle_since: float | None = None
@@ -524,6 +522,8 @@ class InferenceEngine:
                         break
         finally:
             self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
             reader.stop()
             source.close()
 
@@ -544,6 +544,7 @@ class InferenceEngine:
             if self._shutting_down:
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
+            self._streams_drained.clear()
 
         reader = ThreadedFrameReader(
             source,
@@ -553,10 +554,7 @@ class InferenceEngine:
         reader.start()
 
         concurrent = self._pipeline_workers > 1
-        # Serialise backend.infer() to prevent data races in mutable backends.
         infer_lock = threading.Lock() if concurrent else None
-
-        # Pre-allocate one buffer per worker for zero-copy preprocessing.
         buffer_pool: PreprocessBufferPool | None = None
         if concurrent:
             target = (self._model_meta.input_height, self._model_meta.input_width)
@@ -593,7 +591,6 @@ class InferenceEngine:
                         batch.append(frame)
 
                     if len(batch) >= self._batch_size or (frame is None and batch):
-                        # Drain oldest future if pipeline is full.
                         if len(pending) >= max_pending:
                             yield from pending.popleft().result()
                         pending.append(pool.submit(_infer_batch, batch.copy()))
@@ -602,14 +599,14 @@ class InferenceEngine:
                     if frame is None and reader.is_exhausted:
                         break
 
-                # Drain remaining futures in submission order.
                 while pending:
                     yield from pending.popleft().result()
         finally:
-            # Cancel any undrained futures to prevent leaked threads.
             for fut in pending:
                 fut.cancel()
             self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
             reader.stop()
             source.close()
 
@@ -620,6 +617,7 @@ class InferenceEngine:
             if self._shutting_down:
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
+            self._streams_drained.clear()
         batch: list[Frame] = []
         try:
             for frame in source:
@@ -633,6 +631,8 @@ class InferenceEngine:
                 yield from self.detect(batch)
         finally:
             self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
             source.close()
 
     def close(self, timeout: float = 5.0) -> None:
@@ -648,10 +648,10 @@ class InferenceEngine:
             for stop_event in list(self._active_streams):
                 stop_event.set()
 
-        # Wait for streams to drain (best-effort)
         deadline = time.monotonic() + timeout
-        while self._active_streams and time.monotonic() < deadline:
-            time.sleep(0.01)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            self._streams_drained.wait(timeout=remaining)
 
         # Drain and close event bus
         self._event_bus.close(timeout=max(0.1, deadline - time.monotonic()))
