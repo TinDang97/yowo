@@ -255,16 +255,28 @@ class TestEagerShutdownAndDrainedEvent:
         with pytest.raises(ShutdownError):
             engine.stream(mock_source)  # must raise HERE, not on iteration
 
-    def test_streams_drained_event_set_after_all_streams_finish(self) -> None:
-        """_streams_drained is set when _active_streams becomes empty."""
-        engine = _loaded_engine(_make_mock_backend())
-        stop = threading.Event()
-        with engine._shutdown_lock:
-            engine._active_streams.add(stop)
-            engine._streams_drained.clear()
-        assert not engine._streams_drained.is_set()
-        engine._active_streams.discard(stop)
-        if not engine._active_streams:
-            engine._streams_drained.set()
-        assert engine._streams_drained.is_set()
+    def test_streams_drained_set_by_production_stream_sync(self) -> None:
+        """_stream_sync sets _streams_drained via production code after completing."""
+        import numpy as np
+
+        from yowo.types import Frame
+
+        mock_be = _make_mock_backend()
+        engine = _loaded_engine(mock_be)
+        frame = Frame(
+            pixels=np.zeros((480, 640, 3), dtype=np.uint8),
+            source_id="test",
+            frame_index=0,
+        )
+        mock_source = MagicMock()
+        mock_source.__iter__ = MagicMock(return_value=iter([frame]))
+        mock_source.close = MagicMock()
+
+        assert engine._streams_drained.is_set()  # empty at start
+
+        # Consume the production _stream_sync generator — exercises add/clear/discard/set
+        list(engine._stream_sync(mock_source))
+
+        assert engine._streams_drained.is_set()  # set by production code after drain
+        assert not engine._active_streams
         engine.close()

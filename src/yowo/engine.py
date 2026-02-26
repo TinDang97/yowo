@@ -423,7 +423,12 @@ class InferenceEngine:
             yield from self._stream_pipeline(source)
 
     async def astream(self, source: FrameSource) -> AsyncIterator[Detection]:
-        """Async stream; stop-event registered in _active_streams for close() signaling."""
+        """Async stream; stop-event registered in _active_streams for close() signaling.
+
+        Note: if the caller creates the generator but never iterates it, the
+        stop-event leaks in _active_streams until GC finalizes the async generator.
+        close() handles this via its timeout (default 5 s).
+        """
         _stop = threading.Event()
         with self._shutdown_lock:
             if self._shutting_down:

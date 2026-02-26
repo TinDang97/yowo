@@ -41,8 +41,12 @@ async def astream(
     _internal_stop = threading.Event()
 
     def _background() -> None:
+        # Capture the generator explicitly so gen.close() triggers _stream_*
+        # finally blocks immediately (reader.stop(), source.close()) on early exit
+        # rather than waiting for CPython GC.
+        gen = stream_fn(source)
         try:
-            for detection in stream_fn(source):
+            for detection in gen:
                 if _internal_stop.is_set():
                     break
                 if stop_event is not None and stop_event.is_set():
@@ -55,6 +59,7 @@ async def astream(
         except Exception as exc:
             emit_fn("error", exc)
         finally:
+            gen.close()  # ensures _stream_live reader thread stops immediately
             with contextlib.suppress(Exception):
                 asyncio.run_coroutine_threadsafe(q.put(None), loop).result(timeout=2.0)
 
