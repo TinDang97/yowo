@@ -151,16 +151,30 @@ class MetricsCollector:
     # Hot-path methods (called from detect / stream inner loop)
     # ------------------------------------------------------------------
 
-    def record_inference(self, elapsed_ms: float, batch_size: int = 1) -> None:
+    def record_inference(
+        self,
+        elapsed_ms: float,
+        batch_size: int = 1,
+        *,
+        frame_time: float | None = None,
+    ) -> None:
         """Record a successful inference call.
 
         Called from ``_detect_from_tensor`` immediately after backend.infer().
+
+        Args:
+            elapsed_ms: Backend infer() wall time in milliseconds.
+            batch_size: Number of frames in the batch.
+            frame_time: Pre-existing monotonic timestamp to use as
+                ``_last_frame_time``. When supplied, skips the
+                ``time.monotonic()`` syscall (~50-100 ns on macOS).
+                Defaults to None, which falls back to a fresh call.
         """
         if not self._enabled:
             return
         self._frames_total += batch_size
         self._inference_hist.record(elapsed_ms)
-        self._last_frame_time = time.monotonic()
+        self._last_frame_time = frame_time if frame_time is not None else time.monotonic()
 
     def record_error(self) -> None:
         """Record an inference-level error."""

@@ -153,7 +153,7 @@ class ExportConfig:
         target_format: Output format for the exported artifact.
         precision: Numerical precision of the exported artifact.
         dynamic_batch: Enable dynamic batch dimension in the ONNX graph.
-            Enabled by default. Has no effect for TensorRT or OpenVINO exports.
+            Disabled by default. Has no effect for TensorRT or OpenVINO exports.
         batch_sizes: Pre-compiled batch sizes for CoreML EnumeratedShapes
             export. When provided, CoreML will pre-compile optimized kernels
             for each listed batch size. ``None`` means fixed batch=1.
@@ -170,7 +170,7 @@ class ExportConfig:
     weights_path: Path | None = None
     target_format: ExportFormat = ExportFormat.ONNX
     precision: Precision = Precision.FP16
-    dynamic_batch: bool = True
+    dynamic_batch: bool = False
     batch_sizes: list[int] | None = None
     output_dir: Path = field(default_factory=lambda: Path.home() / ".yowo" / "models")
     imgsz: int = 640

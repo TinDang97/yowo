@@ -70,6 +70,11 @@ class EventBus:
         - ``on()``, ``on_async()``, ``remove()`` are protected by a lock.
         - ``emit()`` uses a Semaphore for queue-slot budgeting — no lock needed
           on the common path.
+        - ``_has_listeners`` is read lock-free in emit(); written under lock in
+          _register()/_remove(). The tiny TOCTOU is acceptable: worst case is
+          one wasted emit when the last listener unregisters concurrently.
+        - ``_snapshot`` is replaced atomically (Python dict assignment) under
+          lock in _register()/remove(); read lock-free in _dispatch_loop().
         - ``close()`` is idempotent.
 
     Usage::
@@ -95,6 +100,13 @@ class EventBus:
         self._events_dropped = 0
         self._closed = False
         self._worker: threading.Thread | None = None
+
+        # P0-1: zero-listener fast path — read without lock in emit().
+        self._has_listeners: bool = False
+
+        # P1-5: lock-free snapshot for _dispatch_loop — replaced atomically
+        # under _lock in _register()/remove(); read lock-free in worker thread.
+        self._snapshot: dict[str, list[_ListenerEntry]] = {}
 
     # ------------------------------------------------------------------
     # Registration API
@@ -136,6 +148,10 @@ class EventBus:
             if not entries:
                 return
             self._listeners[event] = [e for e in entries if e[0] is not callback]
+            # Rebuild snapshot atomically (dict assignment is atomic in CPython).
+            self._snapshot = {k: list(v) for k, v in self._listeners.items()}
+            # Reset fast-path flag when all lists are empty.
+            self._has_listeners = any(self._listeners.values())
 
     # ------------------------------------------------------------------
     # Emit
@@ -144,9 +160,14 @@ class EventBus:
     def emit(self, event: str, payload: Any) -> None:
         """Non-blocking enqueue of ``(event, payload)``.
 
-        Dropped silently if the bus is closed or the queue is full.
+        Dropped silently if the bus is closed, no listeners are registered,
+        or the queue is full.
         """
         if self._closed:
+            return
+        # P0-1: skip Semaphore + SimpleQueue cost entirely when no listeners.
+        # Read without lock — tiny TOCTOU is acceptable (see class docstring).
+        if not self._has_listeners:
             return
         if not self._slots.acquire(blocking=False):
             # Queue full — count the drop under lock (rare path, acceptable cost).
@@ -196,6 +217,9 @@ class EventBus:
     ) -> None:
         with self._lock:
             self._listeners.setdefault(event, []).append((callback, is_async, loop))
+            # Rebuild snapshot atomically (dict assignment is atomic in CPython).
+            self._snapshot = {k: list(v) for k, v in self._listeners.items()}
+            self._has_listeners = True
             self._ensure_worker()
 
     def _ensure_worker(self) -> None:
@@ -223,8 +247,9 @@ class EventBus:
             event, payload = item
             # Release the slot so the next emit() can proceed.
             self._slots.release()
-            with self._lock:
-                entries = list(self._listeners.get(event, []))
+            # P1-5: lock-free snapshot read — no lock needed.
+            # _snapshot is replaced atomically under _lock in _register()/remove().
+            entries = self._snapshot.get(event, [])
             for cb, is_async, loop in entries:
                 try:
                     if is_async and loop is not None:

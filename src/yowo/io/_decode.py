@@ -96,7 +96,7 @@ class PreprocessBufferPool:
     Blocks if all buffers are in use (backpressure).
     """
 
-    __slots__ = ("_buffers", "_in_use", "_lock", "_sem")
+    __slots__ = ("_buffers", "_in_use_count", "_lock", "_sem")
 
     def __init__(self, pool_size: int, max_batch: int, target_size: tuple[int, int]) -> None:
         self._sem = threading.Semaphore(pool_size)
@@ -104,23 +104,22 @@ class PreprocessBufferPool:
             PreprocessBuffer(max_batch, target_size) for _ in range(pool_size)
         )
         self._lock = threading.Lock()
-        self._in_use: set[int] = set()
+        self._in_use_count: int = 0
 
     def acquire(self) -> PreprocessBuffer:
         """Acquire a buffer, blocking if none available."""
         self._sem.acquire()
         with self._lock:
             buf = self._buffers.popleft()
-            self._in_use.add(id(buf))
+            self._in_use_count += 1
             return buf
 
     def release(self, buf: PreprocessBuffer) -> None:
         """Return a buffer to the pool."""
         with self._lock:
-            buf_id = id(buf)
-            if buf_id not in self._in_use:
+            if self._in_use_count <= 0:
                 raise ValueError("Buffer was not acquired from this pool or already released")
-            self._in_use.discard(buf_id)
+            self._in_use_count -= 1
             self._buffers.append(buf)
         self._sem.release()
 

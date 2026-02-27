@@ -192,7 +192,7 @@ class InferenceEngine:
         self._error_threshold = cfg.error_threshold
         self._health_state: HealthStatus = HealthStatus.STARTING
         self._event_bus = EventBus()
-        self._shutting_down = False
+        self._shutting_down = threading.Event()  # set() means shutting down
         self._shutdown_lock = threading.Lock()
         self._active_streams: set[threading.Event] = set()
         self._streams_drained = threading.Event()
@@ -340,7 +340,7 @@ class InferenceEngine:
 
     def detect(self, frames: list[Frame]) -> list[Detection]:
         """Run detection on a list of frames. Returns one Detection per frame."""
-        if self._shutting_down:
+        if self._shutting_down.is_set():
             raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
@@ -374,7 +374,7 @@ class InferenceEngine:
         raw_output = self._backend.infer(tensor)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size)
+        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
 
         results = postprocess(
             raw_output,
@@ -404,7 +404,7 @@ class InferenceEngine:
         - Offline multi-frame → _stream_pipeline (prefetch + infer overlap)
         - prefetch=False → _stream_sync (legacy sequential path)
         """
-        if self._shutting_down:
+        if self._shutting_down.is_set():
             raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
@@ -431,7 +431,7 @@ class InferenceEngine:
         """
         _stop = threading.Event()
         with self._shutdown_lock:
-            if self._shutting_down:
+            if self._shutting_down.is_set():
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
@@ -449,7 +449,7 @@ class InferenceEngine:
         """Fast path for single-image sources — no threading overhead."""
         _stop = threading.Event()
         with self._shutdown_lock:
-            if self._shutting_down:
+            if self._shutting_down.is_set():
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
@@ -493,7 +493,7 @@ class InferenceEngine:
         )
         _stop = threading.Event()
         with self._shutdown_lock:
-            if self._shutting_down:
+            if self._shutting_down.is_set():
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
@@ -504,14 +504,12 @@ class InferenceEngine:
                 item = reader.get(timeout=_POLL_TIMEOUT)
                 if item is not None:
                     idle_since = None
-                    if isinstance(item, PreparedItem):
-                        yield from self._detect_from_tensor(
-                            item.tensor,
-                            [item.frame],
-                            scratch=self._postprocess_buf,
-                        )
-                    else:
-                        yield from self.detect([item])
+                    assert isinstance(item, PreparedItem)  # preprocess_fn always set
+                    yield from self._detect_from_tensor(
+                        item.tensor,
+                        [item.frame],
+                        scratch=self._postprocess_buf,
+                    )
                 elif reader.is_exhausted:
                     break
                 else:
@@ -546,7 +544,7 @@ class InferenceEngine:
 
         _stop = threading.Event()
         with self._shutdown_lock:
-            if self._shutting_down:
+            if self._shutting_down.is_set():
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
@@ -560,18 +558,17 @@ class InferenceEngine:
 
         concurrent = self._pipeline_workers > 1
         infer_lock = threading.Lock() if concurrent else None
+        target = (self._model_meta.input_height, self._model_meta.input_width)
         buffer_pool: PreprocessBufferPool | None = None
         if concurrent:
-            target = (self._model_meta.input_height, self._model_meta.input_width)
             buffer_pool = PreprocessBufferPool(self._pipeline_workers, self._batch_size, target)
 
         def _infer_batch(frames: list[Frame]) -> list[Detection]:
             if concurrent:
-                target_size = (self._model_meta.input_height, self._model_meta.input_width)
                 assert buffer_pool is not None
                 buf = buffer_pool.acquire()
                 try:
-                    tensor = preprocess_into(frames, target_size, buf)
+                    tensor = preprocess_into(frames, target, buf)
                     with infer_lock:  # type: ignore[union-attr]
                         return self._detect_from_tensor(tensor, frames, scratch=None)
                 except Exception:
@@ -587,20 +584,19 @@ class InferenceEngine:
             max_pending = self._pipeline_workers
 
             with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
+                # Pipeline path never uses preprocess_fn — reader returns Frame | None only.
+                # (This is enforced by not passing preprocess_fn= to ThreadedFrameReader above.)
                 while not _stop.is_set():
-                    item = reader.get(timeout=5.0)
-                    # Pipeline path never uses preprocess_fn, so items are always Frame.
-                    if isinstance(item, PreparedItem):
-                        raise TypeError("pipeline path must not use preprocess_fn")
-                    frame: Frame | None = item
+                    raw = reader.get(timeout=5.0)
+                    frame: Frame | None = raw  # type: ignore[assignment]  # pipeline reader never uses preprocess_fn
                     if frame is not None:
                         batch.append(frame)
 
                     if len(batch) >= self._batch_size or (frame is None and batch):
                         if len(pending) >= max_pending:
                             yield from pending.popleft().result()
-                        pending.append(pool.submit(_infer_batch, batch.copy()))
-                        batch.clear()
+                        pending.append(pool.submit(_infer_batch, batch))
+                        batch = []
 
                     if frame is None and reader.is_exhausted:
                         break
@@ -620,7 +616,7 @@ class InferenceEngine:
         """Legacy sequential streaming path (prefetch=False)."""
         _stop = threading.Event()
         with self._shutdown_lock:
-            if self._shutting_down:
+            if self._shutting_down.is_set():
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
@@ -646,7 +642,7 @@ class InferenceEngine:
         with self._shutdown_lock:
             if self._health_state == HealthStatus.CLOSED:
                 return
-            self._shutting_down = True
+            self._shutting_down.set()
             self._health_state = HealthStatus.SHUTTING_DOWN
             # Signal streams inside the lock to close the race: any stream that
             # tries to add its stop-event after this point sees _shutting_down=True

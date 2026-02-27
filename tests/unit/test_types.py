@@ -648,9 +648,9 @@ class TestExportConfigValidation:
         with pytest.raises(ConfigError, match="imgsz"):
             ExportConfig(imgsz=-640)
 
-    def test_dynamic_batch_default_true(self) -> None:
+    def test_dynamic_batch_default_false(self) -> None:
         cfg = ExportConfig()
-        assert cfg.dynamic_batch is True
+        assert cfg.dynamic_batch is False
 
 
 # ---------------------------------------------------------------------------

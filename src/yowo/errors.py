@@ -9,7 +9,8 @@ Hierarchy::
     ├── DependencyError         # Missing optional package
     ├── BackendError            # Backend init/inference failure
     │   ├── BackendLoadError    # Failed to load model into backend
-    │   └── InferenceError      # Runtime inference failure
+    │   ├── InferenceError      # Runtime inference failure
+    │   └── ShutdownError       # Engine is shutting down (subclass of InferenceError)
     ├── DeviceError             # Device not found / OOM
     ├── ModelError
     │   ├── ModelNotFoundError  # .pt or exported file not found
@@ -94,6 +95,10 @@ class InferenceError(BackendError):
     Raised on shape mismatches, OOM during a forward pass, or any other
     error that occurs *during* an inference call.
     """
+
+
+class ShutdownError(InferenceError):
+    """Raised when an operation is rejected because the engine is shutting down."""
 
 
 # ---------------------------------------------------------------------------
@@ -183,15 +188,6 @@ class ConfigError(YowoError):
     Raised during dataclass ``__post_init__`` validation or when a YAML
     config file contains unrecognised keys.
     """
-
-
-# ---------------------------------------------------------------------------
-# Shutdown errors
-# ---------------------------------------------------------------------------
-
-
-class ShutdownError(YowoError):
-    """Raised when an operation is rejected because the engine is shutting down."""
 
 
 __all__ = [

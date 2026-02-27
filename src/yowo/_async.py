@@ -53,7 +53,7 @@ async def astream(
                     break
                 future = asyncio.run_coroutine_threadsafe(q.put(detection), loop)
                 try:
-                    future.result(timeout=4.0)
+                    future.result(timeout=1.0)
                 except Exception:
                     break
         except Exception as exc:
