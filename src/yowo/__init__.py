@@ -18,6 +18,14 @@ from yowo.config import (
     load_config,
     preset_config,
 )
+from yowo.counter import (
+    CountLine,
+    CountResult,
+    CountZone,
+    CrossDirection,
+    LineCrossEvent,
+    ObjectCounter,
+)
 from yowo.engine import InferenceEngine
 from yowo.errors import (
     BackendError,
@@ -34,6 +42,7 @@ from yowo.errors import (
     ShutdownError,
     SourceError,
     SourceTimeoutError,
+    TrackingError,
     YowoError,
 )
 from yowo.events import EventBus
@@ -41,6 +50,14 @@ from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
 from yowo.metrics import EngineMetrics, MetricsCollector
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
+from yowo.tracking import (
+    ByteTracker,
+    TrackedBox,
+    TrackedDetection,
+    TrackState,
+    track_detections,
+    track_stream,
+)
 from yowo.types import (
     IMAGE_EXTS,
     RTSP_SCHEMES,
@@ -69,7 +86,7 @@ from yowo.types import (
     is_free_threaded,
 )
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = [
     "IMAGE_EXTS",
@@ -81,8 +98,13 @@ __all__ = [
     "BackendType",
     "BatchScheduler",
     "BoundingBox",
+    "ByteTracker",
     "CPUArch",
     "ConfigError",
+    "CountLine",
+    "CountResult",
+    "CountZone",
+    "CrossDirection",
     "DependencyError",
     "Detection",
     "DetectionRouter",
@@ -105,6 +127,7 @@ __all__ = [
     "InferenceConfig",
     "InferenceEngine",
     "InferenceError",
+    "LineCrossEvent",
     "MetricsCollector",
     "ModelError",
     "ModelFamily",
@@ -112,6 +135,7 @@ __all__ = [
     "ModelNotFoundError",
     "ModelSize",
     "ModelSpec",
+    "ObjectCounter",
     "Precision",
     "PreprocessedTensor",
     "ShutdownError",
@@ -120,6 +144,10 @@ __all__ = [
     "SourceTimeoutError",
     "StreamState",
     "TaggedFrame",
+    "TrackState",
+    "TrackedBox",
+    "TrackedDetection",
+    "TrackingError",
     "YowoError",
     "__version__",
     "classify_device",
@@ -130,4 +158,6 @@ __all__ = [
     "open_source",
     "preset_config",
     "run_pipeline",
+    "track_detections",
+    "track_stream",
 ]

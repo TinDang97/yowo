@@ -32,7 +32,8 @@ onnx = ["onnxruntime>=1.17"]
 onnx-gpu = ["onnxruntime-gpu>=1.17"]
 openvino = ["openvino>=2024.0"]
 coreml = ["coremltools>=7.0"]
-all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml]"]
+tracking = ["scipy>=1.11"]
+all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml,tracking]"]
 # TensorRT requires manual installation on Linux+NVIDIA GPU:
 # pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 

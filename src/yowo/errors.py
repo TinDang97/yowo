@@ -19,7 +19,8 @@ Hierarchy::
     │   └── ExportUnsupportedError  # Format not supported on this platform
     ├── SourceError             # Cannot open input source
     │   └── SourceTimeoutError  # Stream timed out
-    └── ConfigError             # Invalid configuration
+    ├── ConfigError             # Invalid configuration
+    └── TrackingError           # Object tracking failure
 """
 
 from __future__ import annotations
@@ -190,6 +191,19 @@ class ConfigError(YowoError):
     """
 
 
+# ---------------------------------------------------------------------------
+# Tracking errors
+# ---------------------------------------------------------------------------
+
+
+class TrackingError(YowoError):
+    """Object tracking operation failed.
+
+    Raised when a tracking update encounters an unrecoverable error, such as
+    a corrupt Kalman state or an invalid detection passed to ByteTracker.
+    """
+
+
 __all__ = [
     "BackendError",
     "BackendLoadError",
@@ -205,5 +219,6 @@ __all__ = [
     "ShutdownError",
     "SourceError",
     "SourceTimeoutError",
+    "TrackingError",
     "YowoError",
 ]
