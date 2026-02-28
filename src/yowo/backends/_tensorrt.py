@@ -11,6 +11,7 @@ on machines without TensorRT installed.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,12 @@ class TensorRTBackend:
         self._ort: Any = None
         self._kv_zeros: dict[str, NDArray[np.float32]] = {}
         self._kv_zeros_ort: dict[str, Any] = {}
+        # Standard (non-KV) OrtValue path (set in load())
+        self._use_ortvalue: bool = False
+        self._ortvalue_fn: Any = None
+        # Batch dimension info (set in load())
+        self._dynamic_batch: bool = True
+        self._static_batch: int | None = None
 
     # ------------------------------------------------------------------
     # Protocol properties
@@ -117,6 +124,8 @@ class TensorRTBackend:
         self._ort = None
         self._kv_zeros = {}
         self._kv_zeros_ort = {}
+        self._use_ortvalue = False
+        self._ortvalue_fn = None
 
         try:
             import onnxruntime as ort_mod  # type: ignore[import-untyped]
@@ -145,8 +154,10 @@ class TensorRTBackend:
         ]
 
         try:
+            sess_options = self._build_session_options(ort_mod)
             self._session = ort_mod.InferenceSession(
                 str(model_path),
+                sess_options=sess_options,
                 providers=providers,
             )
             inputs = self._session.get_inputs()
@@ -159,8 +170,21 @@ class TensorRTBackend:
                 and isinstance(input_shape[3], int)
             ):
                 self._input_shape = (int(input_shape[2]), int(input_shape[3]))
+            # Detect dynamic vs static batch dimension
+            batch_dim = input_shape[0] if input_shape and len(input_shape) >= 1 else None
+            self._dynamic_batch = not isinstance(batch_dim, int)
+            self._static_batch = int(batch_dim) if isinstance(batch_dim, int) else None
             # Cache output names for run_with_ort_values()
             self._output_names = [o.name for o in self._session.get_outputs()]
+            # OrtValue zero-copy path: TRT backend always has CUDA EP,
+            # so the zero-copy benefit (avoids host→device copy) applies.
+            _active = self._session.get_providers()
+            _has_gpu_ep = any("CUDA" in p or "TensorRT" in p for p in _active)
+            self._use_ortvalue = _has_gpu_ep and hasattr(self._session, "run_with_ort_values")
+            if self._use_ortvalue:
+                from yowo.backends._ortvalue import infer_standard_ortvalue
+
+                self._ortvalue_fn = infer_standard_ortvalue
             # Detect KV cache I/O by inspecting input names
             kv_inputs = [i for i in inputs if i.name.startswith("past_")]
             if kv_inputs:
@@ -216,12 +240,24 @@ class TensorRTBackend:
                 return self._infer_kv_ortvalue(tensor)
             if self._has_kv_io:
                 return self._infer_kv_numpy(tensor)
+            if self._use_ortvalue:
+                return self._infer_standard_ortvalue(tensor)
             outputs = self._session.run(None, {self._input_name: tensor.data})
             return np.asarray(outputs[0], dtype=np.float32)
         except InferenceError:
             raise
         except Exception as exc:
             raise InferenceError(f"TensorRTBackend: inference failed: {exc}") from exc
+
+    def _infer_standard_ortvalue(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """Standard inference using OrtValue for zero-copy input wrapping."""
+        return self._ortvalue_fn(
+            self._ort,
+            self._session,
+            self._input_name,
+            self._output_names,
+            tensor,
+        )
 
     def _infer_kv_numpy(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """KV-cache inference using numpy arrays (fallback path)."""
@@ -277,6 +313,15 @@ class TensorRTBackend:
         if self._session is None:
             return
 
+        if not self._dynamic_batch and batch_size > (self._static_batch or 1):
+            logger.warning(
+                "TensorRTBackend: model has static batch=%d but requested batch=%d; "
+                "inference may fail for batch > %d",
+                self._static_batch or 1,
+                batch_size,
+                self._static_batch or 1,
+            )
+
         try:
             h, w = self._input_shape
             dummy = np.zeros((batch_size, 3, h, w), dtype=np.float32)
@@ -294,6 +339,25 @@ class TensorRTBackend:
                     self._session.run(None, {self._input_name: dummy})
         except Exception as exc:
             logger.debug("TensorRTBackend: warmup failed (non-fatal): %s", exc)
+
+    def _build_session_options(self, ort: object) -> Any:
+        """Build ORT session options with graph optimization and thread tuning.
+
+        Mirrors :py:meth:`OnnxBackend._build_session_options` so the CUDA EP
+        fallback benefits from identical optimisations (ORT_ENABLE_ALL, memory
+        pattern/reuse, thread caps).
+        """
+        import onnxruntime as ort_mod  # type: ignore[import-untyped]
+
+        opts = ort_mod.SessionOptions()
+        opts.graph_optimization_level = ort_mod.GraphOptimizationLevel.ORT_ENABLE_ALL
+        cpu_count = os.cpu_count() or 1
+        opts.intra_op_num_threads = max(1, cpu_count // 2)
+        opts.inter_op_num_threads = max(1, cpu_count // 4)
+        opts.enable_mem_pattern = True
+        opts.enable_mem_reuse = True
+        opts.execution_mode = ort_mod.ExecutionMode.ORT_SEQUENTIAL
+        return opts
 
 
 # ---------------------------------------------------------------------------

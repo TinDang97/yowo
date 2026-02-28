@@ -387,3 +387,255 @@ class TestStreamingConfig:
         monkeypatch.setenv("YOWO_MAX_QUEUE_SIZE", "0")
         with pytest.raises(ConfigError, match="max_queue_size"):
             load_config()
+
+    def test_env_metrics_enabled_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_METRICS_ENABLED", "false")
+        cfg = load_config()
+        assert cfg.metrics_enabled is False
+
+    def test_env_metrics_enabled_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_METRICS_ENABLED", "1")
+        cfg = load_config()
+        assert cfg.metrics_enabled is True
+
+    def test_env_error_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("YOWO_ERROR_THRESHOLD", "3")
+        cfg = load_config()
+        assert cfg.error_threshold == 3
+
+
+# ---------------------------------------------------------------------------
+# error_threshold validation
+# ---------------------------------------------------------------------------
+
+
+class TestErrorThresholdValidation:
+    def test_error_threshold_zero_raises(self) -> None:
+        with pytest.raises(ConfigError, match="error_threshold"):
+            InferenceConfig(error_threshold=0)
+
+    def test_error_threshold_negative_raises(self) -> None:
+        with pytest.raises(ConfigError, match="error_threshold"):
+            InferenceConfig(error_threshold=-1)
+
+    def test_error_threshold_one_is_valid(self) -> None:
+        cfg = InferenceConfig(error_threshold=1)
+        assert cfg.error_threshold == 1
+
+
+# ---------------------------------------------------------------------------
+# classify_source
+# ---------------------------------------------------------------------------
+
+
+class TestClassifySource:
+    def test_image_jpg(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("photo.jpg") == SourceCategory.IMAGE
+
+    def test_image_png(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("photo.png") == SourceCategory.IMAGE
+
+    def test_video_mp4(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("clip.mp4") == SourceCategory.VIDEO
+
+    def test_video_avi(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("clip.avi") == SourceCategory.VIDEO
+
+    def test_rtsp_stream(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("rtsp://host/stream") == SourceCategory.LIVE_STREAM
+
+    def test_webcam_index_zero(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("0") == SourceCategory.LIVE_STREAM
+
+    def test_webcam_index_one(self) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source("1") == SourceCategory.LIVE_STREAM
+
+    def test_directory_is_image(self, tmp_path: Path) -> None:
+        from yowo.config import classify_source
+        from yowo.types import SourceCategory
+
+        assert classify_source(tmp_path) == SourceCategory.IMAGE
+
+    def test_unknown_extension_raises(self) -> None:
+        from yowo.config import classify_source
+
+        with pytest.raises(ConfigError, match="Cannot classify"):
+            classify_source("data.xyz")
+
+
+# ---------------------------------------------------------------------------
+# classify_device
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyDevice:
+    def test_jetson_device(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = True
+        assert classify_device(hw) == DeviceCategory.JETSON
+
+    def test_cuda_high(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = True
+        hw.primary_gpu.memory_total_mb = 16384
+        assert classify_device(hw) == DeviceCategory.CUDA_HIGH
+
+    def test_cuda_low(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = True
+        hw.primary_gpu.memory_total_mb = 4096
+        assert classify_device(hw) == DeviceCategory.CUDA_LOW
+
+    def test_apple_silicon(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import CPUArch, DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = True
+        hw.cpu.cpu_arch = CPUArch.AARCH64
+        assert classify_device(hw) == DeviceCategory.APPLE_SILICON
+
+    def test_cpu_x86(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import CPUArch, DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = False
+        hw.cpu.cpu_arch = CPUArch.X86_64
+        assert classify_device(hw) == DeviceCategory.CPU_X86
+
+    def test_cpu_arm(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import classify_device
+        from yowo.types import CPUArch, DeviceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = False
+        hw.cpu.cpu_arch = CPUArch.AARCH64
+        assert classify_device(hw) == DeviceCategory.CPU_ARM
+
+
+# ---------------------------------------------------------------------------
+# preset_config
+# ---------------------------------------------------------------------------
+
+
+class TestPresetConfig:
+    def test_returns_inference_config(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import preset_config
+        from yowo.types import CPUArch, SourceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = False
+        hw.cpu.cpu_arch = CPUArch.X86_64
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert isinstance(cfg, InferenceConfig)
+
+    def test_cuda_high_video_uses_batch_4(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import preset_config
+        from yowo.types import SourceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = True
+        hw.primary_gpu.memory_total_mb = 16384
+        cfg = preset_config(hw, SourceCategory.VIDEO)
+        assert cfg.batch_size == 4
+        assert cfg.cache is True
+
+    def test_cuda_high_live_uses_kv_cache(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import preset_config
+        from yowo.types import SourceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = True
+        hw.primary_gpu.memory_total_mb = 16384
+        cfg = preset_config(hw, SourceCategory.LIVE_STREAM)
+        assert cfg.kv_cache is True
+        assert cfg.frame_drop_policy == FrameDropPolicy.LATEST
+
+    def test_overrides_win_over_preset(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import preset_config
+        from yowo.types import CPUArch, SourceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = False
+        hw.cpu.cpu_arch = CPUArch.X86_64
+        cfg = preset_config(hw, SourceCategory.VIDEO, batch_size=8)
+        assert cfg.batch_size == 8
+
+    def test_unknown_override_key_raises(self) -> None:
+        from unittest.mock import MagicMock
+
+        from yowo.config import preset_config
+        from yowo.types import CPUArch, SourceCategory
+
+        hw = MagicMock()
+        hw.is_jetson = False
+        hw.has_nvidia_gpu = False
+        hw.libraries.onnxruntime_has_coreml = False
+        hw.cpu.cpu_arch = CPUArch.X86_64
+        with pytest.raises(ConfigError, match="Unknown InferenceConfig fields"):
+            preset_config(hw, SourceCategory.IMAGE, nonexistent_field=True)

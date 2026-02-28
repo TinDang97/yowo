@@ -20,6 +20,8 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_MAX_QUEUE_SIZE      -> InferenceConfig.max_queue_size
     YOWO_PREFETCH            -> InferenceConfig.prefetch
     YOWO_PIPELINE_WORKERS    -> InferenceConfig.pipeline_workers
+    YOWO_METRICS_ENABLED     -> InferenceConfig.metrics_enabled
+    YOWO_ERROR_THRESHOLD     -> InferenceConfig.error_threshold
 """
 
 from __future__ import annotations
@@ -91,6 +93,10 @@ class InferenceConfig:
         prefetch: Enable threaded frame prefetch in ``stream()``.
         pipeline_workers: Worker thread count for the pipeline. ``0`` means
             auto-detect (2 on free-threaded Python, 1 otherwise).
+        metrics_enabled: Collect latency, throughput, and error metrics.
+            Disable to save ~2µs per frame on extremely latency-sensitive paths.
+        error_threshold: Number of cumulative errors before ``engine.health``
+            transitions to ``DEGRADED``. Must be >= 1.
     """
 
     model_family: ModelFamily = ModelFamily.YOLO26
@@ -109,6 +115,8 @@ class InferenceConfig:
     max_queue_size: int = 2
     prefetch: bool = True
     pipeline_workers: int = 0
+    metrics_enabled: bool = True
+    error_threshold: int = 10
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.confidence_threshold <= 1.0):
@@ -123,6 +131,8 @@ class InferenceConfig:
             raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
         if self.pipeline_workers < 0:
             raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
+        if self.error_threshold < 1:
+            raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +153,11 @@ class ExportConfig:
         target_format: Output format for the exported artifact.
         precision: Numerical precision of the exported artifact.
         dynamic_batch: Enable dynamic batch dimension in the ONNX graph.
-            Has no effect for TensorRT or OpenVINO exports.
+            Disabled by default. Has no effect for TensorRT or OpenVINO exports.
+        batch_sizes: Pre-compiled batch sizes for CoreML EnumeratedShapes
+            export. When provided, CoreML will pre-compile optimized kernels
+            for each listed batch size. ``None`` means fixed batch=1.
+            Only applies to CoreML exports.
         output_dir: Directory where exported artifacts are written.
             Defaults to ``~/.yowo/models``.
         imgsz: Input image size (square). Must match training configuration.
@@ -157,6 +171,7 @@ class ExportConfig:
     target_format: ExportFormat = ExportFormat.ONNX
     precision: Precision = Precision.FP16
     dynamic_batch: bool = False
+    batch_sizes: list[int] | None = None
     output_dir: Path = field(default_factory=lambda: Path.home() / ".yowo" / "models")
     imgsz: int = 640
     calibration_data: str | None = None
@@ -169,6 +184,12 @@ class ExportConfig:
             )
         if self.imgsz <= 0:
             raise ConfigError(f"imgsz must be > 0, got {self.imgsz}")
+        if self.batch_sizes is not None:
+            if not self.batch_sizes:
+                raise ConfigError("batch_sizes must not be empty")
+            if any(b <= 0 for b in self.batch_sizes):
+                raise ConfigError("batch_sizes values must be > 0")
+            self.batch_sizes = sorted(set(self.batch_sizes))
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +233,10 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.prefetch = v.lower() in ("true", "1", "yes")
     if (v := env.get("YOWO_PIPELINE_WORKERS")) is not None:
         cfg.pipeline_workers = int(v)
+    if (v := env.get("YOWO_METRICS_ENABLED")) is not None:
+        cfg.metrics_enabled = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_ERROR_THRESHOLD")) is not None:
+        cfg.error_threshold = int(v)
 
 
 def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
@@ -239,6 +264,7 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
         "batch_size",
         "max_queue_size",
         "pipeline_workers",
+        "error_threshold",
     ):
         if int_field in data and data[int_field] is not None:
             kwargs[int_field] = int(data[int_field])
@@ -247,7 +273,7 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
         if float_field in data:
             kwargs[float_field] = float(data[float_field])
 
-    for bool_field in ("prefetch", "cache", "kv_cache"):
+    for bool_field in ("prefetch", "cache", "kv_cache", "metrics_enabled"):
         if bool_field in data:
             kwargs[bool_field] = bool(data[bool_field])
 

@@ -11,16 +11,32 @@ import logging
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from yowo.types import Frame, FrameDropPolicy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from yowo.io._source import FrameSource
+    from yowo.types import PreprocessedTensor
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ThreadedFrameReader"]
+__all__ = ["PreparedItem", "ThreadedFrameReader"]
+
+
+@dataclass(slots=True)
+class PreparedItem:
+    """A frame that has been preprocessed in the reader thread.
+
+    Bundles the ``PreprocessedTensor`` (ready for ``backend.infer()``) with the
+    original ``Frame`` (needed by ``postprocess()`` for ``Detection.frame``).
+    """
+
+    tensor: PreprocessedTensor
+    frame: Frame
 
 
 class ThreadedFrameReader:
@@ -38,6 +54,10 @@ class ThreadedFrameReader:
     All shared state is protected by ``threading.Lock`` + ``threading.Condition``.
     Safe on both GIL and free-threaded Python 3.14t (PEP 703).
 
+    When ``preprocess_fn`` and ``target_size`` are both provided, the reader
+    thread applies preprocessing (resize + blobFromImages) **before** enqueueing,
+    overlapping CPU work with inference on the main thread.
+
     Example::
 
         with ThreadedFrameReader(source, max_queue_size=2, policy=FrameDropPolicy.LATEST) as reader:
@@ -48,6 +68,7 @@ class ThreadedFrameReader:
 
     __slots__ = (
         "_deque",
+        "_enqueue_seq",
         "_error",
         "_exhausted",
         "_frames_dropped",
@@ -57,8 +78,10 @@ class ThreadedFrameReader:
         "_not_empty",
         "_not_full",
         "_policy",
+        "_preprocess_fn",
         "_source",
         "_stop_event",
+        "_target_size",
         "_thread",
     )
 
@@ -67,13 +90,19 @@ class ThreadedFrameReader:
         source: FrameSource,
         max_queue_size: int = 2,
         policy: FrameDropPolicy = FrameDropPolicy.NONE,
+        *,
+        preprocess_fn: Callable[[list[Frame], tuple[int, int]], PreprocessedTensor] | None = None,
+        target_size: tuple[int, int] | None = None,
     ) -> None:
         if max_queue_size < 1:
             raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size}")
         self._source = source
         self._max_size = max_queue_size
         self._policy = policy
-        self._deque: deque[Frame] = deque()
+        self._preprocess_fn = preprocess_fn
+        self._target_size = target_size
+        self._deque: deque[Frame | PreparedItem] = deque()
+        self._enqueue_seq: int = 0
         self._lock = threading.Lock()
         self._not_empty: threading.Condition = threading.Condition(self._lock)
         self._not_full: threading.Condition = threading.Condition(self._lock)
@@ -94,26 +123,47 @@ class ThreadedFrameReader:
             for frame in self._source:
                 if self._stop_event.is_set():
                     break
+
+                # Optional preprocessing: runs OUTSIDE the lock to avoid
+                # blocking the consumer while CPU-bound resize executes.
+                item: Frame | PreparedItem
+                if self._preprocess_fn is not None and self._target_size is not None:
+                    # Snapshot the sequence counter before CPU-bound work so we
+                    # can detect if a newer frame was enqueued while we were
+                    # preprocessing (only relevant for LATEST drop policy).
+                    seq_before = self._enqueue_seq
+                    tensor = self._preprocess_fn([frame], self._target_size)
+                    item = PreparedItem(tensor=tensor, frame=frame)
+                else:
+                    seq_before = None
+                    item = frame
+
                 with self._not_empty:
                     self._frames_read += 1
                     if self._policy == FrameDropPolicy.LATEST:
+                        # If a newer frame was already enqueued while we were
+                        # preprocessing, this item is stale — drop it.
+                        if seq_before is not None and self._enqueue_seq != seq_before:
+                            self._frames_dropped += 1
+                            continue
                         # Drop everything queued; keep only this latest frame.
                         dropped = len(self._deque)
                         self._deque.clear()
                         self._frames_dropped += dropped
-                        self._deque.append(frame)
+                        self._deque.append(item)
+                        self._enqueue_seq += 1
                         self._not_empty.notify()
                     elif self._policy == FrameDropPolicy.SKIP_OLDEST:
                         if len(self._deque) >= self._max_size:
                             self._deque.popleft()
                             self._frames_dropped += 1
-                        self._deque.append(frame)
+                        self._deque.append(item)
                         self._not_empty.notify()
                     else:  # FrameDropPolicy.NONE — backpressure
                         while len(self._deque) >= self._max_size and not self._stop_event.is_set():
                             self._not_full.wait(timeout=0.05)
                         if not self._stop_event.is_set():
-                            self._deque.append(frame)
+                            self._deque.append(item)
                             self._not_empty.notify()
         except Exception as exc:
             with self._not_empty:
@@ -142,24 +192,28 @@ class ThreadedFrameReader:
         )
         self._thread.start()
 
-    def get(self, timeout: float = 1.0) -> Frame | None:
-        """Get the next frame from the queue.
+    def get(self, timeout: float = 1.0) -> Frame | PreparedItem | None:
+        """Get the next item from the queue.
 
-        Blocks until a frame is available, the source is exhausted, or
+        Blocks until an item is available, the source is exhausted, or
         ``timeout`` seconds pass. Returns ``None`` only when the source is
         fully consumed (``is_exhausted`` is True and the queue is empty).
-        Returns ``None`` on timeout as well — callers that need to distinguish
+        Returns ``None`` on timeout as well --- callers that need to distinguish
         timeout from exhaustion should check ``is_exhausted`` after receiving
         ``None``.
 
+        When the reader was created with ``preprocess_fn`` and ``target_size``,
+        items are ``PreparedItem`` instances; otherwise plain ``Frame`` objects.
+
         Args:
-            timeout: Maximum seconds to wait for the next frame.
+            timeout: Maximum seconds to wait for the next item.
 
         Returns:
-            A ``Frame``, or ``None`` when the source is exhausted or on timeout.
+            A ``Frame``, a ``PreparedItem``, or ``None`` when exhausted / timed out.
 
         Raises:
-            Exception: Any exception raised by the underlying ``FrameSource``.
+            Exception: Any exception raised by the underlying ``FrameSource``
+                or by ``preprocess_fn``.
         """
         with self._not_empty:
             deadline = time.monotonic() + timeout
@@ -171,9 +225,9 @@ class ThreadedFrameReader:
             if self._error is not None:
                 raise self._error
             if self._deque:
-                frame = self._deque.popleft()
+                item = self._deque.popleft()
                 self._not_full.notify()
-                return frame
+                return item
             return None  # exhausted or timed out
 
     def stop(self) -> None:

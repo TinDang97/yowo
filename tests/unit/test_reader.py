@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-from yowo.io._reader import ThreadedFrameReader
-from yowo.types import Frame, FrameDropPolicy
+from yowo.io._reader import PreparedItem, ThreadedFrameReader
+from yowo.types import Frame, FrameDropPolicy, PreprocessedTensor
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -290,3 +291,140 @@ class TestCounters:
         reader.stop()
         assert result is None  # timed out
         assert elapsed < 0.5  # wall clock: should not overshoot
+
+
+class TestPreprocessInReaderThread:
+    """Tests for optional preprocess_fn in ThreadedFrameReader."""
+
+    def _make_preprocess_fn(
+        self,
+    ) -> tuple[MagicMock, PreprocessedTensor]:
+        """Return a mock preprocess_fn and the tensor it will produce."""
+        fake_tensor = PreprocessedTensor(
+            data=np.zeros((1, 3, 640, 640), dtype=np.float32),
+            original_shapes=((4, 4),),
+            input_shape=(640, 640),
+            scale_factors=((160.0, 160.0),),
+            pad_offsets=((0, 0),),
+        )
+        mock_fn = MagicMock(return_value=fake_tensor)
+        return mock_fn, fake_tensor
+
+    def test_reader_with_preprocess_fn_returns_prepared_item(self) -> None:
+        """When preprocess_fn+target_size are set, get() yields PreparedItem."""
+        mock_fn, fake_tensor = self._make_preprocess_fn()
+        source = _MockSource(3)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=5,
+            preprocess_fn=mock_fn,
+            target_size=(640, 640),
+        )
+        reader.start()
+        item = reader.get(timeout=2.0)
+        reader.stop()
+        assert isinstance(item, PreparedItem)
+        assert item.tensor is fake_tensor
+        assert isinstance(item.frame, Frame)
+        assert item.frame.frame_index == 0
+
+    def test_reader_without_preprocess_fn_returns_frame(self) -> None:
+        """Without preprocess params, get() returns plain Frame objects."""
+        source = _MockSource(3)
+        reader = ThreadedFrameReader(source, max_queue_size=5)
+        reader.start()
+        item = reader.get(timeout=2.0)
+        reader.stop()
+        assert isinstance(item, Frame)
+        assert item.frame_index == 0
+
+    def test_reader_preprocess_fn_called_with_correct_args(self) -> None:
+        """preprocess_fn receives ([frame], target_size) for each frame."""
+        mock_fn, _ = self._make_preprocess_fn()
+        source = _MockSource(2)
+        target = (640, 640)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=5,
+            preprocess_fn=mock_fn,
+            target_size=target,
+        )
+        reader.start()
+        items: list[Frame | PreparedItem] = []
+        while (item := reader.get(timeout=2.0)) is not None:
+            items.append(item)
+        reader.stop()
+        assert len(items) == 2
+        assert mock_fn.call_count == 2
+        for call_args in mock_fn.call_args_list:
+            args, _ = call_args
+            # First arg is [frame], second is target_size
+            assert len(args[0]) == 1
+            assert isinstance(args[0][0], Frame)
+            assert args[1] == target
+
+    def test_reader_latest_policy_drops_stale_preprocessed_item(self) -> None:
+        """LATEST policy: stale item preprocessed while newer one enqueued is dropped."""
+        import threading
+
+        # preprocess_fn blocks on the first call (simulating slow CPU work)
+        # so a second frame can be read and enqueued while the first preprocesses.
+        gate = threading.Event()
+        call_count = 0
+
+        def _slow_preprocess(frames: list[Frame], target: tuple[int, int]) -> PreprocessedTensor:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Block first call until the gate is released.
+                gate.wait(timeout=5.0)
+            return PreprocessedTensor(
+                data=np.zeros((1, 3, 640, 640), dtype=np.float32),
+                original_shapes=((4, 4),),
+                input_shape=(640, 640),
+                scale_factors=((160.0, 160.0),),
+                pad_offsets=((0, 0),),
+            )
+
+        source = _MockSource(3)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=2,
+            policy=FrameDropPolicy.LATEST,
+            preprocess_fn=_slow_preprocess,
+            target_size=(640, 640),
+        )
+        reader.start()
+
+        # Wait a moment for the reader thread to start preprocessing frame 0.
+        time.sleep(0.05)
+        # Release the gate — frame 0 finishes preprocessing, but frames 1+
+        # may already have advanced the enqueue sequence.
+        gate.set()
+
+        items: list[PreparedItem] = []
+        while (item := reader.get(timeout=2.0)) is not None:
+            assert isinstance(item, PreparedItem)
+            items.append(item)
+        reader.stop()
+
+        # Verify monotonic frame_index ordering — no stale frame delivered
+        # out-of-order due to slow preprocessing of an earlier frame.
+        indices = [it.frame.frame_index for it in items]
+        assert indices == sorted(indices), f"Out-of-order frame indices: {indices}"
+
+    def test_reader_preprocess_error_propagated(self) -> None:
+        """Errors in preprocess_fn propagate via get() like source errors."""
+        mock_fn = MagicMock(side_effect=ValueError("bad preprocess"))
+        source = _MockSource(5)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=5,
+            preprocess_fn=mock_fn,
+            target_size=(640, 640),
+        )
+        reader.start()
+        with pytest.raises(ValueError, match="bad preprocess"):
+            while reader.get(timeout=2.0) is not None:
+                pass
+        reader.stop()

@@ -294,3 +294,31 @@ class TestEdgeCases:
 
         assert collector.stream_errors == {}
         collector.close()
+
+
+class TestCollectorTypeGuard:
+    def test_non_frame_item_raises_type_error(self) -> None:
+        """FrameCollector raises TypeError if reader yields a non-Frame item."""
+        from unittest.mock import MagicMock
+
+        from yowo.io._reader import PreparedItem
+
+        fake_tensor = MagicMock()
+        fake_frame = _make_frame(0)
+        prepared = PreparedItem(tensor=fake_tensor, frame=fake_frame)
+
+        source = _MockSource(1)
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("s0", source)
+
+        # Replace the reader with a mock that returns a PreparedItem.
+        entry = collector._streams["s0"]
+        mock_reader = MagicMock()
+        mock_reader.get.return_value = prepared
+        mock_reader.is_exhausted = False
+        entry.reader = mock_reader
+
+        with pytest.raises(TypeError, match="expects Frame"):
+            next(iter(collector))
+
+        collector.close()

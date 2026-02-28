@@ -254,3 +254,164 @@ class TestPreprocessOptimizations:
         expected_fill = pytest.approx(114.0 / 255.0, abs=2e-3)
         # Top row is entirely in the top padding band.
         assert float(result.data[0, 0, 0, 0]) == expected_fill
+
+
+class TestPreprocessBufferPool:
+    """Tests for the thread-safe PreprocessBufferPool."""
+
+    def test_buffer_pool_acquire_release(self) -> None:
+        """Acquire one buffer and release it without hanging."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        pool.release(buf)
+
+    def test_buffer_pool_distinct_buffers(self) -> None:
+        """Acquiring two buffers from a size-2 pool yields distinct objects."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf1 = pool.acquire()
+        buf2 = pool.acquire()
+
+        assert id(buf1) != id(buf2)
+
+        pool.release(buf1)
+        pool.release(buf2)
+
+    def test_buffer_pool_exhaustion_blocks(self) -> None:
+        """Pool of size 1 blocks a second acquire until the first is released."""
+        import threading
+
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+
+        acquired = threading.Event()
+
+        def _worker() -> None:
+            b = pool.acquire()
+            acquired.set()
+            pool.release(b)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        # Worker should be blocked — event not set after a short wait.
+        assert not acquired.wait(timeout=0.1)
+
+        # Release from main thread unblocks the worker.
+        pool.release(buf)
+        assert acquired.wait(timeout=1.0)
+        t.join(timeout=2.0)
+
+    def test_buffer_pool_reuse(self) -> None:
+        """Released buffer is reused on the next acquire (pool size 1)."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        buf_id = id(buf)
+        pool.release(buf)
+
+        buf2 = pool.acquire()
+        assert id(buf2) == buf_id
+        pool.release(buf2)
+
+    def test_buffer_pool_double_release_raises(self) -> None:
+        """Releasing the same buffer twice raises ValueError."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=2, max_batch=1, target_size=(640, 640))
+        buf = pool.acquire()
+        pool.release(buf)
+
+        with pytest.raises(ValueError, match="not acquired"):
+            pool.release(buf)
+
+    def test_buffer_pool_alien_buffer_raises(self) -> None:
+        """Releasing a buffer not from this pool raises ValueError."""
+        from yowo.io._decode import PreprocessBufferPool
+
+        pool = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640))
+        alien = PreprocessBufferPool(pool_size=1, max_batch=1, target_size=(640, 640)).acquire()
+
+        with pytest.raises(ValueError, match="not acquired"):
+            pool.release(alien)
+
+
+# ---------------------------------------------------------------------------
+# PreprocessBuffer — direct class tests
+# ---------------------------------------------------------------------------
+
+
+class TestPreprocessBuffer:
+    """Direct unit tests for PreprocessBuffer properties and methods."""
+
+    def test_capacity_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(4, (640, 640))
+        assert buf.capacity == 4
+
+    def test_target_size_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(2, (320, 320))
+        assert buf.target_size == (320, 320)
+
+    def test_memory_bytes_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(2, (640, 640))
+        assert buf.memory_bytes == 2 * 640 * 640 * 3
+
+    def test_get_staging_returns_ndarray(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        arr = buf.get_staging(0)
+        assert arr.shape == (640, 640, 3)
+        assert arr.dtype == np.uint8
+
+    def test_needs_reset_first_use_returns_true(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        assert buf.needs_reset(0, 480, 640, 80, 0) is True
+
+    def test_needs_reset_same_dims_returns_false(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        buf.needs_reset(0, 480, 640, 80, 0)
+        assert buf.needs_reset(0, 480, 640, 80, 0) is False
+
+    def test_needs_reset_different_dims_returns_true(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        buf.needs_reset(0, 480, 640, 80, 0)
+        assert buf.needs_reset(0, 320, 320, 160, 160) is True
+
+    def test_staging_filled_with_letterbox_value(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (100, 100))
+        arr = buf.get_staging(0)
+        # Letterbox fill value is 114
+        assert arr[0, 0, 0] == 114
+
+    def test_multiple_slots_independent(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(3, (640, 640))
+        assert buf.needs_reset(0, 480, 640, 80, 0) is True
+        assert buf.needs_reset(1, 480, 640, 80, 0) is True
+        # Slot 0 cached, slot 1 cached
+        assert buf.needs_reset(0, 480, 640, 80, 0) is False
+        assert buf.needs_reset(1, 480, 640, 80, 0) is False
+        # Slot 2 never used
+        assert buf.needs_reset(2, 480, 640, 80, 0) is True

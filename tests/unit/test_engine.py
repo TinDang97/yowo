@@ -189,7 +189,8 @@ class TestContextManager:
             engine.close()  # must not raise
 
         assert not engine.is_loaded
-        assert mock_backend.unload.call_count == 2
+        # close() is idempotent: second call returns immediately without re-unloading.
+        assert mock_backend.unload.call_count == 1
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 [project]
 name = "yowo"
-version = "2.0.0"
+version = "2.1.0"
 description = "Production YOLO inference and export library for edge and cloud deployment"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,7 +32,8 @@ onnx = ["onnxruntime>=1.17"]
 onnx-gpu = ["onnxruntime-gpu>=1.17"]
 openvino = ["openvino>=2024.0"]
 coreml = ["coremltools>=7.0"]
-all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml]"]
+tracking = ["scipy>=1.11"]
+all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml,tracking]"]
 # TensorRT requires manual installation on Linux+NVIDIA GPU:
 # pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 
@@ -42,6 +43,7 @@ yowo = "yowo.cli._main:cli"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "pytest-mock>=3.14",
     "ruff==0.9.10",
@@ -89,6 +91,7 @@ reportMissingTypeArgument = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (require GPU, large models)",
     "integration: marks tests that need full hardware setup",

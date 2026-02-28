@@ -55,6 +55,12 @@ yowo detect rtsp://camera-ip:554/stream --model yolo26n --confidence 0.4
 # Save detections to JSON
 yowo detect ./images/ --model yolo11s --output detections.json
 
+# Track objects with persistent IDs (ByteTrack)
+yowo track video.mp4 --model yolo26n
+
+# Count objects crossing a line or occupying zones
+yowo count video.mp4 --model yolo26n --line --zone --json
+
 # Show hardware and installed backends
 yowo info
 
@@ -322,6 +328,90 @@ meta = export_model(
 
 ---
 
+## Track
+
+ByteTrack multi-object tracking with persistent IDs across frames. Two-stage IoU association with Kalman filter prediction.
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.tracking import ByteTracker, track_stream
+
+tracker = ByteTracker(
+    track_high_thresh=0.3,   # stage-1 confidence threshold
+    track_low_thresh=0.1,    # stage-2 low-confidence recovery
+    match_thresh=0.8,        # IoU matching threshold
+    max_age=30,              # frames before track removal
+    min_hits=3,              # hits before track confirmation
+)
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        for box in tracked.boxes:
+            print(f"ID:{box.track_id} {box.class_name} {box.confidence:.2f} confirmed={box.is_confirmed}")
+        print(f"Active: {tracker.active_track_count}, Lost: {tracker.lost_track_count}")
+```
+
+Optional scipy acceleration for the Hungarian algorithm:
+
+```bash
+pip install yowo[tracking]  # installs scipy
+```
+
+---
+
+## Count
+
+Zone occupancy and line-crossing counting built on top of tracking.
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.counter import ObjectCounter, CrossDirection
+from yowo.tracking import ByteTracker, track_stream
+from yowo.utils import make_half_zones, make_center_line
+
+# Create counting geometry
+zones = list(make_half_zones(1280, 720))    # top/bottom halves
+line = make_center_line(1280, 720)          # horizontal center line
+
+tracker = ByteTracker()
+counter = ObjectCounter(zones=zones, lines=[line])
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        counter.update(tracked)
+
+# Results
+for zone_id, counts in counter.zone_counts.items():
+    print(f"{zone_id}: {dict(counts)}")
+
+for line_id, dirs in counter.line_totals.items():
+    in_count = dirs.get(CrossDirection.IN, 0)
+    out_count = dirs.get(CrossDirection.OUT, 0)
+    print(f"{line_id}: IN={in_count} OUT={out_count}")
+```
+
+---
+
+## Annotate
+
+Reusable drawing utilities for detection, tracking, and counting overlays.
+
+```python
+from yowo.utils import (
+    draw_bounding_boxes,     # class-colored detection boxes
+    draw_tracked_boxes,      # track-colored boxes with IDs
+    draw_zones,              # semi-transparent zone polygons
+    draw_count_lines,        # counting line overlays
+    draw_text_panel,         # translucent stats panel
+    make_half_zones,         # zone factory
+    make_center_line,        # line factory
+)
+```
+
+See [`examples/annotated_video.py`](examples/annotated_video.py) for a complete annotated video pipeline.
+
+---
+
 ## Export
 
 Export `.pt` weights to an optimized format for your target hardware.
@@ -507,12 +597,15 @@ except YowoError as e:
 | core | [`src/yowo/`](src/yowo/README.md) | `InferenceEngine`, public API surface, `engine.py`, `config.py`, `types.py`, `errors.py` |
 | arch | [`src/yowo/arch/`](src/yowo/arch/README.md) | Native YOLO11 and YOLO26 PyTorch — backbone, FPN-PAN neck, detection head, scaling, weight loading |
 | backends | [`src/yowo/backends/`](src/yowo/backends/README.md) | Inference backend implementations (TensorRT, ONNX, OpenVINO, PyTorch) and automatic priority-chain selection |
-| cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `export`, `info`, `models` commands |
+| cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `export`, `info`, `models`, `track`, `count` commands |
+| counter | `src/yowo/counter/` | Zone occupancy (ray-casting PIP) and line-crossing counting (cross-product sign test) |
 | export | [`src/yowo/export/`](src/yowo/export/README.md) | Export `.pt` weights to ONNX / TensorRT / OpenVINO with calibration, metadata sidecar, and output validation |
 | hardware | [`src/yowo/hardware/`](src/yowo/hardware/README.md) | One-time hardware detection (GPU, CPU arch, installed libs), cached for session lifetime |
 | io | [`src/yowo/io/`](src/yowo/io/README.md) | Frame sources (image, video, RTSP, directory), batch preprocessing, output sinks |
 | models | [`src/yowo/models/`](src/yowo/models/README.md) | Model family / size registry, weight download, and `~/.cache/yowo/weights/` cache management |
 | postprocess | [`src/yowo/postprocess/`](src/yowo/postprocess/README.md) | Decode raw backend tensors into `Detection` objects; NMS for backends that return raw proposals |
+| tracking | `src/yowo/tracking/` | ByteTrack multi-object tracking — Kalman filter, two-stage IoU association, persistent track IDs |
+| utils | `src/yowo/utils/` | Reusable drawing/annotation utilities — palettes, bounding boxes, zones, lines, text panels, factories |
 
 ---
 
@@ -547,6 +640,7 @@ Architecture and module contracts are documented in:
 | [Native Architecture Inference Optimization — all 10 variants](docs/experiments/2026-02-24-arch-inference-optimization-benchmark.md) | DFL buffer, in-place sigmoid, stride flag, anchor cache applied to `arch/`. YOLO26 family 10-17% faster than ultralytics baseline; YOLO11 family 1-4% faster. Box IoU vs ultralytics: 0.967-0.995. 9/10 variants faster, avg 1.07x. |
 | [ONNX + CoreML EP + MPS Optimization](docs/experiments/2026-02-24-onnx-coreml-optimization-benchmark.md) | CoreML EP auto-detection for Apple Neural Engine: **4.36x avg faster** than PyTorch across all 10 variants (nano 140-188 FPS, XL 27-29 FPS). MPS (Metal GPU): 1.32x avg faster than ultralytics. KV cache analysis: +12% on CPU PyTorch (block cache), negligible on GPU/CoreML. |
 | [Phase 3 Source-Aware Pipeline](docs/experiments/2026-02-25-phase3-source-aware-pipeline-benchmark.md) | Source-aware dispatch (`_stream_live` / `_stream_pipeline`), `ThreadedFrameReader`, `FrameDropPolicy`, pre-allocated I/O buffers. CoreML 3.5–3.75× faster than PyTorch on offline video. Free-threaded Python 3.13t: `pipeline_workers=2` auto-selected → **58.4 FPS vs 39.3 FPS (1.49×)** on YOLO26n. |
+| [ByteTrack + ObjectCounter Annotated Video](docs/experiments/2026-02-28-bytetrack-counter-annotated-video-benchmark.md) | Full detect→track→count→annotate pipeline on 928-frame traffic video. ONNX+CoreML: YOLO26n **82 FPS**, YOLO26x 21 FPS. PyTorch+MPS: YOLO26s **63 FPS** (9% faster than CoreML for small models). CoreML wins 4/5 variants (up to 1.32×). ByteTrack overhead 0.3–0.7ms (1.3–5.2%). |
 
 ---
 

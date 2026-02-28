@@ -9,7 +9,8 @@ Hierarchy::
     ├── DependencyError         # Missing optional package
     ├── BackendError            # Backend init/inference failure
     │   ├── BackendLoadError    # Failed to load model into backend
-    │   └── InferenceError      # Runtime inference failure
+    │   ├── InferenceError      # Runtime inference failure
+    │   └── ShutdownError       # Engine is shutting down (subclass of InferenceError)
     ├── DeviceError             # Device not found / OOM
     ├── ModelError
     │   ├── ModelNotFoundError  # .pt or exported file not found
@@ -18,7 +19,8 @@ Hierarchy::
     │   └── ExportUnsupportedError  # Format not supported on this platform
     ├── SourceError             # Cannot open input source
     │   └── SourceTimeoutError  # Stream timed out
-    └── ConfigError             # Invalid configuration
+    ├── ConfigError             # Invalid configuration
+    └── TrackingError           # Object tracking failure
 """
 
 from __future__ import annotations
@@ -94,6 +96,10 @@ class InferenceError(BackendError):
     Raised on shape mismatches, OOM during a forward pass, or any other
     error that occurs *during* an inference call.
     """
+
+
+class ShutdownError(InferenceError):
+    """Raised when an operation is rejected because the engine is shutting down."""
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +191,19 @@ class ConfigError(YowoError):
     """
 
 
+# ---------------------------------------------------------------------------
+# Tracking errors
+# ---------------------------------------------------------------------------
+
+
+class TrackingError(YowoError):
+    """Object tracking operation failed.
+
+    Raised when a tracking update encounters an unrecoverable error, such as
+    a corrupt Kalman state or an invalid detection passed to ByteTracker.
+    """
+
+
 __all__ = [
     "BackendError",
     "BackendLoadError",
@@ -197,7 +216,9 @@ __all__ = [
     "ModelError",
     "ModelLoadError",
     "ModelNotFoundError",
+    "ShutdownError",
     "SourceError",
     "SourceTimeoutError",
+    "TrackingError",
     "YowoError",
 ]

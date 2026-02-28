@@ -11,6 +11,7 @@ as logically immutable — callers must not mutate their contents.
 from __future__ import annotations
 
 import enum
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +114,23 @@ class StreamState(enum.StrEnum):
     ERROR = "error"
 
 
+class HealthStatus(enum.StrEnum):
+    """Engine health state, derived from runtime metrics and lifecycle.
+
+    Transitions:
+        STARTING → READY (after load())
+        READY → DEGRADED (error rate ≥ threshold or stream idle >30s)
+        READY | DEGRADED → SHUTTING_DOWN (during close())
+        SHUTTING_DOWN → CLOSED (after close() completes)
+    """
+
+    STARTING = "starting"
+    READY = "ready"
+    DEGRADED = "degraded"
+    SHUTTING_DOWN = "shutting_down"
+    CLOSED = "closed"
+
+
 class SourceCategory(enum.StrEnum):
     """Input source classification for preset selection."""
 
@@ -200,6 +218,18 @@ class BoundingBox:
         """Coordinates as a plain (x1, y1, x2, y2) tuple."""
         return (self.x1, self.y1, self.x2, self.y2)
 
+    def to_dict(self) -> dict[str, float | int | str]:
+        """Serialize to a plain dict with JSON-safe primitive values."""
+        return {
+            "x1": self.x1,
+            "y1": self.y1,
+            "x2": self.x2,
+            "y2": self.y2,
+            "confidence": self.confidence,
+            "class_id": self.class_id,
+            "class_name": self.class_name,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Detection:
@@ -229,6 +259,31 @@ class Detection:
     def has_detections(self) -> bool:
         """True when at least one bounding box is present."""
         return len(self.boxes) > 0
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-safe dict.
+
+        Pixel data (``frame.pixels``) and local paths
+        (``model_spec.weights_path``) are excluded — only portable metadata
+        is included so the result is safe for logging and wire transport.
+        """
+        return {
+            "source_id": self.frame.source_id,
+            "frame_index": self.frame.frame_index,
+            "timestamp_ms": self.frame.timestamp_ms,
+            "inference_time_ms": self.inference_time_ms,
+            "backend": str(self.backend),
+            "model": f"{self.model_spec.family.value}{self.model_spec.size.value}",
+            "boxes": [box.to_dict() for box in self.boxes],
+        }
+
+    def to_json(self, *, indent: int | None = None) -> str:
+        """Serialize to a JSON string.
+
+        All values in ``to_dict()`` are JSON-safe primitives, so no custom
+        encoder is required.
+        """
+        return json.dumps(self.to_dict(), indent=indent)
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,6 +449,7 @@ __all__ = [
     "Frame",
     "FrameDropPolicy",
     "GPUArch",
+    "HealthStatus",
     "ModelFamily",
     "ModelSize",
     "ModelSpec",

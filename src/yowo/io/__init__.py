@@ -7,6 +7,7 @@ Exports:
     preprocess           — convert list[Frame] -> PreprocessedTensor.
     preprocess_into      — like preprocess() but reuses pre-allocated buffers.
     PreprocessBuffer     — reusable staging buffers for letterbox preprocessing.
+    PreprocessBufferPool — thread-safe pool of PreprocessBuffer for concurrent workers.
     make_tensor_meta     — extract TensorMeta from a PreprocessedTensor.
     write_json           — serialize Detection list to JSON.
     write_annotated_frames — draw boxes on frames and save as JPEG.
@@ -15,18 +16,21 @@ Exports:
 
 from yowo.io._decode import (
     PreprocessBuffer,
+    PreprocessBufferPool,
     TensorMeta,
     make_tensor_meta,
     preprocess,
     preprocess_into,
 )
-from yowo.io._reader import ThreadedFrameReader
+from yowo.io._reader import PreparedItem, ThreadedFrameReader
 from yowo.io._sink import write_annotated_frame, write_annotated_frames, write_json
 from yowo.io._source import FrameSource, open_source
 
 __all__ = [
     "FrameSource",
+    "PreparedItem",
     "PreprocessBuffer",
+    "PreprocessBufferPool",
     "TensorMeta",
     "ThreadedFrameReader",
     "make_tensor_meta",

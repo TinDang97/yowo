@@ -74,11 +74,12 @@ yowo export <model>
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--format` | `onnx` | Target format: `onnx \| tensorrt \| openvino` |
+| `--format` | `onnx` | Target format: `onnx \| tensorrt \| openvino \| coreml` |
 | `--precision` | `fp16` | `fp32 \| fp16 \| int8` |
 | `--calibration-data` | none | Required for `--precision int8`: path to image directory or calibration YAML |
 | `--output-dir` | `~/.yowo/exports/` | Destination directory for exported model and sidecar |
-| `--dynamic-batch` | false | Export with dynamic batch dimension (ONNX/TensorRT) |
+| `--dynamic-batch` | true | Export with dynamic batch dimension (ONNX/TensorRT). Use `--no-dynamic-batch` to disable |
+| `--batch-sizes` | none | Comma-separated batch sizes for CoreML EnumeratedShapes (e.g. `1,4,8`) |
 | `--json` | false | Print `ExportResult` as JSON to stdout |
 
 `<model>` is a model name in `{family}{size}` format, e.g. `yolo26n`.
