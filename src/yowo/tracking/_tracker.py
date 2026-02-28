@@ -156,7 +156,7 @@ class ByteTracker:
             cost2 = iou_distance(unmatched_tracked, low_arr)
             matches2, still_unmatched_idxs, _ = linear_assignment(cost2, self._stage2_thresh)
             for ti, di in matches2:
-                unmatched_tracked[ti].re_activate(
+                unmatched_tracked[ti].update(
                     low_boxes[di], low_confs[di], low_cls_ids[di], low_cls_names[di], frame_id
                 )
             for idx in still_unmatched_idxs:

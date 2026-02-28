@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
+from yowo.errors import TrackingError, YowoError
 from yowo.tracking import track_detections, track_stream
 from yowo.tracking._kalman import KalmanFilterXYAH
 from yowo.tracking._matching import (
@@ -514,3 +516,302 @@ class TestSerialization:
             is_confirmed=True,
         )
         assert abs(tb.area - 10000.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Section 7: Validation & edge-case coverage
+# ---------------------------------------------------------------------------
+
+
+class TestByteTrackerValidation:
+    def test_track_low_gte_high_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="track_low_thresh"):
+            ByteTracker(track_low_thresh=0.6, track_high_thresh=0.6)
+
+    def test_track_low_greater_than_high_raises_value_error(self) -> None:
+        with pytest.raises(ValueError, match="track_low_thresh"):
+            ByteTracker(track_low_thresh=0.8, track_high_thresh=0.5)
+
+    def test_new_track_thresh_clamped_to_one(self) -> None:
+        """track_high_thresh=0.95 -> new_track_thresh=1.0, not 1.05."""
+        tracker = ByteTracker(track_high_thresh=0.95, track_low_thresh=0.1, min_hits=1)
+        # conf=0.96 above track_high_thresh=0.95 but below new_track_thresh=1.0
+        box = _make_box(conf=0.96)
+        result = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        assert result.num_boxes == 0
+
+    def test_stage2_low_conf_keeps_track_active(self) -> None:
+        """Low-conf detection matches unmatched tracked track via stage 2."""
+        tracker = ByteTracker(track_high_thresh=0.6, track_low_thresh=0.1, min_hits=1, max_age=10)
+        box = _make_box(conf=0.9)
+        tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        # Frame 1: same position, below high_thresh, above low_thresh → stage 2
+        low_box = _make_box(conf=0.3)
+        tracker.update(_make_detection(boxes=(low_box,), frame_index=1))
+        assert tracker.active_track_count >= 1
+
+    def test_high_conf_below_new_thresh_no_birth(self) -> None:
+        """Detection above high_thresh but below new_track_thresh does not birth a track."""
+        tracker = ByteTracker(track_high_thresh=0.7, track_low_thresh=0.1, min_hits=1)
+        # new_track_thresh = 0.7 + 0.1 = 0.8
+        box = _make_box(conf=0.75)
+        result = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        assert result.num_boxes == 0
+
+
+# ---------------------------------------------------------------------------
+# Section 8: Kalman edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestKalmanFilterEdge:
+    def test_update_cholesky_fallback_degenerate_covariance(self) -> None:
+        """Near-singular covariance triggers inv() fallback without error."""
+        kf = KalmanFilterXYAH()
+        m = KalmanFilterXYAH.xyxy_to_xyah((100.0, 100.0, 200.0, 200.0))
+        mean, _ = kf.initiate(m)
+        cov_degenerate = np.zeros((8, 8), dtype=np.float64)
+        measurement = KalmanFilterXYAH.xyxy_to_xyah((110.0, 110.0, 210.0, 210.0))
+        mean_upd, cov_upd = kf.update(mean, cov_degenerate, measurement)
+        assert mean_upd.shape == (8,)
+        assert cov_upd.shape == (8, 8)
+
+    def test_xyxy_to_xyah_zero_height_box(self) -> None:
+        """Zero-height box uses max(h, 1e-6) guard to avoid division by zero."""
+        xyah = KalmanFilterXYAH.xyxy_to_xyah((50.0, 100.0, 150.0, 100.0))
+        assert np.isfinite(xyah[2])
+        assert abs(xyah[3]) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# Section 9: iou_distance + remove_duplicate_tracks direct tests
+# ---------------------------------------------------------------------------
+
+
+class TestIouDistance:
+    def test_basic(self) -> None:
+        from yowo.tracking._matching import iou_distance
+
+        t = _make_strack(x1=0, y1=0, x2=100, y2=100)
+        t.activate(frame_id=0)
+        dets = np.array([[0.0, 0.0, 100.0, 100.0]], dtype=np.float64)
+        cost = iou_distance([t], dets)
+        assert cost.shape == (1, 1)
+        assert cost[0, 0] < 0.1
+
+    def test_empty_tracks(self) -> None:
+        from yowo.tracking._matching import iou_distance
+
+        dets = np.array([[0.0, 0.0, 100.0, 100.0]], dtype=np.float64)
+        cost = iou_distance([], dets)
+        assert cost.shape == (0, 1)
+
+    def test_empty_detections(self) -> None:
+        from yowo.tracking._matching import iou_distance
+
+        t = _make_strack()
+        t.activate(frame_id=0)
+        dets = np.empty((0, 4), dtype=np.float64)
+        cost = iou_distance([t], dets)
+        assert cost.shape == (1, 0)
+
+
+class TestRemoveDuplicateTracks:
+    def test_empty_a(self) -> None:
+        from yowo.tracking._matching import remove_duplicate_tracks
+
+        t = _make_strack(track_id=1)
+        t.activate(frame_id=0)
+        a, b = remove_duplicate_tracks([], [t])
+        assert a == []
+        assert len(b) == 1
+
+    def test_empty_b(self) -> None:
+        from yowo.tracking._matching import remove_duplicate_tracks
+
+        t = _make_strack(track_id=1)
+        t.activate(frame_id=0)
+        a, b = remove_duplicate_tracks([t], [])
+        assert len(a) == 1
+        assert b == []
+
+    def test_removes_shorter_lived(self) -> None:
+        from yowo.tracking._matching import remove_duplicate_tracks
+
+        t1 = _make_strack(track_id=1)
+        t1.activate(frame_id=0)
+        t1.update((100, 100, 200, 200), 0.9, 0, "person", frame_id=5)
+        t2 = _make_strack(track_id=2)
+        t2.activate(frame_id=4)
+        a, b = remove_duplicate_tracks([t1], [t2])
+        assert len(a) == 1
+        assert len(b) == 0
+
+
+class TestIouBatchEdge:
+    def test_inverted_box_area_clamped(self) -> None:
+        """Boxes with x2 < x1 (Kalman drift) have area clamped to 0."""
+        a = np.array([[100.0, 100.0, 50.0, 50.0]], dtype=np.float64)
+        b = np.array([[0.0, 0.0, 200.0, 200.0]], dtype=np.float64)
+        iou = iou_batch(a, b)
+        assert iou[0, 0] < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Section 10: Munkres fallback
+# ---------------------------------------------------------------------------
+
+
+class TestMunkresFallback:
+    def test_munkres_correct_assignment(self) -> None:
+        from yowo.tracking._matching import _munkres
+
+        cost = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
+        row_ind, col_ind = _munkres(cost)
+        pairs = set(zip(row_ind.tolist(), col_ind.tolist(), strict=True))
+        assert pairs == {(0, 0), (1, 1)}
+
+    def test_hungarian_without_scipy(self, mocker: object) -> None:
+        """Patching _has_scipy=False forces the _munkres path."""
+        import yowo.tracking._matching as match_mod
+
+        mocker.patch.object(match_mod, "_has_scipy", False)  # type: ignore[union-attr]
+        cost = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
+        row_ind, col_ind = match_mod._hungarian(cost)
+        pairs = set(zip(row_ind.tolist(), col_ind.tolist(), strict=True))
+        assert pairs == {(0, 0), (1, 1)}
+
+
+# ---------------------------------------------------------------------------
+# Section 11: STrack re_activate
+# ---------------------------------------------------------------------------
+
+
+class TestSTrackReActivate:
+    def test_re_activate_transitions_to_tracked(self) -> None:
+        t = _make_strack()
+        t.activate(frame_id=0)
+        t.mark_lost()
+        assert t.state == TrackState.LOST
+        t.re_activate((110, 110, 210, 210), 0.85, 1, "car", frame_id=5)
+        assert t.state == TrackState.TRACKED
+        assert t.time_since_update == 0
+        assert t.class_id == 1
+        assert t.class_name == "car"
+        assert t.confidence == 0.85
+        assert t.frame_id == 5
+
+
+# ---------------------------------------------------------------------------
+# Section 12: TrackedDetection/TrackedBox properties
+# ---------------------------------------------------------------------------
+
+
+class TestTrackedDetectionProperties:
+    def test_has_detections_true(self) -> None:
+        tracker = ByteTracker(min_hits=1)
+        result = tracker.update(_make_detection(boxes=(_make_box(conf=0.9),), frame_index=0))
+        assert result.has_detections is True
+
+    def test_has_detections_false(self) -> None:
+        tracker = ByteTracker(min_hits=1)
+        result = tracker.update(_make_detection(boxes=(), frame_index=0))
+        assert result.has_detections is False
+
+    def test_to_dict_keys(self) -> None:
+        tracker = ByteTracker(min_hits=1)
+        result = tracker.update(_make_detection(boxes=(_make_box(conf=0.9),), frame_index=3))
+        d = result.to_dict()
+        for key in (
+            "source_id",
+            "frame_index",
+            "inference_time_ms",
+            "tracking_time_ms",
+            "backend",
+            "model",
+            "boxes",
+        ):
+            assert key in d
+
+    def test_tracked_box_as_xyxy(self) -> None:
+        tb = TrackedBox(
+            x1=10.0,
+            y1=20.0,
+            x2=30.0,
+            y2=40.0,
+            confidence=0.9,
+            class_id=0,
+            class_name="p",
+            track_id=1,
+            is_confirmed=True,
+        )
+        assert tb.as_xyxy == (10.0, 20.0, 30.0, 40.0)
+
+    def test_tracked_box_is_frozen(self) -> None:
+        tb = TrackedBox(
+            x1=0,
+            y1=0,
+            x2=10,
+            y2=10,
+            confidence=0.9,
+            class_id=0,
+            class_name="p",
+            track_id=1,
+            is_confirmed=True,
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            tb.x1 = 99.0  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Section 13: TrackingError
+# ---------------------------------------------------------------------------
+
+
+class TestTrackingError:
+    def test_inherits_from_yowo_error(self) -> None:
+        err = TrackingError("test error")
+        assert isinstance(err, YowoError)
+        assert str(err) == "test error"
+
+    def test_can_be_raised_and_caught(self) -> None:
+        with pytest.raises(TrackingError, match="corrupt state"):
+            raise TrackingError("corrupt state")
+
+
+# ---------------------------------------------------------------------------
+# Section 14: Integration edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationEdge:
+    def test_track_detections_empty_iterable(self) -> None:
+        results = list(track_detections([]))
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Section 15: v2.1.0 top-level exports
+# ---------------------------------------------------------------------------
+
+
+class TestV21Exports:
+    def test_tracking_exports_importable(self) -> None:
+        from yowo import (  # noqa: F401
+            ByteTracker,
+            TrackedBox,
+            TrackedDetection,
+            TrackState,
+            track_detections,
+            track_stream,
+        )
+
+    def test_counter_exports_importable(self) -> None:
+        from yowo import (  # noqa: F401
+            CountLine,
+            CountResult,
+            CountZone,
+            CrossDirection,
+            LineCrossEvent,
+            ObjectCounter,
+        )

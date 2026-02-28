@@ -512,3 +512,75 @@ class TestCountResult:
     def test_plain_box_not_has_track_id(self) -> None:
         box = _make_box()
         assert not isinstance(box, _HasTrackId)
+
+
+# ---------------------------------------------------------------------------
+# Section 8: Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestCounterPropertySnapshots:
+    def test_zone_counts_returns_snapshot(self) -> None:
+        counter = ObjectCounter(zones=[_ZONE])
+        counter.update(_make_detection(boxes=(_make_box(50, 50, 100, 100),)))
+        snapshot = counter.zone_counts
+        snapshot["zone_a"]["person"] = 999
+        assert counter.zone_counts["zone_a"]["person"] == 1
+
+    def test_line_totals_returns_snapshot(self) -> None:
+        counter = ObjectCounter(lines=[_LINE])
+        counter.update(_tracked_det_at(x=50.0, frame_index=0))
+        counter.update(_tracked_det_at(x=150.0, frame_index=1))
+        snapshot = counter.line_totals
+        snapshot["gate"][CrossDirection.IN] = 999
+        assert counter.line_totals["gate"][CrossDirection.IN] == 1
+
+    def test_reset_clears_line_totals(self) -> None:
+        counter = ObjectCounter(lines=[_LINE])
+        counter.update(_tracked_det_at(x=50.0, frame_index=0))
+        counter.update(_tracked_det_at(x=150.0, frame_index=1))
+        assert counter.line_totals["gate"][CrossDirection.IN] == 1
+        counter.reset()
+        assert counter.line_totals["gate"][CrossDirection.IN] == 0
+        assert counter.line_totals["gate"][CrossDirection.OUT] == 0
+
+    def test_cumulative_zone_counts_in_result(self) -> None:
+        counter = ObjectCounter(zones=[_ZONE])
+        box = _make_box(50, 50, 100, 100)
+        counter.update(_make_detection(boxes=(box,), frame_index=0))
+        result = counter.update(_make_detection(boxes=(box,), frame_index=1))
+        assert result.cumulative_zone_counts["zone_a"]["person"] == 2
+
+
+class TestSegmentsIntersectEdge:
+    def test_collinear_with_overlap(self) -> None:
+        assert segments_intersect((0.0, 0.0), (20.0, 0.0), (10.0, 0.0), (30.0, 0.0)) is True
+
+
+class TestLineCrossEventDirect:
+    def test_fields(self) -> None:
+        from yowo.counter._types import LineCrossEvent
+
+        evt = LineCrossEvent(
+            line_id="gate",
+            track_id=5,
+            direction=CrossDirection.IN,
+            class_name="car",
+            frame_index=10,
+            timestamp_ms=1234.5,
+        )
+        assert evt.line_id == "gate"
+        assert evt.track_id == 5
+        assert evt.direction == CrossDirection.IN
+        assert evt.class_name == "car"
+        assert evt.frame_index == 10
+        assert evt.timestamp_ms == 1234.5
+
+
+class TestCountLineValid:
+    def test_valid_construction(self) -> None:
+        line = CountLine("gate", p1=(0.0, 0.0), p2=(100.0, 100.0))
+        assert line.line_id == "gate"
+        assert line.p1 == (0.0, 0.0)
+        assert line.p2 == (100.0, 100.0)
+        assert line.class_filter == frozenset()
