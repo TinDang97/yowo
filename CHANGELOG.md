@@ -15,6 +15,83 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [2.1.0] — 2026-02-28
+
+### Added
+
+- **tracking**: ByteTrack multi-object tracker (`yowo.tracking`). Two-stage IoU
+  association with Kalman filter (XYAH state), lost-track re-association, and
+  velocity zeroing on re-activation. `ByteTracker` class with configurable
+  thresholds (`track_high_thresh`, `track_low_thresh`, `match_thresh`, `max_age`,
+  `min_hits`). `track_stream()` generator wires detection→tracking in a single
+  call. `TrackedDetection` / `TrackedBox` dataclasses with persistent `track_id`
+  and `is_confirmed` flag. Optional scipy acceleration for the Hungarian algorithm
+  (`pip install yowo[tracking]`). Validated against
+  [ifzhang/ByteTrack](https://github.com/ifzhang/ByteTrack) reference implementation.
+
+- **counter**: `ObjectCounter` (`yowo.counter`) — per-class zone occupancy
+  (ray-casting point-in-polygon) and line-crossing counting (cross-product sign
+  test). Thread-safe via `threading.Lock`. Supports multiple zones and lines.
+  `zone_counts`, `line_totals`, `cumulative_counts` properties. `CrossDirection`
+  enum (`IN` / `OUT`). `CountZone` and `CountLine` dataclasses for geometry
+  definition. `_geometry.py` with `point_in_polygon`, `segments_intersect`,
+  `cross_sign`, `box_center` pure functions.
+
+- **utils**: Reusable drawing/annotation utilities (`yowo.utils`). Extracted and
+  consolidated from `examples/`, `tmp/`, and `io/_sink.py`:
+  - `TRACK_PALETTE` (10 colors), `CLASS_PALETTE` (20 colors) — BGR palettes
+  - `color_for_track()`, `color_for_class()` — deterministic color selectors
+  - `draw_bounding_boxes()` — class-colored detection boxes with labels
+  - `draw_tracked_boxes()` — track-colored boxes with `"ID:N class conf"` labels
+  - `draw_zones()` — semi-transparent zone polygon overlays
+  - `draw_count_lines()` — counting line overlays with labels
+  - `draw_text_panel()` — translucent stats/info panel
+  - `make_half_zones()` — top/bottom zone factory
+  - `make_center_line()` — horizontal/vertical line factory
+
+- **cli**: `yowo track SOURCE` — track objects with persistent IDs. `yowo count
+  SOURCE` — count objects with `--zone`, `--line`, `--track`, `--json` flags.
+
+- **engine**: Observable engine — `EventBus` for pub/sub event system,
+  `MetricsCollector` for real-time inference statistics (latency, throughput,
+  histograms), `HealthStatus` for backend health monitoring. Async drain API
+  via `engine.astream()`.
+
+- **backends**: True batch inference for ONNX and CoreML backends. Dynamic batch
+  export via `--dynamic-batch` flag.
+
+### Refactored
+
+- **io**: `write_annotated_frames()` and `write_annotated_frame()` in `_sink.py`
+  now delegate to `yowo.utils.draw_bounding_boxes()` instead of inline cv2 drawing.
+  Removes duplicated 20-color palette and ~60 lines of drawing code.
+
+- **examples**: `annotated_video.py` refactored to use `yowo.utils` imports instead
+  of defining its own 7 drawing/factory functions (~150 lines removed).
+
+### Performance
+
+- **backends**: ORT session opts — `enable_mem_pattern=True`,
+  `enable_mem_reuse=True`, `ORT_SEQUENTIAL`, CoreML `MLComputeUnits: ALL`.
+  Drives 3–14% latency reduction on CoreML EP.
+
+- **engine**: Pipeline overlap via `ThreadPoolExecutor(1)` + deque to overlap
+  `detect()` with batch assembly. Reader-thread preprocess via
+  `ThreadedFrameReader(preprocess_fn=...)`.
+
+### Experiments
+
+- ByteTrack + ObjectCounter annotated video benchmark on 928-frame traffic video.
+  ONNX+CoreML: YOLO26n 82 FPS, YOLO26x 21 FPS. PyTorch+MPS: YOLO26s 63 FPS.
+  CoreML wins 4/5 variants (up to 1.32×). ByteTrack overhead 0.3–0.7ms (1.3–5.2%).
+  See [`docs/experiments/2026-02-28-bytetrack-counter-annotated-video-benchmark.md`](docs/experiments/2026-02-28-bytetrack-counter-annotated-video-benchmark.md).
+
+### Tests
+
+- 1064 unit tests (up from 724 in v2.0.0). 0 pyright errors. 0 ruff errors.
+
+---
+
 ## [2.0.0] — 2026-02-26
 
 ### Added
@@ -314,6 +391,7 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 Initial beta release.
 
+[2.1.0]: https://github.com/TinDang97/yowo/compare/v2.0.0...v2.1.0
 [1.3.1]: https://github.com/TinDang97/yowo/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/TinDang97/yowo/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/TinDang97/yowo/compare/v1.1.1...v1.2.0

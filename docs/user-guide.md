@@ -13,6 +13,8 @@
    - [yowo models](#32-yowo-models)
    - [yowo detect](#33-yowo-detect)
    - [yowo export](#34-yowo-export)
+   - [yowo track](#35-yowo-track)
+   - [yowo count](#36-yowo-count)
 4. [Python API Reference](#4-python-api-reference)
    - [InferenceEngine](#41-inferenceengine)
    - [open_source](#42-open_source)
@@ -28,19 +30,23 @@
    - [run_pipeline](#74-run_pipeline)
    - [Graceful Shutdown](#75-graceful-shutdown)
    - [Stream Health Monitoring](#76-stream-health-monitoring)
-8. [Model Export](#8-model-export)
-9. [Environment Variables](#9-environment-variables)
-10. [YAML Configuration](#10-yaml-configuration)
-11. [Error Reference](#11-error-reference)
-12. [Use Cases](#12-use-cases)
-    - [Traffic Surveillance on Apple Silicon](#121-traffic-surveillance-on-apple-silicon)
-    - [Live RTSP Camera Stream](#122-live-rtsp-camera-stream)
-    - [Custom Fine-Tuned Vehicle Detector](#123-custom-fine-tuned-vehicle-detector)
-    - [Batch Video Processing](#124-batch-video-processing)
-    - [Free-Threaded Python Parallelism](#125-free-threaded-python-parallelism)
-    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#126-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
-    - [Multi-Camera Warehouse Monitoring](#127-multi-camera-warehouse-monitoring)
-13. [Performance Reference](#13-performance-reference)
+8. [Tracking (ByteTrack)](#8-tracking-bytetrack)
+9. [Object Counting](#9-object-counting)
+10. [Annotation Utils](#10-annotation-utils)
+11. [Model Export](#11-model-export)
+12. [Environment Variables](#12-environment-variables)
+13. [YAML Configuration](#13-yaml-configuration)
+14. [Error Reference](#14-error-reference)
+15. [Use Cases](#15-use-cases)
+    - [Traffic Surveillance on Apple Silicon](#151-traffic-surveillance-on-apple-silicon)
+    - [Live RTSP Camera Stream](#152-live-rtsp-camera-stream)
+    - [Custom Fine-Tuned Vehicle Detector](#153-custom-fine-tuned-vehicle-detector)
+    - [Batch Video Processing](#154-batch-video-processing)
+    - [Free-Threaded Python Parallelism](#155-free-threaded-python-parallelism)
+    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#156-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
+    - [Multi-Camera Warehouse Monitoring](#157-multi-camera-warehouse-monitoring)
+    - [Traffic Counting with ByteTrack](#158-traffic-counting-with-bytetrack)
+16. [Performance Reference](#16-performance-reference)
 
 ---
 
@@ -272,6 +278,62 @@ yowo export yolo11n --format onnx --precision int8 --calibration-data ./calib_im
 ```
 
 **Output:** prints the exported file path, size in MB, and export duration.
+
+### 3.5 `yowo track`
+
+Track objects in a video source with persistent IDs using ByteTrack.
+
+```bash
+yowo track SOURCE [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SOURCE` | Image, video, directory, or RTSP URL |
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model`, `-m` | `yolo26n` | Model name |
+| `--weights`, `-w` | auto | Path to local weights file |
+| `--backend` | auto | `pytorch`, `onnx`, `tensorrt`, `openvino` |
+| `--confidence` | `0.25` | Detection confidence threshold |
+| `--device` | `auto` | `auto`, `cpu`, `mps`, `cuda` |
+
+**Examples:**
+
+```bash
+yowo track video.mp4 --model yolo26n
+yowo track rtsp://camera/stream --model yolo26s --confidence 0.3
+```
+
+### 3.6 `yowo count`
+
+Count objects using zone occupancy and line crossing on top of tracking.
+
+```bash
+yowo count SOURCE [OPTIONS]
+```
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model`, `-m` | `yolo26n` | Model name |
+| `--zone` | off | Enable zone counting (top/bottom halves) |
+| `--line` | off | Enable line crossing counting (horizontal center) |
+| `--track` | off | Show per-track IDs |
+| `--json` | off | Output results as JSON |
+
+**Examples:**
+
+```bash
+yowo count video.mp4 --model yolo26n --line --zone
+yowo count video.mp4 --model yolo26s --line --json
+```
 
 ---
 
@@ -1020,7 +1082,215 @@ print(f"{collector.active_count}/{collector.stream_count} streams active")
 
 ---
 
-## 8. Model Export
+## 8. Tracking (ByteTrack)
+
+ByteTrack provides multi-object tracking with persistent IDs. It uses two-stage IoU association with a Kalman filter for motion prediction.
+
+### 8.1 `ByteTracker`
+
+```python
+from yowo.tracking import ByteTracker
+
+tracker = ByteTracker(
+    track_high_thresh=0.3,   # stage-1: high-confidence detection threshold
+    track_low_thresh=0.1,    # stage-2: low-confidence recovery threshold
+    match_thresh=0.8,        # IoU matching threshold
+    max_age=30,              # frames before a lost track is removed
+    min_hits=3,              # hits before a track is confirmed
+)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `track_high_thresh` | `0.3` | Detections above this go to stage-1 matching |
+| `track_low_thresh` | `0.1` | Detections between low/high go to stage-2 recovery |
+| `match_thresh` | `0.8` | IoU threshold for association |
+| `max_age` | `30` | Max frames a lost track survives without matches |
+| `min_hits` | `3` | Minimum hits before `is_confirmed=True` |
+
+Properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `active_track_count` | `int` | Number of currently active tracks |
+| `lost_track_count` | `int` | Number of lost (not yet removed) tracks |
+| `total_track_count` | `int` | Total tracks ever created |
+
+### 8.2 `track_stream`
+
+Convenience generator that wires detection and tracking in a single call:
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.tracking import ByteTracker, track_stream
+
+tracker = ByteTracker()
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        for box in tracked.boxes:
+            print(f"ID:{box.track_id} {box.class_name} conf={box.confidence:.2f}")
+```
+
+### 8.3 `TrackedDetection` and `TrackedBox`
+
+`track_stream` yields `TrackedDetection` objects — one per frame:
+
+```python
+@dataclass(frozen=True, slots=True)
+class TrackedBox:
+    x1: float; y1: float; x2: float; y2: float
+    confidence: float
+    class_id: int
+    class_name: str
+    track_id: int          # persistent ID across frames
+    is_confirmed: bool     # True after min_hits matches
+
+@dataclass(frozen=True, slots=True)
+class TrackedDetection:
+    frame: Frame
+    boxes: tuple[TrackedBox, ...]
+    inference_time_ms: float
+    tracking_time_ms: float
+    backend: BackendType
+    model_spec: ModelSpec
+```
+
+### 8.4 Optional scipy acceleration
+
+The Hungarian algorithm (linear assignment) falls back to a pure-numpy greedy matcher by default. Install scipy for optimal assignment:
+
+```bash
+pip install yowo[tracking]
+```
+
+ByteTrack overhead: ~0.3ms (scipy) to ~1.2ms (numpy) per frame with 50 detections.
+
+---
+
+## 9. Object Counting
+
+`ObjectCounter` provides zone occupancy and line-crossing counting built on top of tracking results.
+
+### 9.1 Setup
+
+```python
+from yowo.counter import ObjectCounter, CountZone, CountLine, CrossDirection
+from yowo.utils import make_half_zones, make_center_line
+
+# Factory helpers for common configurations
+zones = list(make_half_zones(1280, 720))    # top-half + bottom-half
+line = make_center_line(1280, 720)          # horizontal center line
+
+# Or define custom geometry
+zone = CountZone("parking_lot", vertices=(
+    (100.0, 100.0), (500.0, 100.0),
+    (500.0, 400.0), (100.0, 400.0),
+))
+line = CountLine("entrance", p1=(0.0, 360.0), p2=(1280.0, 360.0))
+
+counter = ObjectCounter(zones=[zone], lines=[line])
+```
+
+### 9.2 Usage with tracking
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.tracking import ByteTracker, track_stream
+from yowo.counter import ObjectCounter, CrossDirection
+from yowo.utils import make_half_zones, make_center_line
+
+zones = list(make_half_zones(1280, 720))
+line = make_center_line(1280, 720)
+
+tracker = ByteTracker()
+counter = ObjectCounter(zones=zones, lines=[line])
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        counter.update(tracked)
+
+# Zone occupancy (per-class counts currently in each zone)
+for zone_id, counts in counter.zone_counts.items():
+    print(f"{zone_id}: {dict(counts)}")
+
+# Line crossing totals
+for line_id, dirs in counter.line_totals.items():
+    in_count = dirs.get(CrossDirection.IN, 0)
+    out_count = dirs.get(CrossDirection.OUT, 0)
+    print(f"{line_id}: IN={in_count} OUT={out_count}")
+
+# Cumulative per-class detection count (all frames)
+print(counter.cumulative_counts)
+
+# Reset all counters
+counter.reset()
+```
+
+### 9.3 Geometry types
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `CountZone` | `zone_id`, `vertices` | Polygon defined by `tuple[tuple[float, float], ...]` |
+| `CountLine` | `line_id`, `p1`, `p2` | Line segment from `(x1,y1)` to `(x2,y2)` |
+| `CrossDirection` | `IN`, `OUT` | Direction relative to the line normal vector |
+
+### 9.4 Factory helpers
+
+| Function | Description |
+|----------|-------------|
+| `make_half_zones(w, h)` | Returns `(top_zone, bottom_zone)` splitting frame at `y=h//2` |
+| `make_center_line(w, h, direction="horizontal", line_id="gate")` | Returns a `CountLine` at frame center |
+
+---
+
+## 10. Annotation Utils
+
+`yowo.utils` provides reusable drawing functions for detection, tracking, and counting overlays.
+
+### 10.1 Drawing functions
+
+```python
+from yowo.utils import (
+    draw_bounding_boxes,    # class-colored detection boxes + "class conf" labels
+    draw_tracked_boxes,     # track-colored boxes + "ID:N class conf" labels
+    draw_zones,             # semi-transparent zone polygon overlays
+    draw_count_lines,       # counting line overlays with labels
+    draw_text_panel,        # translucent stats/info panel
+)
+```
+
+All functions mutate the frame in-place and return `None`. Color values are BGR (OpenCV convention).
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `draw_bounding_boxes` | `(frame, boxes, *, font_scale=0.5, thickness=2)` | Class-colored detection boxes |
+| `draw_tracked_boxes` | `(frame, tracked, *, font_scale=0.45)` | Track-colored boxes with IDs |
+| `draw_zones` | `(frame, zones, *, alpha=0.15)` | Semi-transparent zone polygons |
+| `draw_count_lines` | `(frame, lines, *, color=(0,0,255))` | Red counting lines with labels |
+| `draw_text_panel` | `(frame, lines, *, position="top-right", font_scale=0.45)` | Translucent text panel |
+
+### 10.2 Color palettes
+
+```python
+from yowo.utils import TRACK_PALETTE, CLASS_PALETTE, color_for_track, color_for_class
+
+color_for_track(track_id)   # deterministic BGR from 10-color palette
+color_for_class(class_id)   # deterministic BGR from 20-color palette
+```
+
+### 10.3 Complete annotated video example
+
+See [`examples/annotated_video.py`](../examples/annotated_video.py) for a full pipeline:
+detect → track → count → annotate → write video.
+
+```bash
+uv run python examples/annotated_video.py input.mp4 --model yolo26n --backend onnx
+```
+
+---
+
+## 11. Model Export
 
 ### From CLI
 
@@ -1066,7 +1336,7 @@ print(f"Exported to {meta.file_path} ({meta.file_size_bytes / 1e6:.1f} MB)")
 
 ---
 
-## 9. Environment Variables
+## 12. Environment Variables
 
 All `InferenceConfig` fields can be set via `YOWO_*` environment variables. Env vars override YAML values.
 
@@ -1099,7 +1369,7 @@ yowo detect traffic.mp4 --model yolo26n
 
 ---
 
-## 10. YAML Configuration
+## 13. YAML Configuration
 
 ```yaml
 # yowo.yaml
@@ -1131,7 +1401,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-## 11. Error Reference
+## 14. Error Reference
 
 All exceptions inherit from `YowoError` in `yowo.errors`.
 
@@ -1171,9 +1441,9 @@ except YowoError as e:
 
 ---
 
-## 12. Use Cases
+## 15. Use Cases
 
-### 12.1 Traffic Surveillance on Apple Silicon
+### 15.1 Traffic Surveillance on Apple Silicon
 
 **Scenario:** Process a 2560×1440 traffic surveillance image. Maximize throughput on Apple M-series.
 
@@ -1220,7 +1490,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 12.2 Live RTSP Camera Stream
+### 15.2 Live RTSP Camera Stream
 
 **Scenario:** Process a live IP camera stream. Stay current — drop stale frames; don't queue up.
 
@@ -1257,7 +1527,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 12.3 Custom Fine-Tuned Vehicle Detector
+### 15.3 Custom Fine-Tuned Vehicle Detector
 
 **Scenario:** Run a YOLO11s model fine-tuned on 7 vehicle classes (car, motorcycle, bus, truck, transporter, container, big_transporter).
 
@@ -1301,7 +1571,7 @@ Then point `weights_path` at the exported `.onnx` file with `backend=BackendType
 
 ---
 
-### 12.4 Batch Video Processing
+### 15.4 Batch Video Processing
 
 **Scenario:** Process a long video file and save per-frame JSON results. Use prefetch for maximum throughput.
 
@@ -1336,7 +1606,7 @@ print(f"{len(results)} frames, {total_boxes} total detections, avg {avg_ms:.1f}m
 
 ---
 
-### 12.5 Free-Threaded Python Parallelism
+### 15.5 Free-Threaded Python Parallelism
 
 **Scenario:** Maximize CPU throughput using Python 3.13 free-threaded build (`cp313t`, GIL disabled). Enables true thread parallelism between I/O decode and inference — no GPU required.
 
@@ -1544,7 +1814,7 @@ Speedup caps at ~1.5x (not 2.0x theoretical) due to L3 cache contention between 
 
 ---
 
-### 12.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
+### 15.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
 
 **Scenario:** You have an Apple Silicon Mac and want to use GPU-class acceleration. Two paths are available — ONNX via CoreML EP (Neural Engine) and PyTorch via Metal (GPU). This example runs both and compares.
 
@@ -1628,7 +1898,7 @@ with InferenceEngine(coreml_config) as eng:
 
 ---
 
-### 12.7 Multi-Camera Warehouse Monitoring
+### 15.7 Multi-Camera Warehouse Monitoring
 
 **Scenario:** 4 warehouse cameras (2 RTSP, 2 USB webcams) feeding a single YOLO26n engine. Each camera has its own alert callback. Graceful shutdown on SIGINT.
 
@@ -1699,9 +1969,59 @@ for sid, err in collector.stream_errors.items():
 - `timeout_ms=50` flushes partial batches if some cameras are slower — prevents stalling on one offline camera.
 - Feature cache is auto-disabled (mixed-source batches).
 
+### 15.8 Traffic Counting with ByteTrack
+
+Full detect → track → count → annotate pipeline on surveillance video:
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.counter import ObjectCounter, CrossDirection
+from yowo.tracking import ByteTracker, track_stream
+from yowo.utils import (
+    draw_tracked_boxes, draw_zones, draw_count_lines,
+    draw_text_panel, make_half_zones, make_center_line,
+)
+import cv2
+
+# Setup geometry
+zones = list(make_half_zones(1280, 720))
+line = make_center_line(1280, 720)
+
+tracker = ByteTracker(track_high_thresh=0.3, match_thresh=0.8, max_age=30)
+counter = ObjectCounter(zones=zones, lines=[line])
+
+with InferenceEngine(confidence_threshold=0.25) as engine:
+    for tracked in track_stream(engine, open_source("traffic.mp4"), tracker=tracker):
+        counter.update(tracked)
+        frame = tracked.frame.pixels.copy()
+
+        draw_zones(frame, zones)
+        draw_count_lines(frame, [line])
+        draw_tracked_boxes(frame, tracked)
+
+        lt = counter.line_totals.get("gate", {})
+        stats = [
+            f"Active: {tracker.active_track_count}",
+            f"IN={lt.get(CrossDirection.IN, 0)} OUT={lt.get(CrossDirection.OUT, 0)}",
+        ]
+        draw_text_panel(frame, stats)
+
+        cv2.imshow("Traffic Counter", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+```
+
+Performance on Apple M4 Pro (928 frames, 30fps traffic video):
+
+| Model | CoreML FPS | MPS FPS | ByteTrack overhead |
+|-------|-----------|---------|-------------------|
+| YOLO26n | 82 | 72 | 0.3ms (5.2%) |
+| YOLO26s | 58 | 63 | 0.4ms (3.7%) |
+| YOLO26m | 37 | 35 | 0.5ms (2.7%) |
+
 ---
 
-## 13. Performance Reference
+## 16. Performance Reference
 
 ### Backend comparison (YOLO26n, Apple M4 Pro, batch=1)
 

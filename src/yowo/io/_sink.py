@@ -12,30 +12,7 @@ from pathlib import Path
 import cv2
 
 from yowo.types import Detection
-
-# Fixed 20-color palette (BGR) for class ID annotation.
-_PALETTE: list[tuple[int, int, int]] = [
-    (255, 56, 56),
-    (255, 157, 151),
-    (255, 112, 31),
-    (255, 178, 29),
-    (207, 210, 49),
-    (72, 249, 10),
-    (146, 204, 23),
-    (61, 219, 134),
-    (26, 147, 52),
-    (0, 212, 187),
-    (44, 153, 168),
-    (0, 194, 255),
-    (52, 69, 147),
-    (100, 115, 255),
-    (0, 24, 236),
-    (132, 56, 255),
-    (82, 0, 133),
-    (203, 56, 255),
-    (255, 149, 200),
-    (255, 55, 199),
-]
+from yowo.utils._draw import draw_bounding_boxes
 
 
 def write_json(detections: list[Detection], path: Path) -> None:
@@ -78,44 +55,7 @@ def write_annotated_frames(detections: list[Detection], output_dir: Path) -> Non
 
     for det in detections:
         canvas = det.frame.pixels.copy()
-
-        for box in det.boxes:
-            color = _PALETTE[box.class_id % len(_PALETTE)]
-            x1, y1, x2, y2 = (
-                round(box.x1),
-                round(box.y1),
-                round(box.x2),
-                round(box.y2),
-            )
-
-            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, thickness=2)
-
-            label = f"{box.class_name} {box.confidence:.2f}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.5
-            thickness = 1
-            (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-
-            # Draw filled rectangle behind text for readability.
-            label_y = max(y1 - baseline, text_h)
-            cv2.rectangle(
-                canvas,
-                (x1, label_y - text_h - baseline),
-                (x1 + text_w, label_y + baseline),
-                color,
-                cv2.FILLED,
-            )
-            cv2.putText(
-                canvas,
-                label,
-                (x1, label_y),
-                font,
-                font_scale,
-                (255, 255, 255),
-                thickness,
-                cv2.LINE_AA,
-            )
-
+        draw_bounding_boxes(canvas, det.boxes)
         out_path = output_dir / f"{det.frame.frame_index:06d}.jpg"
         cv2.imwrite(str(out_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
@@ -134,29 +74,7 @@ def write_annotated_frame(detection: Detection, output_path: Path) -> None:
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas = detection.frame.pixels.copy()
-
-    for box in detection.boxes:
-        color = _PALETTE[box.class_id % len(_PALETTE)]
-        x1, y1, x2, y2 = round(box.x1), round(box.y1), round(box.x2), round(box.y2)
-
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, thickness=2)
-
-        label = f"{box.class_name} {box.confidence:.2f}"
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        thickness = 1
-        (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-        label_y = max(y1 - baseline, text_h)
-        cv2.rectangle(
-            canvas,
-            (x1, label_y - text_h - baseline),
-            (x1 + text_w, label_y + baseline),
-            color,
-            cv2.FILLED,
-        )
-        cv2.putText(
-            canvas, label, (x1, label_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA
-        )
+    draw_bounding_boxes(canvas, detection.boxes)
 
     ext = output_path.suffix.lower()
     params: list[int] = [cv2.IMWRITE_JPEG_QUALITY, 95] if ext in {".jpg", ".jpeg"} else []

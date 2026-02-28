@@ -340,3 +340,78 @@ class TestPreprocessBufferPool:
 
         with pytest.raises(ValueError, match="not acquired"):
             pool.release(alien)
+
+
+# ---------------------------------------------------------------------------
+# PreprocessBuffer — direct class tests
+# ---------------------------------------------------------------------------
+
+
+class TestPreprocessBuffer:
+    """Direct unit tests for PreprocessBuffer properties and methods."""
+
+    def test_capacity_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(4, (640, 640))
+        assert buf.capacity == 4
+
+    def test_target_size_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(2, (320, 320))
+        assert buf.target_size == (320, 320)
+
+    def test_memory_bytes_property(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(2, (640, 640))
+        assert buf.memory_bytes == 2 * 640 * 640 * 3
+
+    def test_get_staging_returns_ndarray(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        arr = buf.get_staging(0)
+        assert arr.shape == (640, 640, 3)
+        assert arr.dtype == np.uint8
+
+    def test_needs_reset_first_use_returns_true(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        assert buf.needs_reset(0, 480, 640, 80, 0) is True
+
+    def test_needs_reset_same_dims_returns_false(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        buf.needs_reset(0, 480, 640, 80, 0)
+        assert buf.needs_reset(0, 480, 640, 80, 0) is False
+
+    def test_needs_reset_different_dims_returns_true(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (640, 640))
+        buf.needs_reset(0, 480, 640, 80, 0)
+        assert buf.needs_reset(0, 320, 320, 160, 160) is True
+
+    def test_staging_filled_with_letterbox_value(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(1, (100, 100))
+        arr = buf.get_staging(0)
+        # Letterbox fill value is 114
+        assert arr[0, 0, 0] == 114
+
+    def test_multiple_slots_independent(self) -> None:
+        from yowo.io._decode import PreprocessBuffer
+
+        buf = PreprocessBuffer(3, (640, 640))
+        assert buf.needs_reset(0, 480, 640, 80, 0) is True
+        assert buf.needs_reset(1, 480, 640, 80, 0) is True
+        # Slot 0 cached, slot 1 cached
+        assert buf.needs_reset(0, 480, 640, 80, 0) is False
+        assert buf.needs_reset(1, 480, 640, 80, 0) is False
+        # Slot 2 never used
+        assert buf.needs_reset(2, 480, 640, 80, 0) is True

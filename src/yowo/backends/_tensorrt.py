@@ -11,6 +11,7 @@ on machines without TensorRT installed.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -153,8 +154,10 @@ class TensorRTBackend:
         ]
 
         try:
+            sess_options = self._build_session_options(ort_mod)
             self._session = ort_mod.InferenceSession(
                 str(model_path),
+                sess_options=sess_options,
                 providers=providers,
             )
             inputs = self._session.get_inputs()
@@ -336,6 +339,25 @@ class TensorRTBackend:
                     self._session.run(None, {self._input_name: dummy})
         except Exception as exc:
             logger.debug("TensorRTBackend: warmup failed (non-fatal): %s", exc)
+
+    def _build_session_options(self, ort: object) -> Any:
+        """Build ORT session options with graph optimization and thread tuning.
+
+        Mirrors :py:meth:`OnnxBackend._build_session_options` so the CUDA EP
+        fallback benefits from identical optimisations (ORT_ENABLE_ALL, memory
+        pattern/reuse, thread caps).
+        """
+        import onnxruntime as ort_mod  # type: ignore[import-untyped]
+
+        opts = ort_mod.SessionOptions()
+        opts.graph_optimization_level = ort_mod.GraphOptimizationLevel.ORT_ENABLE_ALL
+        cpu_count = os.cpu_count() or 1
+        opts.intra_op_num_threads = max(1, cpu_count // 2)
+        opts.inter_op_num_threads = max(1, cpu_count // 4)
+        opts.enable_mem_pattern = True
+        opts.enable_mem_reuse = True
+        opts.execution_mode = ort_mod.ExecutionMode.ORT_SEQUENTIAL
+        return opts
 
 
 # ---------------------------------------------------------------------------
