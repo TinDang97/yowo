@@ -340,6 +340,37 @@ class TestByteTracker:
         assert tracker.lost_track_count == 0
         assert tracker.active_track_count == 0
 
+    def test_lost_track_re_associated(self) -> None:
+        """A lost track re-appears and keeps the same track_id (not a new one)."""
+        tracker = ByteTracker(min_hits=1, max_age=10)
+        box = _make_box(conf=0.9)
+        r0 = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        original_id = r0.boxes[0].track_id
+        # Disappear for 3 frames
+        for i in range(1, 4):
+            tracker.update(_make_detection(boxes=(), frame_index=i))
+        assert tracker.lost_track_count >= 1
+        # Reappear at same position
+        r4 = tracker.update(_make_detection(boxes=(box,), frame_index=4))
+        assert r4.num_boxes >= 1
+        refound_id = r4.boxes[0].track_id
+        assert refound_id == original_id, (
+            f"Lost track should be re-associated with same ID {original_id}, "
+            f"got new ID {refound_id}"
+        )
+
+    def test_lost_track_velocity_zeroed(self) -> None:
+        """Lost tracks zero their height velocity to prevent drift."""
+        tracker = ByteTracker(min_hits=1, max_age=10)
+        box = _make_box(conf=0.9)
+        tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        # Disappear
+        tracker.update(_make_detection(boxes=(), frame_index=1))
+        # Check internal state: lost tracks should have zeroed h-velocity
+        for track in tracker._lost:  # type: ignore[attr-defined]
+            # mean[7] is vh (height velocity)
+            assert track._mean[7] == 0.0  # type: ignore[attr-defined]
+
     def test_min_hits_confirmation(self) -> None:
         tracker = ByteTracker(min_hits=3, track_high_thresh=0.5)
         box = _make_box(conf=0.9)

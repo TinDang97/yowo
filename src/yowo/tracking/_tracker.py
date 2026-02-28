@@ -109,33 +109,41 @@ class ByteTracker:
         for track in self._tracked + self._lost:
             track.predict()
 
-        # --- STAGE 1: match high-conf dets → active tracked tracks ---
+        # --- STAGE 1: match high-conf dets → tracked + lost pool ---
+        # Per the ByteTrack paper, lost tracks are included so that briefly
+        # occluded objects can be re-identified without getting a new ID.
+        strack_pool = self._tracked + self._lost
         high_arr = (
             np.array(high_boxes, dtype=np.float64)
             if high_boxes
             else np.empty((0, 4), dtype=np.float64)
         )
-        cost1 = iou_distance(self._tracked, high_arr)
+        cost1 = iou_distance(strack_pool, high_arr)
         matches1, unmatched_track_idxs, unmatched_high_idxs = linear_assignment(
             cost1, self._match_thresh
         )
 
-        # Update matched tracks
+        # Update matched tracks (re-activate if they were lost)
+        refound: list[STrack] = []
         for ti, di in matches1:
-            self._tracked[ti].update(
-                high_boxes[di], high_confs[di], high_cls_ids[di], high_cls_names[di], frame_id
-            )
+            track = strack_pool[ti]
+            if track.state == TrackState.TRACKED:
+                track.update(
+                    high_boxes[di], high_confs[di], high_cls_ids[di], high_cls_names[di], frame_id
+                )
+            else:
+                track.re_activate(
+                    high_boxes[di], high_confs[di], high_cls_ids[di], high_cls_names[di], frame_id
+                )
+                refound.append(track)
 
-        # Collect tracks not matched in stage 1 — candidates for stage 2
-        # These were TRACKED before but got no high-conf match.
+        # Collect TRACKED tracks not matched in stage 1 — candidates for stage 2.
+        # Lost tracks that weren't re-associated stay in self._lost (no action).
         unmatched_tracked: list[STrack] = []
-        newly_lost: list[STrack] = []
         for idx in unmatched_track_idxs:
-            track = self._tracked[idx]
+            track = strack_pool[idx]
             if track.state == TrackState.TRACKED:
                 unmatched_tracked.append(track)
-            else:
-                newly_lost.append(track)
 
         # --- STAGE 2: match low-conf dets → unmatched tracked tracks ---
         low_arr = (
@@ -157,7 +165,7 @@ class ByteTracker:
             still_unmatched_tracked = list(unmatched_tracked)
 
         # Mark all remaining unmatched tracked tracks as lost
-        for track in still_unmatched_tracked + newly_lost:
+        for track in still_unmatched_tracked:
             track.mark_lost()
 
         # --- NEW TRACKS from unmatched high-conf dets ---
@@ -177,22 +185,25 @@ class ByteTracker:
                 self._tracked.append(track)
 
         # --- UPDATE LOST pool ---
-        # Add newly lost + age existing lost; remove expired
+        # Re-found tracks leave lost pool; add newly lost; remove expired
+        refound_ids = {t.track_id for t in refound}
         new_lost: list[STrack] = []
         for track in self._lost:
+            if track.track_id in refound_ids:
+                continue  # moved back to tracked
             if track.time_since_update <= self._max_age:
                 new_lost.append(track)
             else:
                 track.mark_removed()
 
-        for track in still_unmatched_tracked + newly_lost:
+        for track in still_unmatched_tracked:
             if track.state == TrackState.LOST:
                 new_lost.append(track)
 
         self._lost = new_lost
 
-        # Rebuild active tracked list (only TRACKED state)
-        self._tracked = [t for t in self._tracked if t.state == TrackState.TRACKED]
+        # Rebuild active tracked list: keep existing TRACKED + add re-found
+        self._tracked = [t for t in self._tracked if t.state == TrackState.TRACKED] + refound
 
         # --- Duplicate removal across tracked / lost ---
         self._tracked, self._lost = remove_duplicate_tracks(self._tracked, self._lost)

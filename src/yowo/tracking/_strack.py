@@ -178,7 +178,13 @@ class STrack:
         self._mean, self._covariance = kalman.initiate(measurement)
 
     def predict(self) -> None:
-        """Advance the Kalman filter prediction one time step."""
+        """Advance the Kalman filter prediction one time step.
+
+        Lost tracks have their height velocity zeroed to prevent unchecked
+        drift while they await re-association (matches reference impl).
+        """
+        if self.state != TrackState.TRACKED:
+            self._mean[7] = 0  # zero height velocity
         self._mean, self._covariance = self._kalman.predict(self._mean, self._covariance)
         self.age += 1
         self.time_since_update += 1
