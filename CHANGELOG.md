@@ -13,6 +13,72 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **tracking**: Cross-camera Re-Identification (ReID) system. Pluggable
+  `ReIDExtractor` Protocol enabling any appearance model (CLIP, FastReID,
+  CLIP-ReID, custom) to be injected into `ByteTracker` and
+  `CrossCameraTracker`. Built-in extractors:
+  - `CLIPExtractor` — CLIP ViT-B/16 zero-shot (512-dim, ONNX)
+  - `FastReIDExtractor` — ResNet-50 SBS person ReID (256-dim, ONNX)
+  - `VehicleReIDExtractor` — general vehicle ReID (256-dim, ONNX)
+  - `CLIPReIDExtractor` — CLIP-ReID fine-tuned on VeRi-776 (1280-dim, ONNX),
+    mAP=82.28%, Rank-1=96.66%
+
+- **tracking**: `CrossCameraTracker` — manages per-camera ByteTrackers with
+  shared `EmbeddingGallery` for cross-camera identity matching. Auto-registers
+  cameras on first update. Thread-safe for concurrent multi-camera pipelines.
+  `GlobalTrackedBox` dataclass with `global_id` for cross-camera identity.
+
+- **tracking**: `EmbeddingGallery` — bounded gallery of L2-normalized track
+  embeddings with cosine-distance nearest-neighbor query. Same-camera exclusion,
+  top-k filtering, FIFO eviction. Thread-safe via `threading.Lock`.
+
+- **tracking**: `CameraLinkModel` with `CameraLink` constraints — spatial-temporal
+  transit window filtering that prunes infeasible cross-camera matches (e.g. a
+  vehicle exiting Camera A can only appear in Camera B within a configured time
+  window). Graceful degradation with configurable default window.
+
+- **tracking**: Appearance-gated cost fusion in `ByteTracker`. `gated_fused_cost()`
+  implements BoT-SORT min-cost fusion: cosine distance scaled by 0.5 when both
+  appearance gate (theta_e=0.30) and IoU gate (theta_iou=0.5) pass, otherwise
+  falls back to IoU-only. `needs_reid()` conditional gate achieves 99.8% skip
+  rate on typical surveillance footage — ReID extraction only fires on ambiguous
+  IoU assignments.
+
+- **tracking**: `fuse_score()` — penalizes low-confidence detections by scaling
+  IoU similarity by detection score (`cost = 1 - (1 - iou_cost) * score`).
+
+- **tracking**: `_appearance_rescue()` — stage-3 re-activation of long-lost
+  tracks via appearance-only matching (cosine distance on embeddings, no IoU
+  requirement). Configurable `reid_lost_age` threshold.
+
+- **tracking**: `STrack.update_embedding()` — EMA-based appearance embedding
+  update with L2 renormalization (eta=0.9 default). `STrack.embedding` property
+  for read access.
+
+- **tracking**: `remove_duplicate_tracks()` and `remove_intra_duplicates()` —
+  IoU-based track deduplication to eliminate ID fragmentation when overlapping
+  tracks compete for the same detection.
+
+### Experiments
+
+- VeRi-776 Cross-Camera Vehicle ReID benchmark: CLIP zero-shot mAP=9.32%,
+  FastReID SBS-S50 mAP=8.43%, CLIP-ReID VeRi mAP=82.28% (Rank-1=96.66%).
+  See [`docs/experiments/2026-03-01-veri-776-cross-camera-reid-benchmark.md`](docs/experiments/2026-03-01-veri-776-cross-camera-reid-benchmark.md).
+
+- ReID method comparison on 928-frame traffic video: `needs_reid()` gate
+  achieves 99.8% skip rate (2 extraction calls per 928 frames). All three
+  configurations (no ReID, CLIP, FastReID) produce identical FPS (~107).
+  See [`docs/experiments/2026-03-01-reid-method-comparison.md`](docs/experiments/2026-03-01-reid-method-comparison.md).
+
+### Tests
+
+- 1238 unit tests (up from 1064 in v2.1.0). 180 new tests covering ReID
+  extractors, embedding gallery, cross-camera tracker, camera link model,
+  appearance fusion, fuse_score, needs_reid, duplicate removal, and
+  appearance rescue.
+
 ---
 
 ## [2.1.0] — 2026-02-28

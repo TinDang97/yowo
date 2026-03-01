@@ -52,11 +52,11 @@ class KalmanFilterXYAH:
         std = [
             2 * _STD_WEIGHT_POSITION * h,
             2 * _STD_WEIGHT_POSITION * h,
-            1e-2,
+            1e-1,  # aspect ratio — loose for edge-entering objects
             2 * _STD_WEIGHT_POSITION * h,
             10 * _STD_WEIGHT_VELOCITY * h,
             10 * _STD_WEIGHT_VELOCITY * h,
-            1e-5,
+            1e-3,  # aspect ratio velocity — allow rapid convergence
             10 * _STD_WEIGHT_VELOCITY * h,
         ]
         covariance = np.diag(np.square(std))

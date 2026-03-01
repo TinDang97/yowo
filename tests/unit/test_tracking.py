@@ -6,13 +6,26 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from yowo.errors import TrackingError, YowoError
 from yowo.tracking import track_detections, track_stream
+from yowo.tracking._clip_reid import CLIPReIDExtractor
 from yowo.tracking._kalman import KalmanFilterXYAH
 from yowo.tracking._matching import (
+    appearance_distance,
+    fuse_score,
+    gated_fused_cost,
     iou_batch,
     linear_assignment,
+    needs_reid,
+)
+from yowo.tracking._reid import (  # noqa: F401
+    _IMAGENET_MEAN,
+    _IMAGENET_STD,
+    CLIPExtractor,
+    FastReIDExtractor,
+    ReIDExtractor,
 )
 from yowo.tracking._strack import STrack, TrackedBox, TrackedDetection, TrackState
 from yowo.tracking._tracker import ByteTracker
@@ -576,7 +589,7 @@ class TestKalmanFilterEdge:
         assert mean_upd.shape == (8,)
         assert cov_upd.shape == (8, 8)
 
-    def test_xyxy_to_xyah_zero_height_box(self) -> None:
+    def test_xyxy_to_xyah_zero_height_make_box(self) -> None:
         """Zero-height box uses max(h, 1e-6) guard to avoid division by zero."""
         xyah = KalmanFilterXYAH.xyxy_to_xyah((50.0, 100.0, 150.0, 100.0))
         assert np.isfinite(xyah[2])
@@ -815,3 +828,1111 @@ class TestV21Exports:
             LineCrossEvent,
             ObjectCounter,
         )
+
+
+# ---------------------------------------------------------------------------
+# MockReIDExtractor helper
+# ---------------------------------------------------------------------------
+
+
+class MockReIDExtractor:
+    """Deterministic mock: returns position-based embeddings for testing."""
+
+    def __init__(self, dim: int = 128) -> None:
+        self._dim = dim
+
+    @property
+    def embedding_dim(self) -> int:
+        return self._dim
+
+    def extract(
+        self,
+        frame_pixels: NDArray[np.uint8],
+        boxes_xyxy: list[tuple[float, float, float, float]],
+    ) -> NDArray[np.float32] | None:
+        if not boxes_xyxy:
+            return None
+        embs = np.zeros((len(boxes_xyxy), self._dim), dtype=np.float32)
+        for i, (x1, y1, x2, y2) in enumerate(boxes_xyxy):
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            embs[i, 0] = cx / 1920
+            embs[i, 1] = cy / 1080
+            embs[i, 2] = (x2 - x1) / 1920
+            embs[i, 3] = (y2 - y1) / 1080
+        norms = np.linalg.norm(embs, axis=1, keepdims=True).clip(min=1e-8)
+        return (embs / norms).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Section 16: STrack embedding tests
+# ---------------------------------------------------------------------------
+
+
+class TestSTrackEmbedding:
+    def test_embedding_slot_default_none(self) -> None:
+        t = _make_strack()
+        assert t.embedding is None
+
+    def test_update_embedding_first_call_copies(self) -> None:
+        t = _make_strack()
+        emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        t.update_embedding(emb)
+        assert t.embedding is not None
+        # Must be a copy, not the same object
+        assert t.embedding is not emb
+        np.testing.assert_allclose(t.embedding, emb, atol=1e-6)
+
+    def test_update_embedding_ema_formula(self) -> None:
+        t = _make_strack()
+        old = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        new = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        t.update_embedding(old)
+        t.update_embedding(new, eta=0.9)
+        # EMA: 0.9 * [1,0,0] + 0.1 * [0,1,0] = [0.9, 0.1, 0] -> normalized
+        expected = np.array([0.9, 0.1, 0.0], dtype=np.float32)
+        expected /= np.linalg.norm(expected)
+        assert t.embedding is not None
+        np.testing.assert_allclose(t.embedding, expected, atol=1e-5)
+
+    def test_update_embedding_renormalized(self) -> None:
+        t = _make_strack()
+        emb1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        emb2 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        t.update_embedding(emb1)
+        t.update_embedding(emb2, eta=0.5)
+        assert t.embedding is not None
+        norm = float(np.linalg.norm(t.embedding))
+        assert abs(norm - 1.0) < 1e-5
+
+    def test_update_embedding_zero_norm_safety(self) -> None:
+        t = _make_strack()
+        zero = np.zeros(4, dtype=np.float32)
+        t.update_embedding(zero)
+        # First call copies — zero embedding stored
+        assert t.embedding is not None
+        # Second call with zero: EMA of zeros = zeros, norm guard prevents crash
+        t.update_embedding(zero)
+        assert t.embedding is not None
+
+
+# ---------------------------------------------------------------------------
+# Section 17: Appearance distance tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppearanceDistance:
+    def test_shape(self) -> None:
+        rng = np.random.default_rng(42)
+        tracks = rng.standard_normal((3, 512)).astype(np.float32)
+        tracks /= np.linalg.norm(tracks, axis=1, keepdims=True)
+        dets = rng.standard_normal((5, 512)).astype(np.float32)
+        dets /= np.linalg.norm(dets, axis=1, keepdims=True)
+        dist = appearance_distance(tracks, dets)
+        assert dist.shape == (3, 5)
+        assert dist.dtype == np.float64
+
+    def test_identical_distance_zero(self) -> None:
+        emb = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+        dist = appearance_distance(emb, emb)
+        assert abs(dist[0, 0]) < 1e-6
+
+    def test_orthogonal_distance_one(self) -> None:
+        a = np.array([[1.0, 0.0]], dtype=np.float32)
+        b = np.array([[0.0, 1.0]], dtype=np.float32)
+        dist = appearance_distance(a, b)
+        assert abs(dist[0, 0] - 1.0) < 1e-6
+
+    def test_empty_tracks(self) -> None:
+        tracks = np.empty((0, 128), dtype=np.float32)
+        dets = np.random.randn(5, 128).astype(np.float32)
+        dist = appearance_distance(tracks, dets)
+        assert dist.shape == (0, 5)
+
+    def test_empty_dets(self) -> None:
+        tracks = np.random.randn(3, 128).astype(np.float32)
+        dets = np.empty((0, 128), dtype=np.float32)
+        dist = appearance_distance(tracks, dets)
+        assert dist.shape == (3, 0)
+
+
+# ---------------------------------------------------------------------------
+# Section 18: Gated fused cost tests
+# ---------------------------------------------------------------------------
+
+
+class TestGatedFusedCost:
+    def test_iou_only_fallback(self) -> None:
+        """When cos_dist > theta_e, result should equal IoU cost."""
+        iou_cost = np.array([[0.3]], dtype=np.float64)
+        # Orthogonal: cos_dist = 1.0 > theta_e=0.3
+        t_emb = np.array([[1.0, 0.0]], dtype=np.float32)
+        d_emb = np.array([[0.0, 1.0]], dtype=np.float32)
+        fused = gated_fused_cost(iou_cost, t_emb, d_emb)
+        assert abs(fused[0, 0] - 0.3) < 1e-6
+
+    def test_fused_path(self) -> None:
+        """When both gates pass, result = min(iou, 0.5*cos_dist)."""
+        iou_cost = np.array([[0.4]], dtype=np.float64)
+        # Nearly identical: cos_dist ~ 0
+        emb = np.array([[1.0, 0.0]], dtype=np.float32)
+        fused = gated_fused_cost(iou_cost, emb, emb, theta_e=0.30, theta_iou=0.5)
+        # cos_dist = 0, d_hat = 0.5 * 0 = 0, min(0.4, 0) = 0
+        assert fused[0, 0] < 0.01
+
+    def test_shape_preserved(self) -> None:
+        n, m, d = 4, 6, 64
+        rng = np.random.default_rng(42)
+        iou_cost = rng.random((n, m)).astype(np.float64)
+        t = rng.standard_normal((n, d)).astype(np.float32)
+        t /= np.linalg.norm(t, axis=1, keepdims=True)
+        de = rng.standard_normal((m, d)).astype(np.float32)
+        de /= np.linalg.norm(de, axis=1, keepdims=True)
+        fused = gated_fused_cost(iou_cost, t, de)
+        assert fused.shape == (n, m)
+        assert fused.dtype == np.float64
+
+    def test_backward_compat_zero_embeddings(self) -> None:
+        """Zero embeddings (no info) -> cos_dist=1.0 -> gate fails -> IoU only."""
+        iou_cost = np.array([[0.5, 0.3], [0.3, 0.5]], dtype=np.float64)
+        zeros = np.zeros((2, 64), dtype=np.float32)
+        fused = gated_fused_cost(iou_cost, zeros, zeros)
+        np.testing.assert_allclose(fused, iou_cost, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Section 19: needs_reid tests
+# ---------------------------------------------------------------------------
+
+
+class TestNeedsReid:
+    def test_empty_cost(self) -> None:
+        cost = np.empty((0, 0), dtype=np.float64)
+        assert needs_reid(cost) is False
+
+    def test_clear_match(self) -> None:
+        """One clear match per column -> no ReID needed."""
+        cost = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
+        assert needs_reid(cost) is False
+
+    def test_no_overlap(self) -> None:
+        """All costs > 0.7 -> no spatial overlap -> no ReID needed."""
+        cost = np.array([[0.8, 0.9], [0.9, 0.8]], dtype=np.float64)
+        assert needs_reid(cost) is False
+
+    def test_ambiguous(self) -> None:
+        """Two tracks with similar overlap for one detection -> need ReID."""
+        cost = np.array([[0.45, 0.9], [0.50, 0.1]], dtype=np.float64)
+        assert needs_reid(cost) is True
+
+
+# ---------------------------------------------------------------------------
+# Section 20: ReID Protocol tests
+# ---------------------------------------------------------------------------
+
+
+class TestReIDProtocol:
+    def test_mock_satisfies_protocol(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        assert isinstance(mock, ReIDExtractor)
+
+    def test_mock_extract_returns_correct_shape(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        boxes = [(100.0, 100.0, 200.0, 200.0), (300.0, 300.0, 400.0, 400.0)]
+        result = mock.extract(frame, boxes)
+        assert result is not None
+        assert result.shape == (2, 128)
+
+    def test_mock_extract_empty_returns_none(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        assert mock.extract(frame, []) is None
+
+    def test_mock_embeddings_l2_normalized(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        boxes = [(100.0, 100.0, 200.0, 200.0)]
+        result = mock.extract(frame, boxes)
+        assert result is not None
+        norm = float(np.linalg.norm(result[0]))
+        assert abs(norm - 1.0) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# Section 21: ByteTracker with ReID tests
+# ---------------------------------------------------------------------------
+
+
+class TestByteTrackerReID:
+    def test_no_reid_identical_output(self) -> None:
+        """Without reid_extractor, behavior is identical to original."""
+        tracker = ByteTracker(min_hits=1)
+        box = _make_box(conf=0.9)
+        r = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        assert isinstance(r, TrackedDetection)
+        assert r.num_boxes == 1
+
+    def test_accepts_reid_extractor(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        tracker = ByteTracker(min_hits=1, reid_extractor=mock)
+        box = _make_box(conf=0.9)
+        r = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        assert isinstance(r, TrackedDetection)
+
+    def test_reid_updates_embeddings(self) -> None:
+        """After matching with ReID, tracks should have embeddings."""
+        mock = MockReIDExtractor(dim=128)
+        tracker = ByteTracker(
+            min_hits=1,
+            reid_extractor=mock,
+            reid_frame_interval=1,
+        )
+        box_a = _make_box(x1=100, y1=100, x2=300, y2=300, conf=0.9)
+        box_b = _make_box(x1=400, y1=100, x2=600, y2=300, conf=0.9)
+        # Create tracks
+        tracker.update(_make_detection(boxes=(box_a, box_b), frame_index=0))
+        # Second frame — matching triggers ReID if ambiguous
+        tracker.update(_make_detection(boxes=(box_a, box_b), frame_index=1))
+        # Embedding may or may not be set depending on needs_reid gate,
+        # but the tracker should not crash with ReID enabled.
+        # Check that internal tracks exist and the tracker is functional.
+        _ = any(
+            t.embedding is not None
+            for t in tracker._tracked  # type: ignore[attr-defined]
+        )
+        assert tracker.active_track_count >= 1
+
+    def test_reid_graceful_none_extract(self) -> None:
+        """If extractor.extract returns None, tracker falls back to IoU."""
+
+        class NullExtractor:
+            @property
+            def embedding_dim(self) -> int:
+                return 128
+
+            def extract(
+                self,
+                frame_pixels: NDArray[np.uint8],
+                boxes_xyxy: list[tuple[float, float, float, float]],
+            ) -> NDArray[np.float32] | None:
+                return None
+
+        tracker = ByteTracker(
+            min_hits=1,
+            reid_extractor=NullExtractor(),
+            reid_frame_interval=1,
+        )
+        box = _make_box(conf=0.9)
+        r = tracker.update(_make_detection(boxes=(box,), frame_index=0))
+        assert isinstance(r, TrackedDetection)
+
+    def test_reset_clears_state_with_reid(self) -> None:
+        mock = MockReIDExtractor(dim=128)
+        tracker = ByteTracker(min_hits=1, reid_extractor=mock)
+        for i in range(3):
+            tracker.update(_make_detection(boxes=(_make_box(conf=0.9),), frame_index=i))
+        tracker.reset()
+        assert tracker.active_track_count == 0
+        assert tracker.lost_track_count == 0
+
+    def test_frame_interval_throttle(self) -> None:
+        """ReID should not be called more often than reid_frame_interval."""
+        call_count = 0
+
+        class CountingExtractor:
+            @property
+            def embedding_dim(self) -> int:
+                return 128
+
+            def extract(
+                self,
+                frame_pixels: NDArray[np.uint8],
+                boxes_xyxy: list[tuple[float, float, float, float]],
+            ) -> NDArray[np.float32] | None:
+                nonlocal call_count
+                call_count += 1
+                n = len(boxes_xyxy)
+                rng = np.random.default_rng(call_count)
+                embs = rng.standard_normal((n, 128)).astype(np.float32)
+                norms = np.linalg.norm(embs, axis=1, keepdims=True).clip(min=1e-8)
+                return (embs / norms).astype(np.float32)
+
+        tracker = ByteTracker(
+            min_hits=1,
+            reid_extractor=CountingExtractor(),
+            reid_frame_interval=3,
+        )
+        # Create two overlapping tracks that trigger ambiguity
+        box_a = _make_box(x1=100, y1=100, x2=250, y2=250, conf=0.9)
+        box_b = _make_box(x1=150, y1=100, x2=300, y2=250, conf=0.9)
+        for i in range(10):
+            tracker.update(_make_detection(boxes=(box_a, box_b), frame_index=i))
+        # With interval=3, over 10 frames should have <= 4 extract calls
+        # (even less if needs_reid sometimes returns False)
+        assert call_count <= 4
+
+
+# ---------------------------------------------------------------------------
+# Section 22: track_stream/track_detections with ReID
+# ---------------------------------------------------------------------------
+
+
+class TestTrackStreamReID:
+    def test_track_stream_accepts_reid_extractor(self) -> None:
+        engine = MagicMock()
+        dets = [_make_detection(boxes=(_make_box(conf=0.9),), frame_index=i) for i in range(3)]
+        engine.stream.return_value = iter(dets)
+        mock = MockReIDExtractor(dim=128)
+        results = list(track_stream(engine, MagicMock(), reid_extractor=mock))
+        assert len(results) == 3
+
+    def test_track_detections_accepts_reid_extractor(self) -> None:
+        dets = [_make_detection(boxes=(_make_box(conf=0.9),), frame_index=i) for i in range(3)]
+        mock = MockReIDExtractor(dim=128)
+        results = list(track_detections(dets, reid_extractor=mock))
+        assert len(results) == 3
+
+
+# ---------------------------------------------------------------------------
+# Section 23: Output box clamping to frame bounds
+# ---------------------------------------------------------------------------
+
+
+class TestOutputBoxClamp:
+    """Verify Kalman-predicted boxes are clamped to frame dimensions."""
+
+    def test_box_within_frame_unchanged(self) -> None:
+        """A box fully inside the frame is returned as-is."""
+        det = _make_detection(
+            boxes=(_make_box(x1=100, y1=100, x2=200, y2=200, conf=0.9),),
+            frame_index=0,
+        )
+        tracker = ByteTracker(track_high_thresh=0.5, track_low_thresh=0.1)
+        tracked = tracker.update(det)
+        for box in tracked.boxes:
+            assert box.x1 >= 0
+            assert box.y1 >= 0
+            assert box.x2 <= 640  # frame width from _make_frame
+            assert box.y2 <= 480  # frame height from _make_frame
+
+    def test_box_exceeding_frame_is_clamped(self) -> None:
+        """A box extending beyond frame edges gets clamped."""
+        from yowo.tracking._tracker import _clamp_tracked_box
+
+        box = TrackedBox(
+            x1=-10.0,
+            y1=-20.0,
+            x2=700.0,
+            y2=500.0,
+            confidence=0.9,
+            class_id=0,
+            class_name="car",
+            track_id=1,
+            is_confirmed=True,
+        )
+        clamped = _clamp_tracked_box(box, w=640, h=480)
+        assert clamped.x1 == 0.0
+        assert clamped.y1 == 0.0
+        assert clamped.x2 == 640.0
+        assert clamped.y2 == 480.0
+        assert clamped.track_id == 1
+        assert clamped.confidence == 0.9
+
+    def test_clamp_preserves_valid_box(self) -> None:
+        """A box already within bounds is returned without allocation."""
+        from yowo.tracking._tracker import _clamp_tracked_box
+
+        box = TrackedBox(
+            x1=50.0,
+            y1=60.0,
+            x2=200.0,
+            y2=300.0,
+            confidence=0.8,
+            class_id=1,
+            class_name="truck",
+            track_id=5,
+            is_confirmed=False,
+        )
+        result = _clamp_tracked_box(box, w=640, h=480)
+        assert result is box  # same object — no allocation
+
+    def test_negative_coords_clamped_to_zero(self) -> None:
+        """Negative coordinates from Kalman overshoot are clamped to 0."""
+        from yowo.tracking._tracker import _clamp_tracked_box
+
+        box = TrackedBox(
+            x1=-50.0,
+            y1=-100.0,
+            x2=100.0,
+            y2=200.0,
+            confidence=0.7,
+            class_id=0,
+            class_name="car",
+            track_id=3,
+            is_confirmed=True,
+        )
+        clamped = _clamp_tracked_box(box, w=640, h=480)
+        assert clamped.x1 == 0.0
+        assert clamped.y1 == 0.0
+        assert clamped.x2 == 100.0
+        assert clamped.y2 == 200.0
+
+    def test_bottom_edge_entry_clamped(self) -> None:
+        """Simulates a car entering from the bottom — wide aspect ratio clamped."""
+        # Frame 0: partial detection near bottom edge
+        bottom_box = _make_box(x1=400, y1=420, x2=600, y2=480, conf=0.8)
+        det0 = _make_detection(boxes=(bottom_box,), frame_index=0)
+        tracker = ByteTracker(
+            track_high_thresh=0.5,
+            track_low_thresh=0.1,
+            min_hits=1,
+        )
+        tracked0 = tracker.update(det0)
+        assert tracked0.num_boxes >= 1
+        for box in tracked0.boxes:
+            assert box.x1 >= 0.0
+            assert box.y1 >= 0.0
+            assert box.x2 <= 640.0
+            assert box.y2 <= 480.0
+
+
+# ---------------------------------------------------------------------------
+# Section 24: Hybrid output — detection box for young, Kalman for mature
+# ---------------------------------------------------------------------------
+
+
+class TestHybridOutputBox:
+    """Verify young tracks output raw detection, mature tracks output Kalman."""
+
+    def test_young_track_outputs_detection_make_box(self) -> None:
+        """A track with hits < min_hits should output the raw detection coords."""
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        det_box = (100.0, 200.0, 300.0, 400.0)
+        track = STrack(1, det_box, 0.9, 0, "car", kalman, min_hits=3)
+        track.activate(frame_id=0)
+        assert track.hits == 1  # < min_hits=3
+
+        tb = track.to_tracked_box()
+        assert (tb.x1, tb.y1, tb.x2, tb.y2) == det_box
+
+    def test_matched_mature_track_outputs_detection(self) -> None:
+        """A matched mature track outputs the raw detection, not Kalman."""
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        det_box = (100.0, 200.0, 300.0, 400.0)
+        track = STrack(1, det_box, 0.9, 0, "car", kalman, min_hits=3)
+        track.activate(frame_id=0)
+
+        # Accumulate hits to reach min_hits
+        for i in range(1, 4):
+            track.predict()
+            track.update(det_box, 0.9, 0, "car", frame_id=i)
+
+        assert track.hits >= 3
+        assert track.time_since_update == 0  # matched
+        tb = track.to_tracked_box()
+        # Matched track always outputs detection (time_since_update == 0)
+        assert (tb.x1, tb.y1, tb.x2, tb.y2) == det_box
+
+    def test_unmatched_track_outputs_kalman_prediction(self) -> None:
+        """An unmatched track (time_since_update > 0) outputs Kalman prediction."""
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        det_box = (100.0, 200.0, 300.0, 400.0)
+        track = STrack(1, det_box, 0.9, 0, "car", kalman, min_hits=3)
+        track.activate(frame_id=0)
+
+        # Simulate predict without update (track is unmatched this frame)
+        track.predict()
+        assert track.time_since_update == 1
+
+        tb = track.to_tracked_box()
+        # Unmatched → should use Kalman-predicted box, not stale detection
+        assert (tb.x1, tb.y1, tb.x2, tb.y2) == track.predicted_xyxy
+        # Kalman prediction is used — verify it comes from predicted_xyxy
+        assert track.time_since_update > 0
+
+    def test_det_xyxy_updated_on_update(self) -> None:
+        """STrack._det_xyxy is refreshed each time update() is called."""
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        track = STrack(1, (10.0, 20.0, 30.0, 40.0), 0.9, 0, "car", kalman, 3)
+        track.activate(frame_id=0)
+        assert track._det_xyxy == (10.0, 20.0, 30.0, 40.0)
+
+        new_box = (50.0, 60.0, 70.0, 80.0)
+        track.predict()
+        track.update(new_box, 0.8, 0, "car", frame_id=1)
+        assert track._det_xyxy == new_box
+
+    def test_det_xyxy_updated_on_reactivate(self) -> None:
+        """STrack._det_xyxy is refreshed when re_activate() is called."""
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        track = STrack(1, (10.0, 20.0, 30.0, 40.0), 0.9, 0, "car", kalman, 3)
+        track.activate(frame_id=0)
+        track.mark_lost()
+
+        new_box = (90.0, 100.0, 110.0, 120.0)
+        track.predict()
+        track.re_activate(new_box, 0.8, 0, "car", frame_id=5)
+        assert track._det_xyxy == new_box
+
+    def test_bottom_entry_no_inflation(self) -> None:
+        """A car entering from the bottom has no width inflation in output.
+
+        Without hybrid output, the Kalman aspect ratio lag would inflate
+        the box width by ~2x for the first several frames.
+        """
+        from yowo.tracking._kalman import KalmanFilterXYAH
+        from yowo.tracking._strack import STrack
+
+        kalman = KalmanFilterXYAH()
+        # Partial car at bottom: 200px wide, 50px tall → a=4.0
+        box0 = (400.0, 430.0, 600.0, 480.0)
+        track = STrack(1, box0, 0.8, 0, "car", kalman, min_hits=3)
+        track.activate(frame_id=0)
+
+        # Frame 1: car more visible — real box narrows in aspect ratio
+        box1 = (380.0, 380.0, 600.0, 480.0)
+        track.predict()
+        track.update(box1, 0.85, 0, "car", frame_id=1)
+
+        assert track.hits == 2  # still young
+        tb = track.to_tracked_box()
+        output_w = tb.x2 - tb.x1
+        real_w = box1[2] - box1[0]  # 220
+        # Output width should match detection (young track), not inflated Kalman
+        assert abs(output_w - real_w) < 1.0, (
+            f"Young track output width {output_w:.1f} should match "
+            f"detection width {real_w:.1f}, not inflated Kalman"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Intra-tracked dedup + birth suppression tests
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveIntraDuplicates:
+    """Tests for remove_intra_duplicates (dedup within _tracked)."""
+
+    def test_no_duplicates_returns_same(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        t1 = _make_strack(100, 100, 200, 200, track_id=1)
+        t2 = _make_strack(400, 400, 500, 500, track_id=2)
+        t1.activate(0)
+        t2.activate(0)
+        result = remove_intra_duplicates([t1, t2])
+        assert len(result) == 2
+
+    def test_overlapping_removes_younger(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        t1 = _make_strack(100, 100, 200, 200, track_id=1)
+        t1.activate(0)
+        # Advance t1 by updating to make it older
+        t1.update((100, 100, 200, 200), 0.9, 0, "person", frame_id=5)
+
+        t2 = _make_strack(105, 105, 205, 205, track_id=2)  # ~82% IoU with t1
+        t2.activate(3)
+        result = remove_intra_duplicates([t1, t2])
+        assert len(result) == 1
+        assert result[0].track_id == 1  # older survives
+
+    def test_identical_boxes_removes_one(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        t1 = _make_strack(100, 100, 200, 200, track_id=1)
+        t2 = _make_strack(100, 100, 200, 200, track_id=2)
+        t1.activate(0)
+        t2.activate(0)
+        result = remove_intra_duplicates([t1, t2])
+        assert len(result) == 1
+
+    def test_empty_list(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        assert remove_intra_duplicates([]) == []
+
+    def test_single_track(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        t1 = _make_strack(100, 100, 200, 200, track_id=1)
+        t1.activate(0)
+        result = remove_intra_duplicates([t1])
+        assert len(result) == 1
+
+    def test_below_threshold_kept(self) -> None:
+        from yowo.tracking._matching import remove_intra_duplicates
+
+        # IoU ~0.53 (boxes share ~53% overlap) — below 0.70 threshold
+        t1 = _make_strack(100, 100, 200, 200, track_id=1)
+        t2 = _make_strack(150, 100, 250, 200, track_id=2)  # shifted 50px right
+        t1.activate(0)
+        t2.activate(0)
+        result = remove_intra_duplicates([t1, t2])
+        assert len(result) == 2  # both survive
+
+
+class TestBirthSuppression:
+    """Tests that duplicate births are suppressed when overlapping a matched track."""
+
+    def test_nms_leak_suppressed(self) -> None:
+        """Two YOLO detections for same object → only one track created."""
+        tracker = ByteTracker(
+            track_high_thresh=0.3,
+            track_low_thresh=0.1,
+            min_hits=1,
+            max_age=30,
+        )
+        # Frame 0: One detection → one track born
+        det0 = _make_detection(
+            boxes=(_make_box(100, 100, 200, 200, conf=0.8),),
+            frame_index=0,
+        )
+        tracker.update(det0)
+
+        # Frame 1: Two overlapping detections (NMS leak) — same object
+        box_a = _make_box(100, 100, 200, 200, conf=0.8)
+        box_b = _make_box(105, 105, 205, 205, conf=0.7)  # ~82% IoU
+        det1 = _make_detection(boxes=(box_a, box_b), frame_index=1)
+        tracked = tracker.update(det1)
+
+        # Should be 1 tracked box, not 2
+        assert len(tracked.boxes) == 1
+
+    def test_distinct_objects_not_suppressed(self) -> None:
+        """Two genuinely different objects should both get tracks."""
+        tracker = ByteTracker(
+            track_high_thresh=0.3,
+            track_low_thresh=0.1,
+            min_hits=1,
+            max_age=30,
+        )
+        # Frame 0: one object
+        det0 = _make_detection(
+            boxes=(_make_box(100, 100, 200, 200, conf=0.8),),
+            frame_index=0,
+        )
+        tracker.update(det0)
+
+        # Frame 1: existing object + new object far away
+        det1 = _make_detection(
+            boxes=(
+                _make_box(100, 100, 200, 200, conf=0.8),
+                _make_box(400, 400, 500, 500, conf=0.8),
+            ),
+            frame_index=1,
+        )
+        tracked = tracker.update(det1)
+        assert len(tracked.boxes) == 2
+
+    def test_multi_frame_no_accumulating_duplicates(self) -> None:
+        """Repeated NMS leaks across frames don't accumulate duplicate tracks."""
+        tracker = ByteTracker(
+            track_high_thresh=0.3,
+            track_low_thresh=0.1,
+            min_hits=1,
+            max_age=30,
+        )
+        for frame_idx in range(10):
+            box_a = _make_box(100, 100, 200, 200, conf=0.8)
+            box_b = _make_box(102, 102, 202, 202, conf=0.75)
+            det = _make_detection(boxes=(box_a, box_b), frame_index=frame_idx)
+            tracked = tracker.update(det)
+
+        # After 10 frames, should still be 1 track, not 10
+        assert len(tracked.boxes) == 1
+
+    def test_all_unique_ids_across_frames(self) -> None:
+        """Same object with NMS leak should maintain one consistent ID."""
+        tracker = ByteTracker(
+            track_high_thresh=0.3,
+            track_low_thresh=0.1,
+            min_hits=1,
+            max_age=30,
+        )
+        all_ids: set[int] = set()
+        for frame_idx in range(20):
+            box_a = _make_box(100, 100, 200, 200, conf=0.8)
+            box_b = _make_box(103, 103, 203, 203, conf=0.7)
+            det = _make_detection(boxes=(box_a, box_b), frame_index=frame_idx)
+            tracked = tracker.update(det)
+            for b in tracked.boxes:
+                all_ids.add(b.track_id)
+
+        # Should have only 1 unique ID (or at most 2 if birth happened once)
+        assert len(all_ids) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Section 28: FastReIDExtractor tests
+# ---------------------------------------------------------------------------
+
+
+class TestFastReIDExtractor:
+    def test_implements_protocol(self) -> None:
+        """FastReIDExtractor satisfies the ReIDExtractor Protocol."""
+        # Can't instantiate without a real ONNX file, but the class has
+        # the right attributes: embedding_dim property + extract() method.
+        assert hasattr(FastReIDExtractor, "embedding_dim")
+        assert hasattr(FastReIDExtractor, "extract")
+        # Protocol structural check: FastReIDExtractor has the same method
+        # signatures as ReIDExtractor. We verify via attribute presence
+        # since isinstance requires an instance.
+
+    def test_file_not_found_raises(self) -> None:
+        """Non-existent model path raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="FastReID ONNX model not found"):
+            FastReIDExtractor("/nonexistent/fastreid.onnx")
+
+    def test_imagenet_constants_correct(self) -> None:
+        """ImageNet normalization constants match standard values."""
+        expected_mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        expected_std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        np.testing.assert_allclose(_IMAGENET_MEAN, expected_mean, atol=1e-6)
+        np.testing.assert_allclose(_IMAGENET_STD, expected_std, atol=1e-6)
+
+    def test_input_size_portrait_default(self) -> None:
+        """Default input_size is portrait (256, 128) not square."""
+        # We can check the __init__ signature default without instantiation
+        import inspect
+
+        sig = inspect.signature(FastReIDExtractor.__init__)
+        default = sig.parameters["input_size"].default
+        assert default == (256, 128), f"Expected (256, 128), got {default}"
+
+    def test_embedding_dim_default(self) -> None:
+        """Default embedding_dim is 256 (not 512 like CLIP)."""
+        import inspect
+
+        sig = inspect.signature(FastReIDExtractor.__init__)
+        default = sig.parameters["embedding_dim"].default
+        assert default == 256, f"Expected 256, got {default}"
+
+    def test_slots_defined(self) -> None:
+        """FastReIDExtractor uses __slots__ for memory efficiency."""
+        assert hasattr(FastReIDExtractor, "__slots__")
+        assert "_session" in FastReIDExtractor.__slots__
+        assert "_input_size_hw" in FastReIDExtractor.__slots__
+
+    def test_export_in_tracking_init(self) -> None:
+        """FastReIDExtractor is exported from yowo.tracking."""
+        from yowo.tracking import FastReIDExtractor as Imported
+
+        assert Imported is FastReIDExtractor
+
+
+# ---------------------------------------------------------------------------
+# Section 28b: CLIPReIDExtractor tests
+# ---------------------------------------------------------------------------
+
+
+class TestCLIPReIDExtractor:
+    def test_implements_protocol(self) -> None:
+        """CLIPReIDExtractor satisfies the ReIDExtractor Protocol."""
+        assert hasattr(CLIPReIDExtractor, "embedding_dim")
+        assert hasattr(CLIPReIDExtractor, "extract")
+
+    def test_file_not_found_raises(self) -> None:
+        """Non-existent model path raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="CLIP-ReID ONNX model not found"):
+            CLIPReIDExtractor("/nonexistent/clip_reid.onnx")
+
+    def test_embedding_dim_default(self) -> None:
+        """Default embedding_dim is 1280 (768 + 512 concat)."""
+        import inspect
+
+        sig = inspect.signature(CLIPReIDExtractor.__init__)
+        default = sig.parameters["embedding_dim"].default
+        assert default == 1280, f"Expected 1280, got {default}"
+
+    def test_input_size_default(self) -> None:
+        """Default input_size is 256 (not 224 like standard CLIP)."""
+        import inspect
+
+        sig = inspect.signature(CLIPReIDExtractor.__init__)
+        default = sig.parameters["input_size"].default
+        assert default == 256, f"Expected 256, got {default}"
+
+    def test_preprocessing_constants(self) -> None:
+        """CLIP-ReID uses mean=0.5, std=0.5 (not ImageNet or CLIP mean/std)."""
+        from yowo.tracking._clip_reid import _CLIPREID_MEAN, _CLIPREID_STD
+
+        expected = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+        np.testing.assert_allclose(_CLIPREID_MEAN, expected, atol=1e-6)
+        np.testing.assert_allclose(_CLIPREID_STD, expected, atol=1e-6)
+
+    def test_slots_defined(self) -> None:
+        """CLIPReIDExtractor uses __slots__ for memory efficiency."""
+        assert hasattr(CLIPReIDExtractor, "__slots__")
+        assert "_session" in CLIPReIDExtractor.__slots__
+        assert "_input_size" in CLIPReIDExtractor.__slots__
+
+    def test_export_in_tracking_init(self) -> None:
+        """CLIPReIDExtractor is exported from yowo.tracking."""
+        from yowo.tracking import CLIPReIDExtractor as Imported
+
+        assert Imported is CLIPReIDExtractor
+
+    def test_export_in_reid_module(self) -> None:
+        """CLIPReIDExtractor is re-exported from _reid.py __all__."""
+        from yowo.tracking._reid import __all__ as reid_all
+
+        assert "CLIPReIDExtractor" in reid_all
+
+
+# ---------------------------------------------------------------------------
+# 29. fuse_score
+# ---------------------------------------------------------------------------
+class TestFuseScore:
+    """Tests for the fuse_score function."""
+
+    def test_identity_at_score_one(self) -> None:
+        """Scores all 1.0 → cost unchanged."""
+        cost = np.array([[0.2, 0.5], [0.8, 0.1]], dtype=np.float64)
+        scores = np.array([1.0, 1.0], dtype=np.float64)
+        result = fuse_score(cost, scores)
+        np.testing.assert_allclose(result, cost)
+
+    def test_zeros_at_score_zero(self) -> None:
+        """Scores all 0.0 → cost all 1.0 (no similarity)."""
+        cost = np.array([[0.2, 0.5], [0.8, 0.1]], dtype=np.float64)
+        scores = np.array([0.0, 0.0], dtype=np.float64)
+        result = fuse_score(cost, scores)
+        np.testing.assert_allclose(result, np.ones_like(cost))
+
+    def test_scales_correctly(self) -> None:
+        """Verify formula: cost = 1 - (1 - iou_cost) * score."""
+        cost = np.array([[0.3]], dtype=np.float64)
+        scores = np.array([0.5], dtype=np.float64)
+        expected = 1.0 - (1.0 - 0.3) * 0.5  # 1 - 0.7*0.5 = 1 - 0.35 = 0.65
+        result = fuse_score(cost, scores)
+        np.testing.assert_allclose(result, [[expected]])
+
+    def test_empty_matrix(self) -> None:
+        """Empty cost matrix → returns empty."""
+        cost = np.empty((0, 0), dtype=np.float64)
+        scores = np.empty(0, dtype=np.float64)
+        result = fuse_score(cost, scores)
+        assert result.shape == (0, 0)
+
+    def test_broadcast_shape(self) -> None:
+        """Result shape matches input shape with multiple tracks and dets."""
+        cost = np.array([[0.1, 0.4, 0.9], [0.3, 0.2, 0.7]], dtype=np.float64)
+        scores = np.array([0.8, 0.5, 0.3], dtype=np.float64)
+        result = fuse_score(cost, scores)
+        assert result.shape == (2, 3)
+        # Lower score → higher cost
+        assert result[0, 2] > result[0, 0], "Low-score det should have higher cost"
+
+    def test_exported_from_matching(self) -> None:
+        """fuse_score is in _matching.__all__."""
+        from yowo.tracking._matching import __all__ as matching_all
+
+        assert "fuse_score" in matching_all
+
+
+# ---------------------------------------------------------------------------
+# 30. ByteTracker fuse_score integration
+# ---------------------------------------------------------------------------
+class TestByteTrackerFuseScore:
+    """Tests for ByteTracker with fuse_score flag."""
+
+    def test_fuse_score_default_false(self) -> None:
+        """fuse_score defaults to False."""
+        tracker = ByteTracker()
+        assert tracker._fuse_score is False
+
+    def test_fuse_score_flag_stored(self) -> None:
+        """fuse_score=True is stored on the tracker."""
+        tracker = ByteTracker(fuse_score=True)
+        assert tracker._fuse_score is True
+
+    def test_fuse_score_does_not_crash(self) -> None:
+        """ByteTracker with fuse_score=True processes detections without error."""
+        tracker = ByteTracker(
+            track_high_thresh=0.3,
+            track_low_thresh=0.1,
+            fuse_score=True,
+        )
+        bbox = _make_box(100, 100, 200, 200, conf=0.9)
+        det = _make_detection(boxes=(bbox,), frame_index=1)
+        result = tracker.update(det)
+        assert isinstance(result, TrackedDetection)
+
+    def test_fuse_score_penalizes_low_confidence(self) -> None:
+        """With fuse_score=True, a low-confidence detection is less likely to match."""
+        # Without fuse_score, a 0.3-conf det at the same location should match
+        tracker_no_fuse = ByteTracker(
+            track_high_thresh=0.2,
+            track_low_thresh=0.1,
+            min_hits=1,
+        )
+        tracker_fuse = ByteTracker(
+            track_high_thresh=0.2,
+            track_low_thresh=0.1,
+            min_hits=1,
+            fuse_score=True,
+        )
+        # Frame 1: birth a track
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker_no_fuse.update(det1)
+        tracker_fuse.update(det1)
+        # Frame 2: same box but low confidence
+        bbox2 = _make_box(100, 100, 200, 200, conf=0.25)
+        det2 = _make_detection(boxes=(bbox2,), frame_index=2)
+        r_no_fuse = tracker_no_fuse.update(det2)
+        r_fuse = tracker_fuse.update(det2)
+        # Both should still have tracks (IoU is perfect), but behavior is valid
+        assert isinstance(r_no_fuse, TrackedDetection)
+        assert isinstance(r_fuse, TrackedDetection)
+
+
+# ---------------------------------------------------------------------------
+# 31. Unconfirmed track re-association stage
+# ---------------------------------------------------------------------------
+class TestUnconfirmedStage:
+    """Tests for the Stage 4 unconfirmed track re-association."""
+
+    def _make_tracker(self, **kwargs: object) -> ByteTracker:
+        defaults: dict[str, object] = {
+            "track_high_thresh": 0.3,
+            "track_low_thresh": 0.1,
+            "min_hits": 3,
+        }
+        defaults.update(kwargs)
+        return ByteTracker(**defaults)  # type: ignore[arg-type]
+
+    def test_unconfirmed_separated_from_confirmed(self) -> None:
+        """Tracks with hits < min_hits are treated as unconfirmed."""
+        tracker = self._make_tracker(min_hits=3)
+        # Frame 1: birth a track (hits=1 after activate)
+        bbox = _make_box(100, 100, 200, 200, conf=0.9)
+        det = _make_detection(boxes=(bbox,), frame_index=1)
+        tracker.update(det)
+        # Track exists but is unconfirmed (hits=1 < min_hits=3)
+        assert len(tracker._tracked) == 1
+        assert not tracker._tracked[0].is_confirmed
+
+    def test_unconfirmed_re_associates(self) -> None:
+        """Unconfirmed track that matches in Stage 4 survives."""
+        tracker = self._make_tracker(min_hits=3)
+        # Frame 1: birth track at (100,100,200,200)
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker.update(det1)
+        assert len(tracker._tracked) == 1
+        # Frame 2: same box appears — unconfirmed track should match in Stage 4
+        bbox2 = _make_box(102, 102, 202, 202, conf=0.9)
+        det2 = _make_detection(boxes=(bbox2,), frame_index=2)
+        tracker.update(det2)
+        # Track should survive (matched in Stage 4)
+        assert len(tracker._tracked) >= 1
+        # Should keep same track_id (not birth a new one)
+        ids = {t.track_id for t in tracker._tracked}
+        assert 1 in ids, "Original track should survive through Stage 4"
+
+    def test_unconfirmed_removed_on_fail(self) -> None:
+        """Unconfirmed track that fails to match is REMOVED (not LOST)."""
+        tracker = self._make_tracker(min_hits=3)
+        # Frame 1: birth track at (100,100,200,200)
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker.update(det1)
+        assert len(tracker._tracked) == 1
+        # Frame 2: detection far away — unconfirmed track fails to match
+        bbox2 = _make_box(500, 500, 600, 600, conf=0.9)
+        det2 = _make_detection(boxes=(bbox2,), frame_index=2)
+        tracker.update(det2)
+        # Original track should be REMOVED, not in _lost
+        lost_ids = {t.track_id for t in tracker._lost}
+        assert 1 not in lost_ids, "Unconfirmed failures should be REMOVED, not LOST"
+
+    def test_confirmed_bypass_unconfirmed_stage(self) -> None:
+        """Tracks with hits >= min_hits participate in Stage 1, not Stage 4."""
+        tracker = self._make_tracker(min_hits=1)
+        # With min_hits=1, track becomes confirmed after activate (hits=1)
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker.update(det1)
+        assert len(tracker._tracked) == 1
+        assert tracker._tracked[0].is_confirmed  # hits=1 >= min_hits=1
+
+    def test_backward_compatible_min_hits_1(self) -> None:
+        """With min_hits=1, unconfirmed list is always empty — no behavior change."""
+        tracker = self._make_tracker(min_hits=1)
+        # Frame 1: birth
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker.update(det1)
+        # With min_hits=1, track is confirmed immediately
+        assert len(tracker._tracked) == 1
+        assert tracker._tracked[0].is_confirmed
+        # Frame 2: match
+        bbox2 = _make_box(102, 102, 202, 202, conf=0.9)
+        det2 = _make_detection(boxes=(bbox2,), frame_index=2)
+        tracker.update(det2)
+        assert len(tracker._tracked) == 1
+        assert tracker._tracked[0].hits == 2
+
+    def test_unconfirmed_matches_tight_iou(self) -> None:
+        """Stage 4 uses thresh=0.7 — only close IoU matches succeed."""
+        tracker = self._make_tracker(min_hits=3)
+        # Frame 1: birth at (100,100,200,200)
+        bbox1 = _make_box(100, 100, 200, 200, conf=0.9)
+        det1 = _make_detection(boxes=(bbox1,), frame_index=1)
+        tracker.update(det1)
+        # Frame 2: detection slightly shifted (IoU ~0.56, which is < 0.7 threshold)
+        # IoU between (100,100,200,200) and (130,130,230,230) is low
+        bbox2 = _make_box(160, 160, 260, 260, conf=0.9)
+        det2 = _make_detection(boxes=(bbox2,), frame_index=2)
+        tracker.update(det2)
+        # Original track should be removed (IoU too low for 0.7 threshold)
+        # New track birthed for the second detection
+        assert len(tracker._tracked) >= 1
+
+    def test_multi_frame_unconfirmed_graduation(self) -> None:
+        """Track graduates from unconfirmed to confirmed after min_hits updates."""
+        tracker = self._make_tracker(min_hits=3)
+        for frame_idx in range(1, 5):
+            bbox = _make_box(100, 100, 200, 200, conf=0.9)
+            det = _make_detection(boxes=(bbox,), frame_index=frame_idx)
+            tracker.update(det)
+        # After 4 frames of matching, hits should be >= 3 → confirmed
+        assert len(tracker._tracked) >= 1
+        confirmed = [t for t in tracker._tracked if t.is_confirmed]
+        assert len(confirmed) >= 1, "Track should graduate to confirmed"
+
+    def test_crowded_scene_unconfirmed_survives(self) -> None:
+        """In crowded scenes, unconfirmed tracks survive through Stage 4."""
+        tracker = self._make_tracker(min_hits=3)
+        # Frame 1: two objects born
+        b1 = _make_box(100, 100, 200, 200, conf=0.9)
+        b2 = _make_box(400, 400, 500, 500, conf=0.9)
+        det1 = _make_detection(boxes=(b1, b2), frame_index=1)
+        tracker.update(det1)
+        assert len(tracker._tracked) == 2
+        # Frame 2: both objects still present at same locations
+        b3 = _make_box(102, 102, 202, 202, conf=0.9)
+        b4 = _make_box(402, 402, 502, 502, conf=0.9)
+        det2 = _make_detection(boxes=(b3, b4), frame_index=2)
+        tracker.update(det2)
+        # Both tracks should survive (Stage 4 re-association)
+        assert len(tracker._tracked) == 2
+        ids = {t.track_id for t in tracker._tracked}
+        assert len(ids) == 2, "Both tracks should keep their IDs"

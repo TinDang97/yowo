@@ -270,6 +270,95 @@ def _munkres(
     return row_ind.astype(np.intp), col_ind.astype(np.intp)
 
 
+def appearance_distance(
+    track_embeddings: NDArray[np.float32],
+    det_embeddings: NDArray[np.float32],
+) -> NDArray[np.float64]:
+    """Cosine distance matrix between track and detection embeddings.
+
+    Args:
+        track_embeddings: (N, D) L2-normalized track appearance vectors.
+        det_embeddings: (M, D) L2-normalized detection appearance vectors.
+
+    Returns:
+        (N, M) cosine distance matrix in [0, 2]. Lower = more similar.
+    """
+    if track_embeddings.size == 0 or det_embeddings.size == 0:
+        return np.zeros(
+            (track_embeddings.shape[0], det_embeddings.shape[0]),
+            dtype=np.float64,
+        )
+    similarity = track_embeddings @ det_embeddings.T  # (N, M)
+    return (1.0 - similarity).astype(np.float64)
+
+
+def gated_fused_cost(
+    iou_cost: NDArray[np.float64],
+    track_embeddings: NDArray[np.float32],
+    det_embeddings: NDArray[np.float32],
+    theta_e: float = 0.30,
+    theta_iou: float = 0.5,
+) -> NDArray[np.float64]:
+    """BoT-SORT gated min-cost fusion of IoU and appearance distance.
+
+    For each (track, detection) pair:
+    - Compute cosine distance from embeddings
+    - If cos_dist < theta_e AND iou_cost < theta_iou (both gates pass):
+        d_hat = 0.5 * cos_dist (scaled appearance cost)
+    - Else:
+        d_hat = 1.0 (reject appearance, fall back to IoU)
+    - Final cost = min(iou_cost, d_hat)
+
+    Args:
+        iou_cost: (N, M) IoU distance matrix.
+        track_embeddings: (N, D) L2-normalized track embeddings.
+        det_embeddings: (M, D) L2-normalized detection embeddings.
+        theta_e: Appearance gate threshold. Default 0.30.
+        theta_iou: IoU gate threshold. Default 0.5.
+
+    Returns:
+        (N, M) fused cost matrix.
+    """
+    cos_dist = 1.0 - track_embeddings @ det_embeddings.T  # (N, M)
+    gate = (cos_dist < theta_e) & (iou_cost < theta_iou)
+    d_hat = np.where(gate, 0.5 * cos_dist, 1.0)
+    return np.minimum(iou_cost, d_hat).astype(np.float64)
+
+
+def needs_reid(
+    iou_cost: NDArray[np.float64],
+    clear_thresh: float = 0.4,
+    no_overlap_thresh: float = 0.7,
+) -> bool:
+    """Check whether ReID extraction is needed based on IoU ambiguity.
+
+    Returns True when IoU cost matrix has ambiguous assignments
+    (multiple tracks with moderate overlap for a detection).
+    Returns False when all assignments are clear or absent.
+
+    Args:
+        iou_cost: (N, M) IoU distance matrix.
+        clear_thresh: Cost below which match is unambiguous.
+        no_overlap_thresh: Cost above which no spatial association exists.
+
+    Returns:
+        True if appearance features would help disambiguation.
+    """
+    if iou_cost.size == 0:
+        return False
+    for col in range(iou_cost.shape[1]):
+        col_costs = iou_cost[:, col]
+        clear_matches = int(np.sum(col_costs < clear_thresh))
+        if clear_matches == 1:
+            continue
+        if np.all(col_costs > no_overlap_thresh):
+            continue
+        ambiguous = int(np.sum((col_costs >= clear_thresh) & (col_costs <= no_overlap_thresh)))
+        if ambiguous >= 2:
+            return True
+    return False
+
+
 def remove_duplicate_tracks(
     tracks_a: list[STrack],
     tracks_b: list[STrack],
@@ -309,9 +398,85 @@ def remove_duplicate_tracks(
     return filtered_a, filtered_b
 
 
+def remove_intra_duplicates(
+    tracks: list[STrack],
+    dist_thresh: float = 0.30,
+) -> list[STrack]:
+    """Remove duplicate tracks within a single list.
+
+    When two tracks in the same list have IoU distance below ``dist_thresh``
+    (i.e., IoU above ``1 - dist_thresh``), the shorter-lived track is removed.
+
+    This handles the case where YOLO NMS lets two boxes through for one
+    object and both land in ``_tracked`` (which cross-list dedup cannot catch).
+
+    Args:
+        tracks: List of active tracks to deduplicate.
+        dist_thresh: IoU distance below which two tracks are considered
+            duplicates.  Default 0.30 (IoU > 0.70).
+
+    Returns:
+        Filtered list with duplicates removed.
+    """
+    if len(tracks) < 2:
+        return tracks
+
+    boxes = np.array([t.predicted_xyxy for t in tracks], dtype=np.float64)
+    ious = iou_batch(boxes, boxes)
+    n = len(tracks)
+
+    remove: set[int] = set()
+    for i in range(n):
+        if i in remove:
+            continue
+        for j in range(i + 1, n):
+            if j in remove:
+                continue
+            if (1.0 - ious[i, j]) < dist_thresh:
+                age_i = tracks[i].frame_id - tracks[i].start_frame
+                age_j = tracks[j].frame_id - tracks[j].start_frame
+                if age_i >= age_j:
+                    remove.add(j)
+                else:
+                    remove.add(i)
+
+    if not remove:
+        return tracks
+    return [t for idx, t in enumerate(tracks) if idx not in remove]
+
+
+def fuse_score(
+    cost_matrix: NDArray[np.float64],
+    detection_scores: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Fuse detection confidence scores into IoU cost matrix.
+
+    Penalizes low-confidence detections by scaling the IoU similarity
+    by the detection score: ``cost = 1 - (1 - iou_cost) * score``.
+
+    Args:
+        cost_matrix: (N, M) IoU distance matrix.
+        detection_scores: (M,) detection confidence scores.
+
+    Returns:
+        (N, M) fused cost matrix.
+    """
+    if cost_matrix.size == 0:
+        return cost_matrix
+    sim = 1.0 - cost_matrix
+    scores = detection_scores[np.newaxis, :]
+    fused_sim = sim * scores
+    return 1.0 - fused_sim
+
+
 __all__ = [
+    "appearance_distance",
+    "fuse_score",
+    "gated_fused_cost",
     "iou_batch",
     "iou_distance",
     "linear_assignment",
+    "needs_reid",
     "remove_duplicate_tracks",
+    "remove_intra_duplicates",
 ]

@@ -357,6 +357,69 @@ Optional scipy acceleration for the Hungarian algorithm:
 pip install yowo[tracking]  # installs scipy
 ```
 
+### ReID-Enhanced Tracking
+
+When a `ReIDExtractor` is provided, ByteTracker uses appearance features to resolve ambiguous IoU assignments and recover long-lost tracks:
+
+```python
+from yowo.tracking import ByteTracker, CLIPExtractor, track_stream
+
+reid = CLIPExtractor("path/to/clip-vit-b16.onnx")
+tracker = ByteTracker(reid_extractor=reid)
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        for box in tracked.boxes:
+            print(f"ID:{box.track_id} {box.class_name}")
+```
+
+The `needs_reid()` gate skips ReID extraction when IoU assignments are unambiguous — achieving 99.8% skip rate on typical surveillance footage with zero FPS impact.
+
+---
+
+## Cross-Camera Tracking
+
+`CrossCameraTracker` unifies per-camera ByteTrackers with a shared embedding gallery for cross-camera identity matching. Each vehicle/person gets a `global_id` that persists across cameras.
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.tracking import CrossCameraTracker, CLIPReIDExtractor, CameraLinkModel, CameraLink
+
+# ReID model (CLIP-ReID fine-tuned on VeRi-776: mAP=82.28%, Rank-1=96.66%)
+reid = CLIPReIDExtractor("path/to/clip-reid-veri-vit-b16.onnx")
+
+# Optional: spatial-temporal transit constraints between cameras
+links = CameraLinkModel(links=[
+    CameraLink(src_camera="cam-entrance", dst_camera="cam-exit",
+               min_transit_sec=10.0, max_transit_sec=60.0),
+])
+
+tracker = CrossCameraTracker(
+    reid_extractor=reid,
+    camera_link_model=links,
+    match_threshold=0.35,
+)
+
+with InferenceEngine() as engine:
+    # Process frames from multiple cameras
+    for det in engine.stream(open_source("cam1.mp4")):
+        results = tracker.update("cam-entrance", det)
+        for box in results:
+            print(f"Global:{box.global_id} Local:{box.local_track_id} "
+                  f"{box.box.class_name} cam={box.camera_id}")
+```
+
+Built-in ReID extractors:
+
+| Extractor | Architecture | Dim | Domain | Install |
+|-----------|-------------|-----|--------|---------|
+| `CLIPExtractor` | CLIP ViT-B/16 | 512 | Zero-shot general | `yowo[tracking]` |
+| `CLIPReIDExtractor` | CLIP-ReID VeRi | 1280 | Vehicle (fine-tuned) | `yowo[tracking]` |
+| `FastReIDExtractor` | ResNet-50 SBS | 256 | Person ReID | `yowo[tracking]` |
+| `VehicleReIDExtractor` | ResNet-50 | 256 | Vehicle general | `yowo[tracking]` |
+
+Any class implementing the `ReIDExtractor` Protocol can be used as a drop-in replacement.
+
 ---
 
 ## Count
@@ -604,7 +667,7 @@ except YowoError as e:
 | io | [`src/yowo/io/`](src/yowo/io/README.md) | Frame sources (image, video, RTSP, directory), batch preprocessing, output sinks |
 | models | [`src/yowo/models/`](src/yowo/models/README.md) | Model family / size registry, weight download, and `~/.cache/yowo/weights/` cache management |
 | postprocess | [`src/yowo/postprocess/`](src/yowo/postprocess/README.md) | Decode raw backend tensors into `Detection` objects; NMS for backends that return raw proposals |
-| tracking | `src/yowo/tracking/` | ByteTrack multi-object tracking — Kalman filter, two-stage IoU association, persistent track IDs |
+| tracking | `src/yowo/tracking/` | ByteTrack multi-object tracking, cross-camera ReID, embedding gallery, appearance-gated fusion, camera link constraints |
 | utils | `src/yowo/utils/` | Reusable drawing/annotation utilities — palettes, bounding boxes, zones, lines, text panels, factories |
 
 ---
@@ -641,6 +704,8 @@ Architecture and module contracts are documented in:
 | [ONNX + CoreML EP + MPS Optimization](docs/experiments/2026-02-24-onnx-coreml-optimization-benchmark.md) | CoreML EP auto-detection for Apple Neural Engine: **4.36x avg faster** than PyTorch across all 10 variants (nano 140-188 FPS, XL 27-29 FPS). MPS (Metal GPU): 1.32x avg faster than ultralytics. KV cache analysis: +12% on CPU PyTorch (block cache), negligible on GPU/CoreML. |
 | [Phase 3 Source-Aware Pipeline](docs/experiments/2026-02-25-phase3-source-aware-pipeline-benchmark.md) | Source-aware dispatch (`_stream_live` / `_stream_pipeline`), `ThreadedFrameReader`, `FrameDropPolicy`, pre-allocated I/O buffers. CoreML 3.5–3.75× faster than PyTorch on offline video. Free-threaded Python 3.13t: `pipeline_workers=2` auto-selected → **58.4 FPS vs 39.3 FPS (1.49×)** on YOLO26n. |
 | [ByteTrack + ObjectCounter Annotated Video](docs/experiments/2026-02-28-bytetrack-counter-annotated-video-benchmark.md) | Full detect→track→count→annotate pipeline on 928-frame traffic video. ONNX+CoreML: YOLO26n **82 FPS**, YOLO26x 21 FPS. PyTorch+MPS: YOLO26s **63 FPS** (9% faster than CoreML for small models). CoreML wins 4/5 variants (up to 1.32×). ByteTrack overhead 0.3–0.7ms (1.3–5.2%). |
+| [VeRi-776 Cross-Camera Vehicle ReID](docs/experiments/2026-03-01-veri-776-cross-camera-reid-benchmark.md) | CLIP zero-shot mAP=9.32%, FastReID SBS-S50 mAP=8.43%, CLIP-ReID VeRi mAP=**82.28%** (Rank-1=**96.66%**). CoreML EP: 15.5 img/s. |
+| [ReID Method Comparison](docs/experiments/2026-03-01-reid-method-comparison.md) | `needs_reid()` gate achieves **99.8% skip rate** (2 ReID calls per 928 frames). Zero FPS impact: no-ReID 107 FPS, CLIP 106 FPS, FastReID 108 FPS. |
 
 ---
 

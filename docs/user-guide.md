@@ -31,22 +31,34 @@
    - [Graceful Shutdown](#75-graceful-shutdown)
    - [Stream Health Monitoring](#76-stream-health-monitoring)
 8. [Tracking (ByteTrack)](#8-tracking-bytetrack)
-9. [Object Counting](#9-object-counting)
-10. [Annotation Utils](#10-annotation-utils)
-11. [Model Export](#11-model-export)
-12. [Environment Variables](#12-environment-variables)
-13. [YAML Configuration](#13-yaml-configuration)
-14. [Error Reference](#14-error-reference)
-15. [Use Cases](#15-use-cases)
-    - [Traffic Surveillance on Apple Silicon](#151-traffic-surveillance-on-apple-silicon)
-    - [Live RTSP Camera Stream](#152-live-rtsp-camera-stream)
-    - [Custom Fine-Tuned Vehicle Detector](#153-custom-fine-tuned-vehicle-detector)
-    - [Batch Video Processing](#154-batch-video-processing)
-    - [Free-Threaded Python Parallelism](#155-free-threaded-python-parallelism)
-    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#156-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
-    - [Multi-Camera Warehouse Monitoring](#157-multi-camera-warehouse-monitoring)
-    - [Traffic Counting with ByteTrack](#158-traffic-counting-with-bytetrack)
-16. [Performance Reference](#16-performance-reference)
+   - [ByteTracker](#81-bytetracker)
+   - [track_stream](#82-track_stream)
+   - [TrackedDetection and TrackedBox](#83-trackeddetection-and-trackedbox)
+   - [Optional scipy acceleration](#84-optional-scipy-acceleration)
+   - [ReID-Enhanced Tracking](#85-reid-enhanced-tracking)
+   - [ReID Extractors](#86-reid-extractors)
+9. [Cross-Camera Tracking](#9-cross-camera-tracking)
+   - [CrossCameraTracker](#91-crosscameratracker)
+   - [EmbeddingGallery](#92-embeddinggallery)
+   - [CameraLinkModel](#93-cameralinkmodel)
+   - [GlobalTrackedBox](#94-globaltrackedbox)
+10. [Object Counting](#10-object-counting)
+11. [Annotation Utils](#11-annotation-utils)
+12. [Model Export](#12-model-export)
+13. [Environment Variables](#13-environment-variables)
+14. [YAML Configuration](#14-yaml-configuration)
+15. [Error Reference](#15-error-reference)
+16. [Use Cases](#16-use-cases)
+    - [Traffic Surveillance on Apple Silicon](#161-traffic-surveillance-on-apple-silicon)
+    - [Live RTSP Camera Stream](#162-live-rtsp-camera-stream)
+    - [Custom Fine-Tuned Vehicle Detector](#163-custom-fine-tuned-vehicle-detector)
+    - [Batch Video Processing](#164-batch-video-processing)
+    - [Free-Threaded Python Parallelism](#165-free-threaded-python-parallelism)
+    - [ONNX CoreML EP vs PyTorch MPS on Apple Silicon](#166-onnx-coreml-ep-vs-pytorch-mps-on-apple-silicon)
+    - [Multi-Camera Warehouse Monitoring](#167-multi-camera-warehouse-monitoring)
+    - [Traffic Counting with ByteTrack](#168-traffic-counting-with-bytetrack)
+    - [Cross-Camera Vehicle ReID](#169-cross-camera-vehicle-reid)
+17. [Performance Reference](#17-performance-reference)
 
 ---
 
@@ -1166,13 +1178,231 @@ pip install yowo[tracking]
 
 ByteTrack overhead: ~0.3ms (scipy) to ~1.2ms (numpy) per frame with 50 detections.
 
+### 8.5 ReID-Enhanced Tracking
+
+When a `ReIDExtractor` is provided, ByteTracker uses appearance features for:
+
+1. **Appearance-gated cost fusion** — BoT-SORT min-cost fusion of IoU and cosine distance. Only fires when `needs_reid()` detects ambiguous IoU assignments (99.8% skip rate on typical footage).
+2. **fuse_score** — penalizes low-confidence detections by scaling IoU similarity by detection score.
+3. **Appearance rescue** — stage-3 re-activation of long-lost tracks via appearance-only matching (no IoU requirement). Configurable `reid_lost_age` threshold.
+4. **EMA embedding update** — track embeddings are updated via exponential moving average with L2 renormalization.
+
+```python
+from yowo.tracking import ByteTracker, CLIPExtractor, track_stream
+from yowo import InferenceEngine, open_source
+
+reid = CLIPExtractor("path/to/clip-vit-b16.onnx")
+
+tracker = ByteTracker(
+    reid_extractor=reid,
+    reid_frame_interval=3,   # extract embeddings every N frames
+    reid_lost_age=5,         # frames before appearance rescue activates
+)
+
+with InferenceEngine() as engine:
+    for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
+        for box in tracked.boxes:
+            print(f"ID:{box.track_id} {box.class_name} {box.confidence:.2f}")
+```
+
+You can also pass `reid_extractor` directly to `track_stream()`:
+
+```python
+for tracked in track_stream(engine, source, reid_extractor=reid):
+    ...
+```
+
+### 8.6 ReID Extractors
+
+All extractors implement the `ReIDExtractor` Protocol:
+
+```python
+from yowo.tracking import ReIDExtractor
+
+class ReIDExtractor(Protocol):
+    @property
+    def embedding_dim(self) -> int: ...
+
+    def extract(
+        self,
+        frame_pixels: NDArray[np.uint8],          # HWC BGR uint8
+        boxes_xyxy: list[tuple[float, float, float, float]],
+    ) -> NDArray[np.float32] | None:              # (N, D) L2-normalized
+        ...
+```
+
+Built-in extractors:
+
+| Extractor | Architecture | Dim | Input | Domain |
+|-----------|-------------|-----|-------|--------|
+| `CLIPExtractor` | CLIP ViT-B/16 | 512 | 224x224 | Zero-shot general |
+| `CLIPReIDExtractor` | CLIP-ReID VeRi | 1280 | 256x256 | Vehicle (fine-tuned) |
+| `FastReIDExtractor` | ResNet-50 SBS | 256 | 256x128 | Person ReID |
+| `VehicleReIDExtractor` | ResNet-50 | 256 | 256x128 | Vehicle general |
+
+```python
+from yowo.tracking import CLIPExtractor, CLIPReIDExtractor, FastReIDExtractor
+
+# CLIP zero-shot (no training needed, works on any object type)
+reid = CLIPExtractor("clip-vit-b16.onnx")
+
+# CLIP-ReID fine-tuned on VeRi-776 (best for vehicle ReID)
+reid = CLIPReIDExtractor("clip-reid-veri-vit-b16.onnx")
+
+# FastReID (best for person ReID)
+reid = FastReIDExtractor("fastreid-sbs-s50.onnx")
+```
+
+Custom extractors just need to implement the Protocol:
+
+```python
+class MyReIDExtractor:
+    @property
+    def embedding_dim(self) -> int:
+        return 256
+
+    def extract(self, frame_pixels, boxes_xyxy):
+        # Your extraction logic here
+        return embeddings  # (N, 256) L2-normalized float32
+```
+
 ---
 
-## 9. Object Counting
+## 9. Cross-Camera Tracking
+
+`CrossCameraTracker` manages per-camera ByteTrackers with a shared embedding gallery for cross-camera identity matching. Each object gets a `global_id` that persists across camera transitions.
+
+### 9.1 `CrossCameraTracker`
+
+```python
+from yowo.tracking import CrossCameraTracker, CLIPReIDExtractor
+
+reid = CLIPReIDExtractor("clip-reid-veri-vit-b16.onnx")
+
+tracker = CrossCameraTracker(
+    reid_extractor=reid,
+    gallery_max_entries=10_000,   # bounded gallery size (FIFO eviction)
+    match_threshold=0.4,         # cosine distance threshold for matching
+    # ByteTracker kwargs forwarded to per-camera trackers:
+    track_high_thresh=0.3,
+    max_age=30,
+)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `reid_extractor` | *(required)* | Shared ReID model for embedding extraction |
+| `camera_link_model` | `None` | Optional spatial-temporal constraints |
+| `gallery_max_entries` | `10_000` | Max embeddings in gallery (FIFO eviction) |
+| `match_threshold` | `0.4` | Cosine distance threshold for cross-camera match |
+| `**tracker_kwargs` | — | Forwarded to each per-camera `ByteTracker` |
+
+Properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `gallery_size` | `int` | Current number of entries in the embedding gallery |
+| `camera_count` | `int` | Number of registered cameras |
+
+Usage:
+
+```python
+from yowo import InferenceEngine, open_source
+
+with InferenceEngine() as engine:
+    # Cameras auto-register on first update
+    for det in engine.stream(open_source("cam1.mp4")):
+        results = tracker.update("cam-1", det)
+        for box in results:
+            print(f"Global:{box.global_id} {box.box.class_name} cam={box.camera_id}")
+```
+
+Thread-safe: `update()` can be called concurrently from multiple camera threads.
+
+### 9.2 `EmbeddingGallery`
+
+Bounded gallery of L2-normalized track embeddings for cross-camera nearest-neighbor lookup:
+
+```python
+from yowo.tracking import EmbeddingGallery
+
+gallery = EmbeddingGallery(embedding_dim=512, max_entries=10_000)
+
+# Add an embedding
+global_id = gallery.add(
+    camera_id="cam-1",
+    local_track_id=42,
+    embedding=emb,        # (D,) L2-normalized float32
+    class_id=2,
+    timestamp=1709312400.0,
+)
+
+# Query for cross-camera matches (excludes same-camera entries)
+matches = gallery.query(
+    query_emb,
+    exclude_camera="cam-2",
+    top_k=5,
+    threshold=0.4,        # max cosine distance
+)
+
+for m in matches:
+    print(f"global_id={m.global_id} dist={m.distance:.3f} cam={m.camera_id}")
+```
+
+### 9.3 `CameraLinkModel`
+
+Prunes cross-camera matches using spatial-temporal transit constraints. A vehicle exiting Camera A can only appear in Camera B within a configured time window:
+
+```python
+from yowo.tracking import CameraLink, CameraLinkModel
+
+links = CameraLinkModel(
+    links=[
+        CameraLink(
+            src_camera="cam-entrance",
+            dst_camera="cam-exit",
+            min_transit_sec=10.0,   # vehicle takes at least 10s
+            max_transit_sec=60.0,   # vehicle takes at most 60s
+        ),
+        CameraLink(
+            src_camera="cam-exit",
+            dst_camera="cam-entrance",
+            min_transit_sec=15.0,
+            max_transit_sec=90.0,
+        ),
+    ],
+    default_window=(5.0, 120.0),  # fallback for unconfigured pairs
+)
+
+# Use with CrossCameraTracker
+tracker = CrossCameraTracker(
+    reid_extractor=reid,
+    camera_link_model=links,
+)
+```
+
+When no link is configured for a camera pair, a permissive default window is used (graceful degradation).
+
+### 9.4 `GlobalTrackedBox`
+
+Cross-camera output dataclass:
+
+```python
+@dataclass(frozen=True, slots=True)
+class GlobalTrackedBox:
+    box: TrackedBox          # original single-camera tracked box
+    camera_id: str           # source camera identifier
+    global_id: int | None    # cross-camera identity (None if unconfirmed)
+    local_track_id: int      # per-camera track ID from ByteTracker
+```
+
+---
+
+## 10. Object Counting
 
 `ObjectCounter` provides zone occupancy and line-crossing counting built on top of tracking results.
 
-### 9.1 Setup
+### 10.1 Setup
 
 ```python
 from yowo.counter import ObjectCounter, CountZone, CountLine, CrossDirection
@@ -1192,7 +1422,7 @@ line = CountLine("entrance", p1=(0.0, 360.0), p2=(1280.0, 360.0))
 counter = ObjectCounter(zones=[zone], lines=[line])
 ```
 
-### 9.2 Usage with tracking
+### 10.2 Usage with tracking
 
 ```python
 from yowo import InferenceEngine, open_source
@@ -1227,7 +1457,7 @@ print(counter.cumulative_counts)
 counter.reset()
 ```
 
-### 9.3 Geometry types
+### 10.3 Geometry types
 
 | Type | Fields | Description |
 |------|--------|-------------|
@@ -1235,7 +1465,7 @@ counter.reset()
 | `CountLine` | `line_id`, `p1`, `p2` | Line segment from `(x1,y1)` to `(x2,y2)` |
 | `CrossDirection` | `IN`, `OUT` | Direction relative to the line normal vector |
 
-### 9.4 Factory helpers
+### 10.4 Factory helpers
 
 | Function | Description |
 |----------|-------------|
@@ -1244,11 +1474,11 @@ counter.reset()
 
 ---
 
-## 10. Annotation Utils
+## 11. Annotation Utils
 
 `yowo.utils` provides reusable drawing functions for detection, tracking, and counting overlays.
 
-### 10.1 Drawing functions
+### 11.1 Drawing functions
 
 ```python
 from yowo.utils import (
@@ -1270,7 +1500,7 @@ All functions mutate the frame in-place and return `None`. Color values are BGR 
 | `draw_count_lines` | `(frame, lines, *, color=(0,0,255))` | Red counting lines with labels |
 | `draw_text_panel` | `(frame, lines, *, position="top-right", font_scale=0.45)` | Translucent text panel |
 
-### 10.2 Color palettes
+### 11.2 Color palettes
 
 ```python
 from yowo.utils import TRACK_PALETTE, CLASS_PALETTE, color_for_track, color_for_class
@@ -1279,7 +1509,7 @@ color_for_track(track_id)   # deterministic BGR from 10-color palette
 color_for_class(class_id)   # deterministic BGR from 20-color palette
 ```
 
-### 10.3 Complete annotated video example
+### 11.3 Complete annotated video example
 
 See [`examples/annotated_video.py`](../examples/annotated_video.py) for a full pipeline:
 detect → track → count → annotate → write video.
@@ -1290,7 +1520,7 @@ uv run python examples/annotated_video.py input.mp4 --model yolo26n --backend on
 
 ---
 
-## 11. Model Export
+## 12. Model Export
 
 ### From CLI
 
@@ -1336,7 +1566,7 @@ print(f"Exported to {meta.file_path} ({meta.file_size_bytes / 1e6:.1f} MB)")
 
 ---
 
-## 12. Environment Variables
+## 13. Environment Variables
 
 All `InferenceConfig` fields can be set via `YOWO_*` environment variables. Env vars override YAML values.
 
@@ -1369,7 +1599,7 @@ yowo detect traffic.mp4 --model yolo26n
 
 ---
 
-## 13. YAML Configuration
+## 14. YAML Configuration
 
 ```yaml
 # yowo.yaml
@@ -1401,7 +1631,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-## 14. Error Reference
+## 15. Error Reference
 
 All exceptions inherit from `YowoError` in `yowo.errors`.
 
@@ -1441,9 +1671,9 @@ except YowoError as e:
 
 ---
 
-## 15. Use Cases
+## 16. Use Cases
 
-### 15.1 Traffic Surveillance on Apple Silicon
+### 16.1 Traffic Surveillance on Apple Silicon
 
 **Scenario:** Process a 2560×1440 traffic surveillance image. Maximize throughput on Apple M-series.
 
@@ -1490,7 +1720,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 15.2 Live RTSP Camera Stream
+### 16.2 Live RTSP Camera Stream
 
 **Scenario:** Process a live IP camera stream. Stay current — drop stale frames; don't queue up.
 
@@ -1527,7 +1757,7 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 15.3 Custom Fine-Tuned Vehicle Detector
+### 16.3 Custom Fine-Tuned Vehicle Detector
 
 **Scenario:** Run a YOLO11s model fine-tuned on 7 vehicle classes (car, motorcycle, bus, truck, transporter, container, big_transporter).
 
@@ -1571,7 +1801,7 @@ Then point `weights_path` at the exported `.onnx` file with `backend=BackendType
 
 ---
 
-### 15.4 Batch Video Processing
+### 16.4 Batch Video Processing
 
 **Scenario:** Process a long video file and save per-frame JSON results. Use prefetch for maximum throughput.
 
@@ -1606,7 +1836,7 @@ print(f"{len(results)} frames, {total_boxes} total detections, avg {avg_ms:.1f}m
 
 ---
 
-### 15.5 Free-Threaded Python Parallelism
+### 16.5 Free-Threaded Python Parallelism
 
 **Scenario:** Maximize CPU throughput using Python 3.13 free-threaded build (`cp313t`, GIL disabled). Enables true thread parallelism between I/O decode and inference — no GPU required.
 
@@ -1814,7 +2044,7 @@ Speedup caps at ~1.5x (not 2.0x theoretical) due to L3 cache contention between 
 
 ---
 
-### 15.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
+### 16.6 ONNX CoreML EP vs PyTorch MPS on Apple Silicon
 
 **Scenario:** You have an Apple Silicon Mac and want to use GPU-class acceleration. Two paths are available — ONNX via CoreML EP (Neural Engine) and PyTorch via Metal (GPU). This example runs both and compares.
 
@@ -1898,7 +2128,7 @@ with InferenceEngine(coreml_config) as eng:
 
 ---
 
-### 15.7 Multi-Camera Warehouse Monitoring
+### 16.7 Multi-Camera Warehouse Monitoring
 
 **Scenario:** 4 warehouse cameras (2 RTSP, 2 USB webcams) feeding a single YOLO26n engine. Each camera has its own alert callback. Graceful shutdown on SIGINT.
 
@@ -1969,7 +2199,7 @@ for sid, err in collector.stream_errors.items():
 - `timeout_ms=50` flushes partial batches if some cameras are slower — prevents stalling on one offline camera.
 - Feature cache is auto-disabled (mixed-source batches).
 
-### 15.8 Traffic Counting with ByteTrack
+### 16.8 Traffic Counting with ByteTrack
 
 Full detect → track → count → annotate pipeline on surveillance video:
 
@@ -2019,9 +2249,70 @@ Performance on Apple M4 Pro (928 frames, 30fps traffic video):
 | YOLO26s | 58 | 63 | 0.4ms (3.7%) |
 | YOLO26m | 37 | 35 | 0.5ms (2.7%) |
 
+### 16.9 Cross-Camera Vehicle ReID
+
+Track vehicles across multiple cameras using CLIP-ReID embeddings and `CrossCameraTracker`.
+
+```python
+from yowo import InferenceEngine, open_source
+from yowo.tracking import (
+    CrossCameraTracker,
+    CLIPReIDExtractor,
+    CameraLinkModel,
+    CameraLink,
+)
+
+# CLIP-ReID fine-tuned on VeRi-776 (mAP=82.28%, Rank-1=96.66%)
+reid = CLIPReIDExtractor("clip-reid-veri-vit-b16.onnx")
+
+# Transit constraints between cameras
+links = CameraLinkModel(links=[
+    CameraLink("cam-north", "cam-south", min_transit_sec=8, max_transit_sec=45),
+    CameraLink("cam-south", "cam-north", min_transit_sec=10, max_transit_sec=50),
+])
+
+tracker = CrossCameraTracker(
+    reid_extractor=reid,
+    camera_link_model=links,
+    match_threshold=0.35,
+    gallery_max_entries=10_000,
+    track_high_thresh=0.3,
+    max_age=30,
+)
+
+with InferenceEngine() as engine:
+    # Camera 1
+    for det in engine.stream(open_source("cam_north.mp4")):
+        results = tracker.update("cam-north", det)
+        for box in results:
+            if box.global_id is not None:
+                print(f"[cam-north] Vehicle Global#{box.global_id} "
+                      f"{box.box.class_name} conf={box.box.confidence:.2f}")
+
+    # Camera 2 (or process concurrently with threading)
+    for det in engine.stream(open_source("cam_south.mp4")):
+        results = tracker.update("cam-south", det)
+        for box in results:
+            if box.global_id is not None:
+                print(f"[cam-south] Vehicle Global#{box.global_id} "
+                      f"{box.box.class_name} conf={box.box.confidence:.2f}")
+
+print(f"Gallery: {tracker.gallery_size} entries, {tracker.camera_count} cameras")
+```
+
+**Key performance numbers:**
+
+| Metric | Value |
+|--------|-------|
+| CLIP-ReID mAP (VeRi-776) | 82.28% |
+| CLIP-ReID Rank-1 (VeRi-776) | 96.66% |
+| `needs_reid()` skip rate | 99.8% |
+| ReID extraction (CoreML) | 15.5 img/s |
+| FPS impact (tracking + ReID) | < 1% |
+
 ---
 
-## 16. Performance Reference
+## 17. Performance Reference
 
 ### Backend comparison (YOLO26n, Apple M4 Pro, batch=1)
 

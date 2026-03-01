@@ -7,6 +7,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
+from numpy.typing import NDArray
+
 from yowo.tracking._kalman import KalmanFilterXYAH
 from yowo.types import BackendType, Frame, ModelSpec
 
@@ -136,6 +139,8 @@ class STrack:
 
     __slots__ = (
         "_covariance",
+        "_det_xyxy",
+        "_embedding",
         "_kalman",
         "_mean",
         "_min_hits",
@@ -173,6 +178,8 @@ class STrack:
         self.time_since_update = 0
         self.start_frame = 0
         self.frame_id = 0
+        self._embedding: NDArray[np.float32] | None = None
+        self._det_xyxy = box_xyxy
 
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = kalman.initiate(measurement)
@@ -222,6 +229,7 @@ class STrack:
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
         )
+        self._det_xyxy = box_xyxy
         self.confidence = confidence
         self.class_id = class_id
         self.class_name = class_name
@@ -251,6 +259,7 @@ class STrack:
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
         )
+        self._det_xyxy = box_xyxy
         self.confidence = confidence
         self.class_id = class_id
         self.class_name = class_name
@@ -273,13 +282,47 @@ class STrack:
         return self.hits >= self._min_hits and self.state == TrackState.TRACKED
 
     @property
+    def embedding(self) -> NDArray[np.float32] | None:
+        """Current appearance embedding, or None if not yet extracted."""
+        return self._embedding
+
+    def update_embedding(self, new_embedding: NDArray[np.float32], eta: float = 0.9) -> None:
+        """Update track appearance embedding via EMA with L2 renormalization.
+
+        Args:
+            new_embedding: (D,) L2-normalized embedding from ReID extractor.
+            eta: EMA momentum -- higher retains more history. Default 0.9.
+        """
+        if self._embedding is None:
+            self._embedding = new_embedding.copy()
+            return
+        blended = eta * self._embedding + (1.0 - eta) * new_embedding
+        norm = float(np.linalg.norm(blended))
+        if norm > 1e-8:
+            blended = blended / np.float32(norm)
+        self._embedding = blended.astype(np.float32, copy=False)
+
+    @property
     def predicted_xyxy(self) -> tuple[float, float, float, float]:
         """Current predicted position as (x1, y1, x2, y2) pixel coordinates."""
         return KalmanFilterXYAH.xyah_to_xyxy(self._mean[:4])
 
+    @property
+    def output_xyxy(self) -> tuple[float, float, float, float]:
+        """Box for output: raw detection when matched, Kalman when unmatched.
+
+        Matched tracks (time_since_update == 0) use the raw detection — always
+        more accurate than Kalman prediction, especially for edge-entering
+        objects whose aspect ratio changes rapidly.  Kalman prediction is only
+        used when the track has no fresh detection (lost/occluded frames).
+        """
+        if self.time_since_update == 0:
+            return self._det_xyxy
+        return self.predicted_xyxy
+
     def to_tracked_box(self) -> TrackedBox:
         """Convert current track state to an immutable TrackedBox."""
-        x1, y1, x2, y2 = self.predicted_xyxy
+        x1, y1, x2, y2 = self.output_xyxy
         return TrackedBox(
             x1=x1,
             y1=y1,
