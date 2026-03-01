@@ -13,6 +13,10 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+---
+
+## [2.2.0] — 2026-03-01
+
 ### Added
 
 - **tracking**: Cross-camera Re-Identification (ReID) system. Pluggable
@@ -457,6 +461,7 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 Initial beta release.
 
+[2.2.0]: https://github.com/TinDang97/yowo/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/TinDang97/yowo/compare/v2.0.0...v2.1.0
 [1.3.1]: https://github.com/TinDang97/yowo/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/TinDang97/yowo/compare/v1.2.0...v1.3.0
