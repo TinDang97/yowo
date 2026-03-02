@@ -90,6 +90,18 @@ class TestChromaEmbeddingGallery:
         gid3 = gallery.add("cam_c", 3, emb, global_id=gid1)
         assert gid3 == gid1
 
+    def test_explicit_global_id_advances_counter(self, tmp_path: Path) -> None:
+        """add(global_id=N) advances counter past N to prevent collisions."""
+        gallery = ChromaEmbeddingGallery(
+            embedding_dim=4, max_entries=100, persist_path=tmp_path / "g"
+        )
+        emb = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+
+        gallery.add("cam_a", 1, emb, global_id=100)
+        # Next auto-assigned ID must be > 100
+        gid = gallery.add("cam_b", 2, emb)
+        assert gid > 100
+
     def test_thread_safety_concurrent_add_query(self, tmp_path: Path) -> None:
         """Concurrent add/query doesn't crash."""
         gallery = ChromaEmbeddingGallery(

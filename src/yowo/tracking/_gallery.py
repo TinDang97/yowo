@@ -124,6 +124,7 @@ class EmbeddingGallery:
             class_id: Object class index.
             timestamp: Time when track was finalized.
             global_id: If provided, reuse this global ID. Otherwise assign new.
+                The counter advances past this value to prevent future collisions.
 
         Returns:
             The global_id assigned to this entry.
@@ -132,6 +133,9 @@ class EmbeddingGallery:
             if global_id is None:
                 global_id = self._next_global_id
                 self._next_global_id += 1
+            else:
+                # Advance counter past explicit ID to prevent future collisions
+                self._next_global_id = max(self._next_global_id, global_id + 1)
 
             entry = GalleryEntry(
                 global_id=global_id,

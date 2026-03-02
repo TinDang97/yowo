@@ -24,9 +24,11 @@ __all__ = ["ChromaEmbeddingGallery"]
 
 
 def _make_noop_embedding_fn() -> Any:
-    """Build a no-op embedding function (pre-computed embeddings supplied externally)."""
+    """Build a registered no-op embedding function (pre-computed embeddings)."""
     import chromadb  # already imported by caller
+    from chromadb.utils.embedding_functions import register_embedding_function
 
+    @register_embedding_function
     class _NoOp(chromadb.EmbeddingFunction):  # type: ignore[type-arg]
         def __init__(self) -> None:
             pass  # skip base class deprecation warning
@@ -44,7 +46,7 @@ def _make_noop_embedding_fn() -> Any:
             return _NoOp()
 
         def get_config(self) -> dict[str, Any]:
-            return {"name": "noop_precomputed"}
+            return {}
 
     return _NoOp()
 
@@ -109,7 +111,7 @@ class ChromaEmbeddingGallery:
         self._client: Any = chromadb.PersistentClient(path=str(persist))
         self._collection: Any = self._client.get_or_create_collection(
             name=collection_name,
-            metadata={"hnsw:space": "cosine"},
+            configuration={"hnsw": {"space": "cosine"}},
             embedding_function=_make_noop_embedding_fn(),
         )
 
@@ -172,6 +174,7 @@ class ChromaEmbeddingGallery:
             class_id: Object class index.
             timestamp: Time when track was finalized.
             global_id: If provided, reuse this global ID. Otherwise assign new.
+                The counter advances past this value to prevent future collisions.
 
         Returns:
             The global_id assigned to this entry.
@@ -180,6 +183,9 @@ class ChromaEmbeddingGallery:
             if global_id is None:
                 global_id = self._next_global_id
                 self._next_global_id += 1
+            else:
+                # Advance counter past explicit ID to prevent future collisions
+                self._next_global_id = max(self._next_global_id, global_id + 1)
 
             order = self._insertion_counter
             self._insertion_counter += 1
@@ -227,7 +233,10 @@ class ChromaEmbeddingGallery:
         Returns:
             List of GalleryMatch sorted by distance (ascending).
         """
-        if self._size == 0:
+        with self._lock:
+            size = self._size
+
+        if size == 0:
             return []
 
         where: dict[str, Any] | None = (
@@ -236,7 +245,7 @@ class ChromaEmbeddingGallery:
 
         result = self._collection.query(
             query_embeddings=[embedding.tolist()],
-            n_results=min(top_k, self._size),
+            n_results=min(top_k, size),
             where=where,
             include=["metadatas", "distances"],
         )
@@ -287,7 +296,8 @@ class ChromaEmbeddingGallery:
     @property
     def size(self) -> int:
         """Current number of entries in the gallery."""
-        return self._size
+        with self._lock:
+            return self._size
 
     @property
     def embedding_dim(self) -> int:
