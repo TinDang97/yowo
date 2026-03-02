@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["EmbeddingGallery", "GalleryEntry", "GalleryMatch"]
+__all__ = ["EmbeddingGallery", "GalleryEntry", "GalleryMatch", "GalleryProtocol"]
 
 
 @dataclass(slots=True)
@@ -33,6 +34,44 @@ class GalleryMatch:
     camera_id: str
     local_track_id: int
     timestamp: float = 0.0
+
+
+@runtime_checkable
+class GalleryProtocol(Protocol):
+    """Structural type for embedding gallery implementations.
+
+    Both ``EmbeddingGallery`` (in-memory) and ``ChromaEmbeddingGallery``
+    (persistent) satisfy this protocol, enabling duck-typed injection
+    into ``CrossCameraTracker``.
+    """
+
+    def add(
+        self,
+        camera_id: str,
+        local_track_id: int,
+        embedding: NDArray[np.float32],
+        *,
+        class_id: int = ...,
+        timestamp: float = ...,
+        global_id: int | None = ...,
+    ) -> int: ...
+
+    def query(
+        self,
+        embedding: NDArray[np.float32],
+        *,
+        exclude_camera: str | None = ...,
+        top_k: int = ...,
+        threshold: float = ...,
+    ) -> list[GalleryMatch]: ...
+
+    def next_global_id(self) -> int: ...
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def embedding_dim(self) -> int: ...
 
 
 class EmbeddingGallery:
