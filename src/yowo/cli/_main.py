@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from yowo.types import BackendType, ExportFormat, ModelFamily, ModelSize, ModelSpec, Precision
+from yowo.types import BackendType, ExportFormat, ModelSpec, Precision
 
 
 @click.group()
@@ -592,27 +592,13 @@ def _parse_model_spec(model_name: str) -> ModelSpec:
     Raises:
         click.BadParameter: On unknown model name format.
     """
-    size_map: dict[str, ModelSize] = {
-        "n": ModelSize.NANO,
-        "s": ModelSize.SMALL,
-        "m": ModelSize.MEDIUM,
-        "l": ModelSize.LARGE,
-        "x": ModelSize.XLARGE,
-    }
-    family_map: dict[str, ModelFamily] = {
-        "yolo11": ModelFamily.YOLO11,
-        "yolo26": ModelFamily.YOLO26,
-    }
+    from yowo._convenience import parse_model_name
+    from yowo.errors import ConfigError
 
-    for prefix, family in sorted(family_map.items(), key=lambda x: -len(x[0])):
-        if model_name.startswith(prefix):
-            suffix = model_name[len(prefix) :]
-            if suffix in size_map:
-                return ModelSpec(family, size_map[suffix])
-
-    raise click.BadParameter(
-        f"Unknown model: {model_name!r}. Expected format: yolo{{11|26}}{{n|s|m|l|x}}, e.g. yolo26n"
-    )
+    try:
+        return parse_model_name(model_name)
+    except ConfigError as exc:
+        raise click.BadParameter(str(exc)) from exc
 
 
 def _write_json(detections: list[object], path: Path) -> None:

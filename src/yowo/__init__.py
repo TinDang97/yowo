@@ -2,21 +2,26 @@
 
 Quick start::
 
-    from yowo import InferenceEngine, open_source
-
-    with InferenceEngine(confidence_threshold=0.35) as engine:
-        for detection in engine.stream(open_source("image.jpg")):
-            for box in detection.boxes:
-                print(f"{box.class_name}: {box.confidence:.2f}")
+    from yowo import detect
+    for det in detect("image.jpg"):
+        for box in det.boxes:
+            print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
+from yowo._convenience import detect, parse_model_name
 from yowo.config import (
-    ExportConfig,
+    ExportConfig as ExportConfig,
+)
+from yowo.config import (
     InferenceConfig,
-    classify_device,
-    classify_source,
     load_config,
     preset_config,
+)
+from yowo.config import (
+    classify_device as classify_device,
+)
+from yowo.config import (
+    classify_source as classify_source,
 )
 from yowo.counter import (
     CountLine,
@@ -45,10 +50,11 @@ from yowo.errors import (
     TrackingError,
     YowoError,
 )
-from yowo.events import EventBus
+from yowo.events import EventBus as EventBus
 from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
-from yowo.metrics import EngineMetrics, MetricsCollector
+from yowo.metrics import EngineMetrics as EngineMetrics
+from yowo.metrics import MetricsCollector as MetricsCollector
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.tracking import (
     ByteTracker,
@@ -59,39 +65,54 @@ from yowo.tracking import (
     track_stream,
 )
 from yowo.types import (
-    IMAGE_EXTS,
-    RTSP_SCHEMES,
-    VIDEO_EXTS,
+    IMAGE_EXTS as IMAGE_EXTS,
+)
+from yowo.types import (
+    RTSP_SCHEMES as RTSP_SCHEMES,
+)
+from yowo.types import (
+    VIDEO_EXTS as VIDEO_EXTS,
+)
+from yowo.types import (
     BackendSelection,
     BackendType,
     BoundingBox,
-    CPUArch,
     Detection,
-    DeviceCategory,
-    DeviceType,
     ExportFormat,
     ExportResult,
     Frame,
     FrameDropPolicy,
-    GPUArch,
     HealthStatus,
     ModelFamily,
     ModelSize,
     ModelSpec,
     Precision,
-    PreprocessedTensor,
-    SourceCategory,
     StreamState,
     TaggedFrame,
     is_free_threaded,
+)
+from yowo.types import (
+    CPUArch as CPUArch,
+)
+from yowo.types import (
+    DeviceCategory as DeviceCategory,
+)
+from yowo.types import (
+    DeviceType as DeviceType,
+)
+from yowo.types import (
+    GPUArch as GPUArch,
+)
+from yowo.types import (
+    PreprocessedTensor as PreprocessedTensor,
+)
+from yowo.types import (
+    SourceCategory as SourceCategory,
 )
 
 __version__ = "2.2.1"
 
 __all__ = [
-    "IMAGE_EXTS",
-    "RTSP_SCHEMES",
-    "VIDEO_EXTS",
     "BackendError",
     "BackendLoadError",
     "BackendSelection",
@@ -99,7 +120,6 @@ __all__ = [
     "BatchScheduler",
     "BoundingBox",
     "ByteTracker",
-    "CPUArch",
     "ConfigError",
     "CountLine",
     "CountResult",
@@ -108,12 +128,7 @@ __all__ = [
     "DependencyError",
     "Detection",
     "DetectionRouter",
-    "DeviceCategory",
     "DeviceError",
-    "DeviceType",
-    "EngineMetrics",
-    "EventBus",
-    "ExportConfig",
     "ExportError",
     "ExportFormat",
     "ExportMetadata",
@@ -122,13 +137,11 @@ __all__ = [
     "Frame",
     "FrameCollector",
     "FrameDropPolicy",
-    "GPUArch",
     "HealthStatus",
     "InferenceConfig",
     "InferenceEngine",
     "InferenceError",
     "LineCrossEvent",
-    "MetricsCollector",
     "ModelError",
     "ModelFamily",
     "ModelLoadError",
@@ -137,9 +150,7 @@ __all__ = [
     "ModelSpec",
     "ObjectCounter",
     "Precision",
-    "PreprocessedTensor",
     "ShutdownError",
-    "SourceCategory",
     "SourceError",
     "SourceTimeoutError",
     "StreamState",
@@ -150,12 +161,12 @@ __all__ = [
     "TrackingError",
     "YowoError",
     "__version__",
-    "classify_device",
-    "classify_source",
+    "detect",
     "export_model",
     "is_free_threaded",
     "load_config",
     "open_source",
+    "parse_model_name",
     "preset_config",
     "run_pipeline",
     "track_detections",

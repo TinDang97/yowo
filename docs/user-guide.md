@@ -40,8 +40,9 @@
 9. [Cross-Camera Tracking](#9-cross-camera-tracking)
    - [CrossCameraTracker](#91-crosscameratracker)
    - [EmbeddingGallery](#92-embeddinggallery)
-   - [CameraLinkModel](#93-cameralinkmodel)
-   - [GlobalTrackedBox](#94-globaltrackedbox)
+   - [ChromaEmbeddingGallery](#93-chromaembeddinggallery-persistent)
+   - [CameraLinkModel](#94-cameralinkmodel)
+   - [GlobalTrackedBox](#95-globaltrackedbox)
 10. [Object Counting](#10-object-counting)
 11. [Annotation Utils](#11-annotation-utils)
 12. [Model Export](#12-model-export)
@@ -74,6 +75,8 @@ pip install yowo
 pip install yowo[onnx]       # ONNX Runtime (+ CoreML EP on macOS automatically)
 pip install yowo[tensorrt]   # TensorRT (NVIDIA GPU)
 pip install yowo[openvino]   # OpenVINO (Intel CPU/iGPU)
+pip install yowo[coreml]     # Native CoreML (Apple Silicon, requires coremltools>=7.0)
+pip install yowo[chromadb]   # ChromaDB persistent gallery for cross-camera ReID
 pip install yowo[all]        # All backends
 ```
 
@@ -112,7 +115,6 @@ yowo detect rtsp://camera.local:8554/live --model yolo26n --save-frames /tmp/fra
 ### Python — single image
 
 ```python
-import numpy as np
 from yowo.engine import InferenceEngine
 from yowo.io import open_source
 
@@ -249,7 +251,7 @@ yowo detect image.jpg --model yolo11s --weights ./best.pt --backend pytorch
 
 ### 3.4 `yowo export`
 
-Export a PyTorch model to ONNX, TensorRT, or OpenVINO.
+Export a PyTorch model to ONNX, TensorRT, OpenVINO, or CoreML.
 
 ```
 yowo export MODEL --format FORMAT [OPTIONS]
@@ -266,12 +268,13 @@ yowo export MODEL --format FORMAT [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--weights`, `-w` | auto | Path to local `.pt` weights file |
-| `--format`, `-f` | required | `onnx`, `tensorrt`, `openvino` |
+| `--format`, `-f` | required | `onnx`, `tensorrt`, `openvino`, `coreml` |
 | `--precision`, `-p` | `fp16` | `fp32`, `fp16`, `int8` |
 | `--calibration-data` | none | Path to calibration images (required for INT8) |
 | `--output-dir`, `-o` | `~/.yowo/models/MODEL/FORMAT_PRECISION` | Output directory |
 | `--dynamic-batch` / `--no-dynamic-batch` | `--no-dynamic-batch` | Enable dynamic batch dimension in ONNX |
 | `--imgsz` | `640` | Input image size (square) |
+| `--batch-sizes` | none | Comma-separated batch sizes for CoreML EnumeratedShapes (e.g. `1,4,8`) |
 
 **Examples:**
 
@@ -287,6 +290,9 @@ yowo export yolo26m --format tensorrt --precision fp16
 
 # Export ONNX INT8 with calibration data
 yowo export yolo11n --format onnx --precision int8 --calibration-data ./calib_images/
+
+# Export to CoreML FP16 with multi-batch on macOS
+yowo export yolo26n --format coreml --precision fp16 --batch-sizes 1,4,8
 ```
 
 **Output:** prints the exported file path, size in MB, and export duration.
@@ -311,15 +317,24 @@ yowo track SOURCE [OPTIONS]
 |--------|---------|-------------|
 | `--model`, `-m` | `yolo26n` | Model name |
 | `--weights`, `-w` | auto | Path to local weights file |
-| `--backend` | auto | `pytorch`, `onnx`, `tensorrt`, `openvino` |
-| `--confidence` | `0.25` | Detection confidence threshold |
+| `--backend` | `auto` | `pytorch`, `onnx`, `tensorrt`, `openvino` |
 | `--device` | `auto` | `auto`, `cpu`, `mps`, `cuda` |
+| `--precision` | `auto` | `fp32`, `fp16`, `int8` |
+| `--confidence` | `0.25` | Detection confidence threshold |
+| `--iou` | `0.45` | NMS IoU threshold |
+| `--high-thresh` | `0.6` | ByteTrack stage-1 confidence gate |
+| `--low-thresh` | `0.1` | ByteTrack stage-2 confidence gate |
+| `--match-thresh` | `0.8` | IoU distance threshold |
+| `--max-age` | `30` | Frames a lost track survives |
+| `--min-hits` | `3` | Hits before a track is confirmed |
+| `--json` | off | Stream JSONL to stdout |
 
 **Examples:**
 
 ```bash
 yowo track video.mp4 --model yolo26n
 yowo track rtsp://camera/stream --model yolo26s --confidence 0.3
+yowo track video.mp4 --model yolo26n --high-thresh 0.5 --max-age 60 --json
 ```
 
 ### 3.6 `yowo count`
@@ -335,16 +350,28 @@ yowo count SOURCE [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model`, `-m` | `yolo26n` | Model name |
-| `--zone` | off | Enable zone counting (top/bottom halves) |
-| `--line` | off | Enable line crossing counting (horizontal center) |
-| `--track` | off | Show per-track IDs |
-| `--json` | off | Output results as JSON |
+| `--weights`, `-w` | auto | Path to local weights file |
+| `--backend` | `auto` | `pytorch`, `onnx`, `tensorrt`, `openvino` |
+| `--device` | `auto` | `auto`, `cpu`, `mps`, `cuda` |
+| `--precision` | `auto` | `fp32`, `fp16`, `int8` |
+| `--confidence` | `0.25` | Detection confidence threshold |
+| `--iou` | `0.45` | NMS IoU threshold |
+| `--zone` | none | Path to JSON file defining polygon zones. Format: `[{"zone_id": "name", "vertices": [[x,y], ...]}]` |
+| `--line` | none | Path to JSON file defining counting lines. Requires `--track`. Format: `[{"line_id": "name", "p1": [x,y], "p2": [x,y]}]` |
+| `--track` | off | Enable ByteTrack (required for `--line`) |
+| `--json` | off | Stream JSONL to stdout |
 
 **Examples:**
 
 ```bash
-yowo count video.mp4 --model yolo26n --line --zone
-yowo count video.mp4 --model yolo26s --line --json
+# Per-class detection count (no tracking)
+yowo count video.mp4 --model yolo26n
+
+# Zone counting with custom zone definitions
+yowo count video.mp4 --model yolo26n --zone zones.json --track
+
+# Line crossing counting
+yowo count video.mp4 --model yolo26s --line lines.json --track --json
 ```
 
 ---
@@ -373,6 +400,7 @@ InferenceEngine(
 
     # Backend
     backend: BackendType | None = None,   # None = auto-select
+    backend_instance: InferenceBackend | None = None,  # bypass auto-select entirely
     device: str = "auto",                 # "auto", "cpu", "cuda", "cuda:0"
     precision: Precision | None = None,   # None = auto (fp16 on CUDA, fp32 on CPU)
 
@@ -391,6 +419,10 @@ InferenceEngine(
     max_queue_size: int = 2,
     prefetch: bool = True,
     pipeline_workers: int = 0,     # 0 = auto (2 on free-threaded Python, 1 otherwise)
+
+    # Observability
+    metrics_enabled: bool = True,  # collect inference metrics
+    error_threshold: int = 10,     # consecutive errors before DEGRADED health
 )
 ```
 
@@ -500,7 +532,7 @@ src = open_source("/images/dir/") # all images in directory
 `FrameSource` protocol attributes:
 
 ```python
-src.total_frames   # int: total frame count; -1 if unknown (live streams)
+src.total_frames   # int | None: total frame count; None for live / unknown-length sources
 src.is_live        # bool: True for RTSP and webcam sources
 ```
 
@@ -569,10 +601,10 @@ class BoundingBox:
 from yowo.types import (
     ModelFamily,     # YOLO11 = "yolo11", YOLO26 = "yolo26"
     ModelSize,       # NANO="n", SMALL="s", MEDIUM="m", LARGE="l", XLARGE="x"
-    BackendType,     # PYTORCH, ONNX, TENSORRT, OPENVINO
+    BackendType,     # PYTORCH, ONNX, TENSORRT, OPENVINO, COREML
     Precision,       # FP32, FP16, INT8
     FrameDropPolicy, # NONE, LATEST, SKIP_OLDEST
-    ExportFormat,    # ONNX, TENSORRT, OPENVINO
+    ExportFormat,    # ONNX, TENSORRT, OPENVINO, COREML
 )
 ```
 
@@ -605,6 +637,8 @@ config = InferenceConfig(
     max_queue_size=2,
     prefetch=True,
     pipeline_workers=0,          # 0 → auto
+    metrics_enabled=True,
+    error_threshold=10,
 )
 ```
 
@@ -676,8 +710,8 @@ write_annotated_frames(results, Path("output/"))
 yowo auto-selects the fastest available backend for your hardware:
 
 ```
-TensorRT EP  →  ONNX (CUDA EP)  →  ONNX (CoreML EP)  →  ONNX (CPU EP)  →  PyTorch
-   (NVIDIA)       (NVIDIA)          (Apple Silicon)       (any CPU)        (fallback)
+TensorRT  →  ONNX (CUDA EP)  →  Native CoreML  →  ONNX (CoreML EP)  →  OpenVINO  →  ONNX (CPU EP)  →  PyTorch
+ (NVIDIA)      (NVIDIA)       (Apple Silicon)    (Apple Silicon)       (Intel)       (any CPU)        (fallback)
 ```
 
 Detection is one-time at startup. Run `yowo info` to see what is available on your system.
@@ -704,6 +738,7 @@ eng = InferenceEngine(backend=BackendType.ONNX)
 | `onnx` | CPU (CoreML EP on macOS, AVX/VNNI on Intel) | 4–5x faster than PyTorch on Apple Silicon via Neural Engine. |
 | `tensorrt` | NVIDIA GPU only | Requires TensorRT install. Best GPU throughput. |
 | `openvino` | Intel CPU/iGPU | Competitive on Intel hardware. |
+| `coreml` | Apple Silicon (Neural Engine) | Native CoreML via `coremltools`. Priority 3 in auto-select on macOS ARM64. Requires `pip install yowo[coreml]`. |
 
 ### CoreML EP — ONNX on Apple Neural Engine
 
@@ -844,8 +879,7 @@ src = open_source("rtsp://camera.local:8554/live")
 reader = ThreadedFrameReader(
     src,
     max_queue_size=4,
-    drop_policy=FrameDropPolicy.LATEST,
-    idle_timeout_s=5.0,
+    policy=FrameDropPolicy.LATEST,
 )
 reader.start()
 try:
@@ -1104,21 +1138,23 @@ ByteTrack provides multi-object tracking with persistent IDs. It uses two-stage 
 from yowo.tracking import ByteTracker
 
 tracker = ByteTracker(
-    track_high_thresh=0.3,   # stage-1: high-confidence detection threshold
+    track_high_thresh=0.6,   # stage-1: high-confidence detection threshold
     track_low_thresh=0.1,    # stage-2: low-confidence recovery threshold
     match_thresh=0.8,        # IoU matching threshold
     max_age=30,              # frames before a lost track is removed
     min_hits=3,              # hits before a track is confirmed
+    fuse_score=False,        # penalize low-confidence detections by scaling IoU similarity
 )
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `track_high_thresh` | `0.3` | Detections above this go to stage-1 matching |
+| `track_high_thresh` | `0.6` | Detections above this go to stage-1 matching |
 | `track_low_thresh` | `0.1` | Detections between low/high go to stage-2 recovery |
 | `match_thresh` | `0.8` | IoU threshold for association |
 | `max_age` | `30` | Max frames a lost track survives without matches |
 | `min_hits` | `3` | Minimum hits before `is_confirmed=True` |
+| `fuse_score` | `False` | Scale IoU similarity by detection confidence |
 
 Properties:
 
@@ -1126,7 +1162,6 @@ Properties:
 |----------|------|-------------|
 | `active_track_count` | `int` | Number of currently active tracks |
 | `lost_track_count` | `int` | Number of lost (not yet removed) tracks |
-| `total_track_count` | `int` | Total tracks ever created |
 
 ### 8.2 `track_stream`
 
@@ -1283,8 +1318,9 @@ tracker = CrossCameraTracker(
     reid_extractor=reid,
     gallery_max_entries=10_000,   # bounded gallery size (FIFO eviction)
     match_threshold=0.4,         # cosine distance threshold for matching
+    gallery=None,                # inject pre-built gallery (e.g. ChromaEmbeddingGallery)
     # ByteTracker kwargs forwarded to per-camera trackers:
-    track_high_thresh=0.3,
+    track_high_thresh=0.6,
     max_age=30,
 )
 ```
@@ -1293,8 +1329,9 @@ tracker = CrossCameraTracker(
 |-----------|---------|-------------|
 | `reid_extractor` | *(required)* | Shared ReID model for embedding extraction |
 | `camera_link_model` | `None` | Optional spatial-temporal constraints |
-| `gallery_max_entries` | `10_000` | Max embeddings in gallery (FIFO eviction) |
+| `gallery_max_entries` | `10_000` | Max embeddings in gallery (FIFO eviction). Ignored when `gallery` is provided. |
 | `match_threshold` | `0.4` | Cosine distance threshold for cross-camera match |
+| `gallery` | `None` | Pre-built gallery instance (e.g. `ChromaEmbeddingGallery`). `None` uses in-memory `EmbeddingGallery`. |
 | `**tracker_kwargs` | — | Forwarded to each per-camera `ByteTracker` |
 
 Properties:
@@ -1349,7 +1386,34 @@ for m in matches:
     print(f"global_id={m.global_id} dist={m.distance:.3f} cam={m.camera_id}")
 ```
 
-### 9.3 `CameraLinkModel`
+### 9.3 `ChromaEmbeddingGallery` (persistent)
+
+Drop-in replacement for `EmbeddingGallery` backed by ChromaDB. Embeddings persist across restarts.
+
+```bash
+pip install yowo[chromadb]   # requires chromadb >= 0.5.0
+```
+
+```python
+from yowo.tracking import ChromaEmbeddingGallery, CrossCameraTracker, CLIPReIDExtractor
+
+reid = CLIPReIDExtractor("clip-reid-veri-vit-b16.onnx")
+
+gallery = ChromaEmbeddingGallery(
+    embedding_dim=reid.embedding_dim,
+    max_entries=10_000,
+    persist_directory="/data/reid_gallery",   # on-disk persistence
+)
+
+tracker = CrossCameraTracker(
+    reid_extractor=reid,
+    gallery=gallery,    # inject persistent gallery
+)
+```
+
+Both `EmbeddingGallery` and `ChromaEmbeddingGallery` implement the `GalleryProtocol` structural type. You can swap them without changing the rest of your pipeline.
+
+### 9.4 `CameraLinkModel`
 
 Prunes cross-camera matches using spatial-temporal transit constraints. A vehicle exiting Camera A can only appear in Camera B within a configured time window:
 
@@ -1383,7 +1447,7 @@ tracker = CrossCameraTracker(
 
 When no link is configured for a camera pair, a permissive default window is used (graceful degradation).
 
-### 9.4 `GlobalTrackedBox`
+### 9.5 `GlobalTrackedBox`
 
 Cross-camera output dataclass:
 
@@ -1440,7 +1504,7 @@ with InferenceEngine() as engine:
     for tracked in track_stream(engine, open_source("video.mp4"), tracker=tracker):
         counter.update(tracked)
 
-# Zone occupancy (per-class counts currently in each zone)
+# Zone occupancy (cumulative per-zone, per-class counts)
 for zone_id, counts in counter.zone_counts.items():
     print(f"{zone_id}: {dict(counts)}")
 
@@ -1451,7 +1515,7 @@ for line_id, dirs in counter.line_totals.items():
     print(f"{line_id}: IN={in_count} OUT={out_count}")
 
 # Cumulative per-class detection count (all frames)
-print(counter.cumulative_counts)
+print(counter.counts)
 
 # Reset all counters
 counter.reset()
@@ -1536,6 +1600,9 @@ yowo export yolo26m --format tensorrt --precision fp16
 
 # INT8 (requires calibration data)
 yowo export yolo11n --format onnx --precision int8 --calibration-data ./calib_images/
+
+# CoreML FP16 with multi-batch (Apple Silicon)
+yowo export yolo26n --format coreml --precision fp16 --batch-sizes 1,4,8
 ```
 
 ### From Python
@@ -1556,13 +1623,31 @@ meta = export_model(
     imgsz=640,
 )
 print(f"Exported to {meta.file_path} ({meta.file_size_bytes / 1e6:.1f} MB)")
+
+# CoreML with multi-batch (Apple Silicon)
+meta = export_model(
+    spec,
+    ExportFormat.COREML,
+    Path("./exports/"),
+    precision=Precision.FP16,
+    batch_sizes=[1, 4, 8],
+)
+
+# KV-cache ONNX for streaming inference (Python API only)
+meta = export_model(
+    spec,
+    ExportFormat.ONNX,
+    Path("./exports/"),
+    kv_cache=True,
+)
 ```
 
 **Export notes:**
-- ONNX uses the dynamo path (opset 18). Legacy TorchScript exporter is not supported.
-- `onnxslim` graph simplification is applied automatically.
+- ONNX uses TorchScript export (opset 17). `onnxslim` graph simplification is applied automatically.
 - A `.yowo.json` sidecar file is written alongside the export with model metadata.
 - INT8 dynamic quantization is **not recommended on Apple Silicon** — CoreML EP rejects it; use FP16 ONNX instead.
+- KV-cache export (`kv_cache=True`) is available via Python API only — not exposed in CLI.
+- CoreML export goes directly from PyTorch (no ONNX intermediate). Use `batch_sizes` for multi-batch support.
 
 ---
 
@@ -2169,8 +2254,8 @@ engine.load()
 collector = FrameCollector(max_queue_size=4)
 collector.add_stream("dock-cam",   open_source("rtsp://192.168.1.10:554/live"))
 collector.add_stream("aisle-cam",  open_source("rtsp://192.168.1.11:554/live"))
-collector.add_stream("entrance",   open_source(0))   # USB webcam 0
-collector.add_stream("loading",    open_source(1))   # USB webcam 1
+collector.add_stream("entrance",   open_source("0"))   # USB webcam 0
+collector.add_stream("loading",    open_source("1"))   # USB webcam 1
 
 scheduler = BatchScheduler(collector, max_batch_size=4, timeout_ms=50)
 

@@ -450,7 +450,7 @@ class WebcamSource:
 
 
 def open_source(
-    source: str | Path,
+    source: str | Path | int,
     *,
     loop: bool = False,
     frame_skip: int = 0,
@@ -460,7 +460,7 @@ def open_source(
     """Factory: inspect *source* and return the appropriate FrameSource.
 
     Dispatch rules (checked in order):
-    - String of digits (``"0"``, ``"1"``, …) → WebcamSource.
+    - Integer or string of digits (``0``, ``"0"``, ``"1"``, …) → WebcamSource.
     - Starts with ``rtsp://`` or ``rtsps://`` → RTSPStreamSource.
     - Path with image extension → ImageFileSource.
     - Existing directory → ImageDirectorySource.
@@ -468,7 +468,7 @@ def open_source(
     - Anything else → raises SourceError.
 
     Args:
-        source: File path, URL string, or webcam index string.
+        source: File path, URL string, webcam index string, or integer device index.
         loop: Repeat video file when exhausted (VideoFileSource only).
         frame_skip: Skip N frames between yields (0 = no skip).
         max_frames: Stop after this many yielded frames; ``None`` is unlimited.
@@ -480,6 +480,10 @@ def open_source(
     Raises:
         SourceError: If no source type matches or the resource is unavailable.
     """
+    # Integer webcam index (e.g. open_source(0)).
+    if isinstance(source, int):
+        return WebcamSource(source, max_frames=max_frames, frame_skip=frame_skip)
+
     source_str = str(source)
 
     # Webcam: pure digit string.
