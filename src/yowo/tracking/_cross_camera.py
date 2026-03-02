@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.tracking._camera_link import CameraLinkModel
-from yowo.tracking._gallery import EmbeddingGallery
+from yowo.tracking._gallery import EmbeddingGallery, GalleryProtocol
 from yowo.tracking._reid import ReIDExtractor
 from yowo.tracking._strack import TrackedBox
 from yowo.tracking._tracker import ByteTracker
@@ -68,6 +68,7 @@ class CrossCameraTracker:
         camera_link_model: CameraLinkModel | None = None,
         gallery_max_entries: int = 10_000,
         match_threshold: float = 0.4,
+        gallery: GalleryProtocol | None = None,
         **tracker_kwargs: Any,
     ) -> None:
         """Initialize cross-camera tracker.
@@ -75,15 +76,22 @@ class CrossCameraTracker:
         Args:
             reid_extractor: Shared ReID model for embedding extraction.
             camera_link_model: Optional spatial-temporal constraints.
-            gallery_max_entries: Max embeddings in gallery.
+            gallery_max_entries: Max embeddings in gallery. Ignored when
+                ``gallery`` is provided.
             match_threshold: Cosine distance threshold for cross-camera match.
+            gallery: Optional pre-built gallery instance (e.g.
+                ``ChromaEmbeddingGallery`` for persistent storage). When
+                ``None`` (default), uses in-memory ``EmbeddingGallery``.
             **tracker_kwargs: Passed to each per-camera ByteTracker.
         """
         self._reid = reid_extractor
-        self._gallery = EmbeddingGallery(
-            embedding_dim=reid_extractor.embedding_dim,
-            max_entries=gallery_max_entries,
-        )
+        if gallery is not None:
+            self._gallery: GalleryProtocol = gallery
+        else:
+            self._gallery = EmbeddingGallery(
+                embedding_dim=reid_extractor.embedding_dim,
+                max_entries=gallery_max_entries,
+            )
         self._link_model = camera_link_model
         self._match_threshold = match_threshold
         self._tracker_kwargs = tracker_kwargs

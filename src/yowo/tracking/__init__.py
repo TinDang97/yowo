@@ -21,9 +21,15 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from yowo.tracking._camera_link import CameraLink, CameraLinkModel
+from yowo.tracking._chroma_gallery import ChromaEmbeddingGallery
 from yowo.tracking._clip_reid import CLIPReIDExtractor
 from yowo.tracking._cross_camera import CrossCameraTracker, GlobalTrackedBox
-from yowo.tracking._gallery import EmbeddingGallery, GalleryEntry, GalleryMatch
+from yowo.tracking._gallery import (
+    EmbeddingGallery,
+    GalleryEntry,
+    GalleryMatch,
+    GalleryProtocol,
+)
 from yowo.tracking._reid import (
     CLIPExtractor,
     FastReIDExtractor,
@@ -97,11 +103,13 @@ __all__ = [
     "CLIPReIDExtractor",
     "CameraLink",
     "CameraLinkModel",
+    "ChromaEmbeddingGallery",
     "CrossCameraTracker",
     "EmbeddingGallery",
     "FastReIDExtractor",
     "GalleryEntry",
     "GalleryMatch",
+    "GalleryProtocol",
     "GlobalTrackedBox",
     "ReIDExtractor",
     "TrackState",

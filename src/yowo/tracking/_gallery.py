@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["EmbeddingGallery", "GalleryEntry", "GalleryMatch"]
+__all__ = ["EmbeddingGallery", "GalleryEntry", "GalleryMatch", "GalleryProtocol"]
 
 
 @dataclass(slots=True)
@@ -33,6 +34,44 @@ class GalleryMatch:
     camera_id: str
     local_track_id: int
     timestamp: float = 0.0
+
+
+@runtime_checkable
+class GalleryProtocol(Protocol):
+    """Structural type for embedding gallery implementations.
+
+    Both ``EmbeddingGallery`` (in-memory) and ``ChromaEmbeddingGallery``
+    (persistent) satisfy this protocol, enabling duck-typed injection
+    into ``CrossCameraTracker``.
+    """
+
+    def add(
+        self,
+        camera_id: str,
+        local_track_id: int,
+        embedding: NDArray[np.float32],
+        *,
+        class_id: int = ...,
+        timestamp: float = ...,
+        global_id: int | None = ...,
+    ) -> int: ...
+
+    def query(
+        self,
+        embedding: NDArray[np.float32],
+        *,
+        exclude_camera: str | None = ...,
+        top_k: int = ...,
+        threshold: float = ...,
+    ) -> list[GalleryMatch]: ...
+
+    def next_global_id(self) -> int: ...
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def embedding_dim(self) -> int: ...
 
 
 class EmbeddingGallery:
@@ -85,6 +124,7 @@ class EmbeddingGallery:
             class_id: Object class index.
             timestamp: Time when track was finalized.
             global_id: If provided, reuse this global ID. Otherwise assign new.
+                The counter advances past this value to prevent future collisions.
 
         Returns:
             The global_id assigned to this entry.
@@ -93,6 +133,9 @@ class EmbeddingGallery:
             if global_id is None:
                 global_id = self._next_global_id
                 self._next_global_id += 1
+            else:
+                # Advance counter past explicit ID to prevent future collisions
+                self._next_global_id = max(self._next_global_id, global_id + 1)
 
             entry = GalleryEntry(
                 global_id=global_id,
