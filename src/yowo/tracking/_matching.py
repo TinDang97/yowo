@@ -426,8 +426,12 @@ def _should_veto_removal(
         cos_dist = 1.0 - float(emb_i @ emb_j)
         if cos_dist > embedding_veto_thresh:
             return True
-    # Gate 3: Velocity divergence (height-normalised)
-    vel_diff = float(np.linalg.norm(ti.velocity - tj.velocity))
+    # Gate 3: Velocity divergence (height-normalised, scalar math)
+    vi = ti.velocity
+    vj = tj.velocity
+    dx = float(vi[0] - vj[0])
+    dy = float(vi[1] - vj[1])
+    vel_diff = (dx * dx + dy * dy) ** 0.5
     box_i = ti.predicted_xyxy
     box_j = tj.predicted_xyxy
     h_avg = 0.5 * ((box_i[3] - box_i[1]) + (box_j[3] - box_j[1]))

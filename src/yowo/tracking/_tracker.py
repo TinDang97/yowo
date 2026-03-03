@@ -268,22 +268,17 @@ class ByteTracker:
                 if t.time_since_update <= self._lost_low_age
                 or (
                     t.hits >= self._min_hits
-                    and float(t.velocity @ t.velocity) < 1.0
+                    and t.is_stationary
                     and t.time_since_update <= self._stationary_max_age
                 )
             ]
             if recent_lost:
-                remaining_low = np.array(
-                    [low_boxes[i] for i in unmatched_low_s2],
-                    dtype=np.float64,
-                )
+                remaining_low = low_arr[unmatched_low_s2]
                 cost_2_5 = iou_distance(recent_lost, remaining_low)
-                # Class gate: inflate cost for class-mismatched pairs so
-                # the assignment can route detections to correct tracks.
-                for ti, lost_t in enumerate(recent_lost):
-                    for di, orig_di in enumerate(unmatched_low_s2):
-                        if lost_t.class_id != low_cls_ids[orig_di]:
-                            cost_2_5[ti, di] = 1.0
+                # Class gate: inflate cost for class-mismatched pairs
+                cls_lost = np.array([t.class_id for t in recent_lost])
+                cls_det = np.array([low_cls_ids[i] for i in unmatched_low_s2])
+                cost_2_5[cls_lost[:, None] != cls_det[None, :]] = 1.0
                 matches_2_5, _, _ = linear_assignment(cost_2_5, self._stage2_thresh)
                 for ti, di in matches_2_5:
                     orig_di = unmatched_low_s2[di]
@@ -357,7 +352,7 @@ class ByteTracker:
         new_tracks: list[STrack] = []
         initial_boxes = _collect_matched_boxes(matches1, high_boxes)
         n_initial = len(initial_boxes)
-        max_birth = n_initial + len(unmatched_high_idxs)
+        max_birth = n_initial + len(unmatched_high_idxs)  # bounded by len(high_boxes)
         matched_arr = (
             np.empty((max_birth, 4), dtype=np.float64)
             if max_birth > 0
@@ -399,13 +394,12 @@ class ByteTracker:
         for track in self._lost:
             if track.track_id in refound_ids:
                 continue
-            # Confirmed stationary tracks (near-zero velocity) survive longer
-            # because their Kalman prediction stays accurate for many more
-            # frames.  Require min_hits to avoid granting extended retention
-            # to short-lived false-positive detections (C-1 fix).
-            v = track.velocity
-            is_stationary = track.hits >= self._min_hits and float(v[0] * v[0] + v[1] * v[1]) < 1.0
-            age_limit = self._stationary_max_age if is_stationary else self._max_age
+            # Confirmed stationary tracks (height-normalised velocity < 10%)
+            # survive longer because their Kalman prediction stays accurate.
+            # Require min_hits to avoid granting extended retention to
+            # short-lived false-positive detections (C-1 fix).
+            stationary = track.hits >= self._min_hits and track.is_stationary
+            age_limit = self._stationary_max_age if stationary else self._max_age
             if track.time_since_update <= age_limit:
                 new_lost.append(track)
             else:
@@ -581,6 +575,8 @@ def _overlaps_any(
     if n <= 8:
         bx1, by1, bx2, by2 = box
         area_b = (bx2 - bx1) * (by2 - by1)
+        if area_b <= 0.0:
+            return False
         for i in range(n):
             ex1, ey1, ex2, ey2 = existing[i]
             ix1 = max(bx1, ex1)

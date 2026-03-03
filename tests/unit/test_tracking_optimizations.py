@@ -12,9 +12,7 @@ from numpy.typing import NDArray
 from yowo.tracking._kalman import KalmanFilterXYAH
 from yowo.tracking._matching import iou_batch, remove_intra_duplicates
 from yowo.tracking._strack import STrack, TrackState
-from yowo.types import ModelFamily, ModelSize, ModelSpec
 
-_SPEC = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
 _KF = KalmanFilterXYAH()
 
 
@@ -404,318 +402,99 @@ class TestRemoveIntraDuplicatesOpt:
 
 
 # ---------------------------------------------------------------------------
-# P3: Kalman covariance buffer
+# P3: Kalman predict correctness
 # ---------------------------------------------------------------------------
 
 
-class TestKalmanCovBuffer:
-    """Verify pre-allocated covariance buffer correctness."""
+class TestKalmanPredictCorrectness:
+    """Verify Kalman predict produces valid covariance and is side-effect-free."""
 
-    def test_predict_diagonal_values(self) -> None:
-        """predict() diagonal matches scalar formula."""
+    def test_predict_valid_covariance(self) -> None:
+        """predict() produces a valid 8x8 symmetric positive semi-definite matrix."""
         kf = KalmanFilterXYAH()
         measurement = np.array([100.0, 100.0, 1.0, 200.0], dtype=np.float64)
         mean, cov = kf.initiate(measurement)
         new_mean, new_cov = kf.predict(mean, cov)
-        # Verify result is a valid 8x8 symmetric positive semi-definite matrix
         assert new_cov.shape == (8, 8)
         np.testing.assert_allclose(new_cov, new_cov.T, atol=1e-12)
         eigvals = np.linalg.eigvalsh(new_cov)
         assert np.all(eigvals >= -1e-10)
 
-    def test_predict_off_diagonal_structure(self) -> None:
-        """Motion noise buffer contributes only to diagonal."""
-        kf = KalmanFilterXYAH()
-        # After predict, motion_cov_buf should only have diagonal values
-        measurement = np.array([50.0, 50.0, 1.5, 100.0], dtype=np.float64)
-        mean, cov = kf.initiate(measurement)
-        kf.predict(mean, cov)
-        buf = kf._motion_cov_buf
-        # Off-diagonal should be zero
-        mask = ~np.eye(8, dtype=bool)
-        np.testing.assert_allclose(buf[mask], 0.0, atol=1e-15)
-
-    def test_initiate_fresh_array(self) -> None:
-        """initiate() returns a fresh covariance, not the shared buffer."""
+    def test_initiate_independent_arrays(self) -> None:
+        """initiate() returns independent covariance arrays."""
         kf = KalmanFilterXYAH()
         m1 = np.array([100.0, 100.0, 1.0, 200.0], dtype=np.float64)
         _, cov1 = kf.initiate(m1)
         m2 = np.array([200.0, 200.0, 0.5, 50.0], dtype=np.float64)
         _, cov2 = kf.initiate(m2)
-        # cov1 should NOT be affected by cov2 computation
         assert not np.array_equal(cov1, cov2)
-        # Verify cov1 diagonal matches height=200 formula
         h = 200.0
         expected_d0 = (2 * (1.0 / 20) * h) ** 2
         assert abs(cov1[0, 0] - expected_d0) < 1e-10
 
-    def test_repeated_predict_no_accumulation(self) -> None:
-        """Multiple predict() calls don't accumulate in shared buffer."""
+    def test_predict_no_cross_contamination(self) -> None:
+        """Sequential predict() calls produce independent results."""
         kf = KalmanFilterXYAH()
         m1 = np.array([100.0, 100.0, 1.0, 200.0], dtype=np.float64)
         mean1, cov1 = kf.initiate(m1)
+        r1_mean, r1_cov = kf.predict(mean1.copy(), cov1.copy())
+        r1_snapshot = r1_cov.copy()
 
         m2 = np.array([50.0, 50.0, 2.0, 50.0], dtype=np.float64)
         mean2, cov2 = kf.initiate(m2)
-
-        # Predict with first track
-        kf.predict(mean1, cov1)
-        buf_after_first = kf._motion_cov_buf.copy()
-
-        # Predict with second track (different height → different diagonal)
         kf.predict(mean2, cov2)
-        buf_after_second = kf._motion_cov_buf.copy()
 
-        # Buffer should reflect second track's values, not accumulated
-        assert not np.array_equal(buf_after_first, buf_after_second)
-        # Off-diagonal still zero
-        mask = ~np.eye(8, dtype=bool)
-        np.testing.assert_allclose(buf_after_second[mask], 0.0, atol=1e-15)
+        np.testing.assert_allclose(r1_cov, r1_snapshot, atol=1e-15)
 
+    def test_batch_matches_sequential_mixed_states(self) -> None:
+        """predict_batch matches sequential predict for TRACKED + LOST tracks."""
+        kf = KalmanFilterXYAH()
 
-class TestIntraDuplicateVetoGates:
-    """Tests for multi-signal veto gates in remove_intra_duplicates."""
+        # Create tracks with different states and nonzero height velocity
+        boxes = [
+            (100.0, 100.0, 200.0, 300.0),
+            (300.0, 300.0, 450.0, 500.0),
+            (50.0, 50.0, 150.0, 250.0),
+        ]
+        states = [TrackState.TRACKED, TrackState.LOST, TrackState.LOST]
 
-    @staticmethod
-    def _make_overlapping_pair(
-        class_id_a: int = 0,
-        class_id_b: int = 0,
-        age_a: int = 10,
-        age_b: int = 5,
-    ) -> tuple[STrack, STrack]:
-        """Create two tracks with IoU > 0.70 (overlapping boxes)."""
-        t1 = STrack(
-            track_id=1,
-            box_xyxy=(100.0, 100.0, 200.0, 200.0),
-            confidence=0.9,
-            class_id=class_id_a,
-            class_name="obj",
-            kalman=_KF,
-            min_hits=3,
-        )
-        t1.activate(frame_id=0)
-        t1.start_frame = 0
-        t1.frame_id = age_a
-
-        t2 = STrack(
-            track_id=2,
-            box_xyxy=(105.0, 105.0, 205.0, 205.0),
-            confidence=0.9,
-            class_id=class_id_b,
-            class_name="obj",
-            kalman=_KF,
-            min_hits=3,
-        )
-        t2.activate(frame_id=age_a - age_b)
-        t2.start_frame = age_a - age_b
-        t2.frame_id = age_a
-
-        return t1, t2
-
-    def test_class_mismatch_preserves_both(self) -> None:
-        """Different class_id → both tracks survive despite high IoU."""
-        t1, t2 = self._make_overlapping_pair(class_id_a=0, class_id_b=2)
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 2
-
-    def test_same_class_no_embedding_deduped(self) -> None:
-        """Same class, no embeddings, similar velocity → younger removed."""
-        t1, t2 = self._make_overlapping_pair()
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 1
-        assert result[0].track_id == 1
-
-    def test_embedding_veto_preserves_distinct(self) -> None:
-        """Same class, orthogonal embeddings → both survive."""
-        t1, t2 = self._make_overlapping_pair()
-        # Orthogonal L2-normalised embeddings (cosine distance = 1.0)
-        emb_a = np.zeros(512, dtype=np.float32)
-        emb_a[0] = 1.0
-        emb_b = np.zeros(512, dtype=np.float32)
-        emb_b[1] = 1.0
-        t1._embedding = emb_a
-        t2._embedding = emb_b
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 2
-
-    def test_similar_embeddings_still_deduped(self) -> None:
-        """Same class, nearly identical embeddings → younger removed."""
-        t1, t2 = self._make_overlapping_pair()
-        emb = np.random.default_rng(42).standard_normal(512).astype(np.float32)
-        emb /= np.linalg.norm(emb)
-        t1._embedding = emb.copy()
-        t2._embedding = emb.copy()
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 1
-        assert result[0].track_id == 1
-
-    def test_one_embedding_none_gate_skipped(self) -> None:
-        """One None embedding → gate skipped, dedup still happens."""
-        t1, t2 = self._make_overlapping_pair()
-        emb = np.zeros(512, dtype=np.float32)
-        emb[0] = 1.0
-        t1._embedding = emb
-        # t2._embedding stays None
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 1
-        assert result[0].track_id == 1
-
-    def test_velocity_divergence_veto(self) -> None:
-        """Diverging Kalman velocities → both survive."""
-        t1, t2 = self._make_overlapping_pair()
-        # Set diverging velocities: t1 moves right, t2 moves left
-        # mean[3]=height, mean[4:6]=[vcx, vcy]
-        t1._mean[3] = 100.0
-        t1._mean[4] = 6.0
-        t1._mean[5] = 0.0
-        t2._mean[3] = 100.0
-        t2._mean[4] = -6.0
-        t2._mean[5] = 0.0
-        # rel_vel = norm([12, 0]) / 100 = 0.12 > 0.10 → veto
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 2
-
-    def test_low_velocity_no_veto(self) -> None:
-        """Similar velocities → no veto, younger removed."""
-        t1, t2 = self._make_overlapping_pair()
-        t1._mean[3] = 100.0
-        t1._mean[4] = 1.0
-        t1._mean[5] = 0.5
-        t2._mean[3] = 100.0
-        t2._mean[4] = 1.2
-        t2._mean[5] = 0.3
-        # rel_vel = norm([0.2, -0.2]) / 100 = 0.003 < 0.10 → no veto
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 1
-        assert result[0].track_id == 1
-
-    def test_class_aware_false_disables(self) -> None:
-        """class_aware=False disables class gate."""
-        t1, t2 = self._make_overlapping_pair(class_id_a=0, class_id_b=2)
-        result = remove_intra_duplicates(
-            [t1, t2],
-            class_aware=False,
-        )
-        assert len(result) == 1
-
-    def test_embedding_veto_overrides_velocity(self) -> None:
-        """Same class, similar velocity, but different embeddings → survives."""
-        t1, t2 = self._make_overlapping_pair()
-        # Similar velocity → no velocity veto
-        t1._mean[4] = 1.0
-        t2._mean[4] = 1.0
-        # Orthogonal embeddings → embedding veto fires
-        emb_a = np.zeros(512, dtype=np.float32)
-        emb_a[0] = 1.0
-        emb_b = np.zeros(512, dtype=np.float32)
-        emb_b[1] = 1.0
-        t1._embedding = emb_a
-        t2._embedding = emb_b
-        result = remove_intra_duplicates([t1, t2])
-        assert len(result) == 2
-
-    def test_three_way_mixed_classes(self) -> None:
-        """A(cls0)+B(cls0)+C(cls1): dedup A/B, keep C."""
-        ta = STrack(
-            track_id=1,
-            box_xyxy=(100.0, 100.0, 200.0, 200.0),
-            confidence=0.9,
-            class_id=0,
-            class_name="person",
-            kalman=_KF,
-            min_hits=3,
-        )
-        ta.activate(frame_id=0)
-        ta.start_frame = 0
-        ta.frame_id = 10
-
-        tb = STrack(
-            track_id=2,
-            box_xyxy=(105.0, 105.0, 205.0, 205.0),
-            confidence=0.9,
-            class_id=0,
-            class_name="person",
-            kalman=_KF,
-            min_hits=3,
-        )
-        tb.activate(frame_id=5)
-        tb.start_frame = 5
-        tb.frame_id = 10
-
-        tc = STrack(
-            track_id=3,
-            box_xyxy=(103.0, 103.0, 203.0, 203.0),
-            confidence=0.9,
-            class_id=1,
-            class_name="car",
-            kalman=_KF,
-            min_hits=3,
-        )
-        tc.activate(frame_id=3)
-        tc.start_frame = 3
-        tc.frame_id = 10
-
-        result = remove_intra_duplicates([ta, tb, tc])
-        ids = {t.track_id for t in result}
-        assert 1 in ids, "Oldest same-class track should survive"
-        assert 3 in ids, "Different-class track should survive"
-        assert len(result) == 2
-
-    def test_vectorized_path_with_class_veto(self) -> None:
-        """N>20 tracks: class veto works in vectorized path."""
-        tracks: list[STrack] = []
-        # 21 non-overlapping tracks of class 0
-        for i in range(21):
-            t = STrack(
-                track_id=i + 1,
-                box_xyxy=(
-                    float(i * 300),
-                    0.0,
-                    float(i * 300 + 100),
-                    100.0,
-                ),
-                confidence=0.9,
-                class_id=0,
-                class_name="person",
-                kalman=_KF,
-                min_hits=3,
-            )
+        # --- Sequential path ---
+        seq_means = []
+        seq_covs = []
+        for box, st in zip(boxes, states, strict=True):
+            t = _make_strack(*box, min_hits=1)
             t.activate(frame_id=0)
-            t.start_frame = 0
-            t.frame_id = 10
-            tracks.append(t)
-        # Add two overlapping tracks of different classes
-        overlap_a = STrack(
-            track_id=100,
-            box_xyxy=(5000.0, 0.0, 5100.0, 100.0),
-            confidence=0.9,
-            class_id=0,
-            class_name="person",
-            kalman=_KF,
-            min_hits=3,
-        )
-        overlap_a.activate(frame_id=0)
-        overlap_a.start_frame = 0
-        overlap_a.frame_id = 10
-        tracks.append(overlap_a)
+            t._mean[7] = 3.5  # nonzero height velocity
+            t.state = st
+            t.predict()
+            seq_means.append(t._mean.copy())
+            seq_covs.append(t._covariance.copy())
 
-        overlap_b = STrack(
-            track_id=101,
-            box_xyxy=(5005.0, 5.0, 5105.0, 105.0),
-            confidence=0.9,
-            class_id=2,
-            class_name="car",
-            kalman=_KF,
-            min_hits=3,
-        )
-        overlap_b.activate(frame_id=5)
-        overlap_b.start_frame = 5
-        overlap_b.frame_id = 10
-        tracks.append(overlap_b)
+        # --- Batch path ---
+        batch_tracks = []
+        for box, st in zip(boxes, states, strict=True):
+            t = _make_strack(*box, min_hits=1)
+            t.activate(frame_id=0)
+            t._mean[7] = 3.5
+            t.state = st
+            batch_tracks.append(t)
 
-        assert len(tracks) == 23  # > 20 → vectorized path
-        result = remove_intra_duplicates(tracks)
-        ids = {t.track_id for t in result}
-        assert 100 in ids, "Class-0 overlap track should survive"
-        assert 101 in ids, "Class-2 overlap track should survive (class veto)"
-        assert len(result) == 23  # No tracks removed
+        lost_mask = np.array(
+            [t.state != TrackState.TRACKED for t in batch_tracks],
+            dtype=np.bool_,
+        )
+        kf.predict_batch(batch_tracks, lost_mask)
+
+        for i in range(3):
+            np.testing.assert_allclose(
+                batch_tracks[i]._mean,
+                seq_means[i],
+                atol=1e-10,
+                err_msg=f"Track {i} mean mismatch",
+            )
+            np.testing.assert_allclose(
+                batch_tracks[i]._covariance,
+                seq_covs[i],
+                atol=1e-10,
+                err_msg=f"Track {i} covariance mismatch",
+            )

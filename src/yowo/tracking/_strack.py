@@ -138,6 +138,7 @@ class STrack:
     """
 
     __slots__ = (
+        "_cached_stationary",
         "_cached_xyxy",
         "_covariance",
         "_det_xyxy",
@@ -182,6 +183,7 @@ class STrack:
         self._embedding: NDArray[np.float32] | None = None
         self._det_xyxy = box_xyxy
         self._cached_xyxy: tuple[float, float, float, float] | None = None
+        self._cached_stationary: bool | None = None
 
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = kalman.initiate(measurement)
@@ -193,6 +195,7 @@ class STrack:
         drift while they await re-association (matches reference impl).
         """
         self._cached_xyxy = None
+        self._cached_stationary = None
         if self.state != TrackState.TRACKED:
             self._mean[7] = 0  # zero height velocity
         self._mean, self._covariance = self._kalman.predict(self._mean, self._covariance)
@@ -229,6 +232,7 @@ class STrack:
             frame_id: Current frame index.
         """
         self._cached_xyxy = None
+        self._cached_stationary = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -260,6 +264,7 @@ class STrack:
             frame_id: Current frame index.
         """
         self._cached_xyxy = None
+        self._cached_stationary = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -320,6 +325,22 @@ class STrack:
     def velocity(self) -> NDArray[np.float64]:
         """Kalman-estimated velocity ``(v_cx, v_cy)`` in pixels/frame."""
         return self._mean[4:6]
+
+    @property
+    def is_stationary(self) -> bool:
+        """True if height-normalised velocity is below stationary threshold.
+
+        Uses ``v² / max(h², 1)`` where h is Kalman-estimated height.
+        Threshold 0.01 ≈ velocity < 10% of height per frame.
+        Cached per predict/update cycle.
+        """
+        cached = self._cached_stationary
+        if cached is None:
+            v = self._mean[4:6]
+            h_sq = self._mean[3] ** 2
+            cached = float(v[0] * v[0] + v[1] * v[1]) / max(h_sq, 1.0) < 0.01
+            self._cached_stationary = cached
+        return cached
 
     @property
     def output_xyxy(self) -> tuple[float, float, float, float]:

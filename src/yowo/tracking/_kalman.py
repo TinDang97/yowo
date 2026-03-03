@@ -36,9 +36,6 @@ class KalmanFilterXYAH:
         for i in range(ndim):
             self._motion_mat[i, ndim + i] = dt
         self._update_mat = np.eye(ndim, 2 * ndim, dtype=np.float64)
-        # Pre-allocated diagonal covariance buffers (P3 optimization)
-        self._motion_cov_buf = np.zeros((8, 8), dtype=np.float64)
-        self._innov_cov_buf = np.zeros((4, 4), dtype=np.float64)
 
     def initiate(
         self, measurement: NDArray[np.float64]
@@ -83,10 +80,11 @@ class KalmanFilterXYAH:
         vh = _STD_WEIGHT_VELOCITY * h
         diag_vals = np.array([ph, ph, 1e-2, ph, vh, vh, 1e-5, vh], dtype=np.float64)
         diag_vals *= diag_vals
-        self._motion_cov_buf[_DIAG_8, _DIAG_8] = diag_vals
+        motion_cov = np.zeros((8, 8), dtype=np.float64)
+        motion_cov[_DIAG_8, _DIAG_8] = diag_vals
 
         mean = np.dot(mean, self._motion_mat.T)
-        covariance = self._motion_mat @ covariance @ self._motion_mat.T + self._motion_cov_buf
+        covariance = self._motion_mat @ covariance @ self._motion_mat.T + motion_cov
         return mean, covariance
 
     def predict_batch(
@@ -101,7 +99,7 @@ class KalmanFilterXYAH:
         and invalidates _cached_xyxy in-place.
 
         Args:
-            tracks: List of STrack objects (typed Any to avoid circular import).
+            tracks: STrack objects (typed Any — cross-module private access).
             lost_mask: (N,) bool array — True for tracks not in TRACKED state.
         """
         n = len(tracks)
@@ -155,6 +153,7 @@ class KalmanFilterXYAH:
             t.age += 1
             t.time_since_update += 1
             t._cached_xyxy = None
+            t._cached_stationary = None
 
     def project(
         self,
@@ -174,10 +173,11 @@ class KalmanFilterXYAH:
         ph = _STD_WEIGHT_POSITION * h
         diag_vals = np.array([ph, ph, 1e-1, ph], dtype=np.float64)
         diag_vals *= diag_vals
-        self._innov_cov_buf[_DIAG_4, _DIAG_4] = diag_vals
+        innov_cov = np.zeros((4, 4), dtype=np.float64)
+        innov_cov[_DIAG_4, _DIAG_4] = diag_vals
 
         projected_mean = self._update_mat @ mean
-        projected_cov = self._update_mat @ covariance @ self._update_mat.T + self._innov_cov_buf
+        projected_cov = self._update_mat @ covariance @ self._update_mat.T + innov_cov
         return projected_mean, projected_cov
 
     def update(
