@@ -498,3 +498,45 @@ class TestKalmanPredictCorrectness:
                 atol=1e-10,
                 err_msg=f"Track {i} covariance mismatch",
             )
+
+
+# ---------------------------------------------------------------------------
+# is_stationary boundary tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsStationaryBoundary:
+    """Verify is_stationary threshold at the 0.01 boundary."""
+
+    def test_stationary_just_below_threshold(self) -> None:
+        """v^2/h^2 just below 0.01 → is_stationary=True."""
+        t = _make_strack()
+        t.activate(frame_id=0)
+        # h=100, threshold ratio=0.01 → v^2 < 0.01 * h^2 = 100
+        # v = (9.9, 0) → v^2 = 98.01, ratio = 98.01/10000 = 0.009801 < 0.01
+        t._mean[3] = 100.0  # height
+        t._mean[4] = 9.9  # v_cx
+        t._mean[5] = 0.0  # v_cy
+        t._cached_stationary = None
+        assert t.is_stationary == True  # noqa: E712  (numpy bool)
+
+    def test_stationary_just_above_threshold(self) -> None:
+        """v^2/h^2 just above 0.01 → is_stationary=False."""
+        t = _make_strack()
+        t.activate(frame_id=0)
+        # h=100, v = (10.1, 0) → v^2 = 102.01, ratio = 102.01/10000 = 0.010201 > 0.01
+        t._mean[3] = 100.0
+        t._mean[4] = 10.1
+        t._mean[5] = 0.0
+        t._cached_stationary = None
+        assert t.is_stationary == False  # noqa: E712  (numpy bool)
+
+    def test_stationary_zero_velocity(self) -> None:
+        """Zero velocity → is_stationary=True."""
+        t = _make_strack()
+        t.activate(frame_id=0)
+        t._mean[3] = 200.0
+        t._mean[4] = 0.0
+        t._mean[5] = 0.0
+        t._cached_stationary = None
+        assert t.is_stationary == True  # noqa: E712  (numpy bool)

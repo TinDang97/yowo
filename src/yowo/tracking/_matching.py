@@ -124,6 +124,10 @@ def _hungarian(
     Returns:
         (row_indices, col_indices) of optimal assignments.
     """
+    # All-inf matrix is infeasible — return empty assignment.
+    if not np.isfinite(cost).any():
+        return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
+
     if _has_scipy:
         row_ind, col_ind = _scipy_lsa(cost)  # type: ignore[possibly-undefined]
         return row_ind.astype(np.intp), col_ind.astype(np.intp)
@@ -362,14 +366,24 @@ def needs_reid(
 def remove_duplicate_tracks(
     tracks_a: list[STrack],
     tracks_b: list[STrack],
+    *,
+    class_aware: bool = True,
+    embedding_veto_thresh: float = 0.40,
+    velocity_veto_thresh: float = 0.10,
 ) -> tuple[list[STrack], list[STrack]]:
     """Remove duplicate tracks across two track lists.
 
-    When two tracks have IoU distance < 0.15, the shorter-lived one is removed.
+    When two tracks have IoU distance < 0.15, the shorter-lived one is removed
+    **unless** a veto gate fires (same gates as ``remove_intra_duplicates``).
 
     Args:
         tracks_a: First list of tracks (typically active tracks).
-        tracks_b: Second list of tracks (typically re-activated or new tracks).
+        tracks_b: Second list of tracks (typically lost tracks).
+        class_aware: If True, different ``class_id`` vetoes removal.
+        embedding_veto_thresh: Cosine distance above which the embedding
+            gate vetoes removal.
+        velocity_veto_thresh: Height-normalised velocity difference above
+            which the velocity gate vetoes removal.
 
     Returns:
         (filtered_a, filtered_b) with duplicates removed.
@@ -386,6 +400,14 @@ def remove_duplicate_tracks(
 
     pairs = np.argwhere(dist_matrix < 0.15)
     for i, j in pairs:
+        if _should_veto_removal(
+            tracks_a[i],
+            tracks_b[j],
+            class_aware=class_aware,
+            embedding_veto_thresh=embedding_veto_thresh,
+            velocity_veto_thresh=velocity_veto_thresh,
+        ):
+            continue
         age_a = tracks_a[i].frame_id - tracks_a[i].start_frame
         age_b = tracks_b[j].frame_id - tracks_b[j].start_frame
         if age_a > age_b:
@@ -412,7 +434,8 @@ def _should_veto_removal(
 
     1. **Class mismatch**: Different ``class_id`` → never duplicates.
     2. **Embedding divergence**: Cosine distance above threshold when both
-       tracks have ReID embeddings.
+       tracks have ReID embeddings.  Assumes embeddings are L2-normalised
+       (``||e|| ≈ 1``); unnormalised vectors produce meaningless distances.
     3. **Velocity divergence**: Height-normalised Kalman velocity difference
        above threshold → objects moving differently.
     """

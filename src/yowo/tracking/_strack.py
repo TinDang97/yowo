@@ -146,6 +146,7 @@ class STrack:
         "_kalman",
         "_mean",
         "_min_hits",
+        "_stationary_thresh",
         "age",
         "class_id",
         "class_name",
@@ -167,6 +168,7 @@ class STrack:
         class_name: str,
         kalman: KalmanFilterXYAH,
         min_hits: int,
+        stationary_thresh: float = 0.01,
     ) -> None:
         self.track_id = track_id
         self.class_id = class_id
@@ -175,6 +177,7 @@ class STrack:
         self.state = TrackState.NEW
         self._kalman = kalman
         self._min_hits = min_hits
+        self._stationary_thresh = stationary_thresh
         self.hits = 0
         self.age = 0
         self.time_since_update = 0
@@ -323,22 +326,25 @@ class STrack:
 
     @property
     def velocity(self) -> NDArray[np.float64]:
-        """Kalman-estimated velocity ``(v_cx, v_cy)`` in pixels/frame."""
-        return self._mean[4:6]
+        """Kalman-estimated velocity ``(v_cx, v_cy)`` in pixels/frame.
+
+        Returns a copy — mutations do not affect Kalman state.
+        """
+        return self._mean[4:6].copy()
 
     @property
     def is_stationary(self) -> bool:
         """True if height-normalised velocity is below stationary threshold.
 
         Uses ``v² / max(h², 1)`` where h is Kalman-estimated height.
-        Threshold 0.01 ≈ velocity < 10% of height per frame.
-        Cached per predict/update cycle.
+        Threshold configurable via ``stationary_thresh`` (default 0.01 ≈ 10%
+        of height per frame). Cached per predict/update cycle.
         """
         cached = self._cached_stationary
         if cached is None:
             v = self._mean[4:6]
             h_sq = self._mean[3] ** 2
-            cached = float(v[0] * v[0] + v[1] * v[1]) / max(h_sq, 1.0) < 0.01
+            cached = float(v[0] * v[0] + v[1] * v[1]) / max(h_sq, 1.0) < self._stationary_thresh
             self._cached_stationary = cached
         return cached
 

@@ -67,6 +67,10 @@ class ByteTracker:
         reid_extractor: ReIDExtractor | None = None,
         reid_lost_age: int = 5,
         reid_frame_interval: int = 3,
+        stationary_thresh: float = 0.01,
+        max_lost: int = 500,
+        embedding_veto_thresh: float = 0.40,
+        velocity_veto_thresh: float = 0.10,
     ) -> None:
         if track_low_thresh >= track_high_thresh:
             raise ValueError(
@@ -92,7 +96,12 @@ class ByteTracker:
         self._reid = reid_extractor
         self._reid_lost_age = reid_lost_age
         self._reid_frame_interval = reid_frame_interval
-        self._frames_since_reid: int = reid_frame_interval  # start ready to extract
+        self._frames_since_reid: int = reid_frame_interval
+        # Configurable thresholds
+        self._stationary_thresh = stationary_thresh
+        self._max_lost = max_lost
+        self._embedding_veto_thresh = embedding_veto_thresh
+        self._velocity_veto_thresh = velocity_veto_thresh  # start ready to extract
 
     def update(self, detection: Detection) -> TrackedDetection:
         """Process one Detection frame and return tracked result.
@@ -278,7 +287,7 @@ class ByteTracker:
                 # Class gate: inflate cost for class-mismatched pairs
                 cls_lost = np.array([t.class_id for t in recent_lost])
                 cls_det = np.array([low_cls_ids[i] for i in unmatched_low_s2])
-                cost_2_5[cls_lost[:, None] != cls_det[None, :]] = 1.0
+                cost_2_5[cls_lost[:, None] != cls_det[None, :]] = np.inf
                 matches_2_5, _, _ = linear_assignment(cost_2_5, self._stage2_thresh)
                 for ti, di in matches_2_5:
                     orig_di = unmatched_low_s2[di]
@@ -376,6 +385,7 @@ class ByteTracker:
                     high_cls_names[idx],
                     self._kalman,
                     self._min_hits,
+                    stationary_thresh=self._stationary_thresh,
                 )
                 self._next_id += 1
                 track.activate(frame_id)
@@ -409,6 +419,12 @@ class ByteTracker:
             if track.state == TrackState.LOST:
                 new_lost.append(track)
 
+        # Enforce lost pool cap — evict oldest-unseen first
+        if len(new_lost) > self._max_lost:
+            new_lost.sort(key=lambda t: t.time_since_update)
+            for evicted in new_lost[self._max_lost :]:
+                evicted.mark_removed()
+            new_lost = new_lost[: self._max_lost]
         self._lost = new_lost
 
         # Rebuild active tracked list:
@@ -421,8 +437,17 @@ class ByteTracker:
         )
 
         # --- Duplicate removal ---
-        self._tracked = remove_intra_duplicates(self._tracked)
-        self._tracked, self._lost = remove_duplicate_tracks(self._tracked, self._lost)
+        self._tracked = remove_intra_duplicates(
+            self._tracked,
+            embedding_veto_thresh=self._embedding_veto_thresh,
+            velocity_veto_thresh=self._velocity_veto_thresh,
+        )
+        self._tracked, self._lost = remove_duplicate_tracks(
+            self._tracked,
+            self._lost,
+            embedding_veto_thresh=self._embedding_veto_thresh,
+            velocity_veto_thresh=self._velocity_veto_thresh,
+        )
 
         # --- Build output (clamp to frame bounds) ---
         frame_h, frame_w = detection.frame.pixels.shape[:2]
