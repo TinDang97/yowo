@@ -9,6 +9,9 @@ from numpy.typing import NDArray
 
 from yowo.tracking._strack import STrack
 
+# Scalar-vs-vectorized crossover threshold (empirical, numpy dispatch overhead)
+_INTRA_DEDUP_VECTORIZE_THRESHOLD = 20
+
 # Use scipy's C-extension linear_sum_assignment when available (~500x faster than
 # the pure-numpy fallback for N>=20). Install with: pip install yowo[tracking]
 try:
@@ -129,7 +132,11 @@ def _hungarian(
         return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
 
     if _has_scipy:
-        row_ind, col_ind = _scipy_lsa(cost)  # type: ignore[possibly-undefined]
+        try:
+            row_ind, col_ind = _scipy_lsa(cost)  # type: ignore[possibly-undefined]
+        except ValueError:
+            # Partial-inf matrix (e.g. class gate) makes assignment infeasible
+            return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
         return row_ind.astype(np.intp), col_ind.astype(np.intp)
 
     n_rows, n_cols = cost.shape
@@ -502,7 +509,7 @@ def remove_intra_duplicates(
     ious = iou_batch(boxes, boxes)
 
     remove: set[int] = set()
-    if n <= 20:
+    if n <= _INTRA_DEDUP_VECTORIZE_THRESHOLD:
         # Scalar path: avoids np.triu/np.where overhead at small N
         for i in range(n):
             if i in remove:

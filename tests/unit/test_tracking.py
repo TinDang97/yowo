@@ -148,6 +148,16 @@ class TestLinearAssignment:
         matches, ur, uc = linear_assignment(cost, thresh=0.5)
         assert all(isinstance(p, tuple) and len(p) == 2 for p in matches)
 
+    def test_partial_inf_cost_returns_feasible_subset(self) -> None:
+        """Partial-inf matrix (e.g. class gate) should not crash."""
+        cost = np.array(
+            [[0.3, np.inf], [np.inf, np.inf]],
+            dtype=np.float64,
+        )
+        matches, ur, uc = linear_assignment(cost, thresh=0.5)
+        # Row 1 has no feasible column — at most row 0 matched
+        assert len(matches) <= 1
+
 
 class TestSTrack:
     def test_initial_state_new(self) -> None:

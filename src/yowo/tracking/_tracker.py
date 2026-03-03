@@ -29,6 +29,10 @@ from yowo.tracking._reid import ReIDExtractor
 from yowo.tracking._strack import STrack, TrackedBox, TrackedDetection, TrackState
 from yowo.types import Detection
 
+# Scalar-vs-vectorized crossover thresholds (empirical, numpy dispatch overhead)
+_BATCH_PREDICT_THRESHOLD = 16
+_OVERLAP_VECTORIZE_THRESHOLD = 8
+
 
 class ByteTracker:
     """ByteTrack multi-object tracker (Zhang et al., ECCV 2022).
@@ -101,7 +105,7 @@ class ByteTracker:
         self._stationary_thresh = stationary_thresh
         self._max_lost = max_lost
         self._embedding_veto_thresh = embedding_veto_thresh
-        self._velocity_veto_thresh = velocity_veto_thresh  # start ready to extract
+        self._velocity_veto_thresh = velocity_veto_thresh
 
     def update(self, detection: Detection) -> TrackedDetection:
         """Process one Detection frame and return tracked result.
@@ -152,7 +156,7 @@ class ByteTracker:
 
         # --- Kalman predict all tracks ---
         all_active = self._tracked + self._lost
-        if len(all_active) > 16:
+        if len(all_active) > _BATCH_PREDICT_THRESHOLD:
             # Batch path: amortizes numpy dispatch overhead at scale
             lost_mask = np.array(
                 [t.state != TrackState.TRACKED for t in all_active], dtype=np.bool_
@@ -597,7 +601,7 @@ def _overlaps_any(
     if n == 0:
         return False
     # Scalar path faster for small N (avoids numpy dispatch overhead)
-    if n <= 8:
+    if n <= _OVERLAP_VECTORIZE_THRESHOLD:
         bx1, by1, bx2, by2 = box
         area_b = (bx2 - bx1) * (by2 - by1)
         if area_b <= 0.0:
