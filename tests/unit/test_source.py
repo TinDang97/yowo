@@ -143,6 +143,27 @@ class TestOpenSourceFrameSkipWiring:
 
 
 # ---------------------------------------------------------------------------
+# F-1: open_source() accepts int webcam index
+# ---------------------------------------------------------------------------
+
+
+class TestOpenSourceIntIndex:
+    """open_source(0) should dispatch to WebcamSource."""
+
+    def test_int_dispatches_to_webcam(self) -> None:
+        with patch("yowo.io._source.WebcamSource") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            open_source(0)
+            mock_cls.assert_called_once_with(0, max_frames=None, frame_skip=0)
+
+    def test_int_passes_kwargs(self) -> None:
+        with patch("yowo.io._source.WebcamSource") as mock_cls:
+            mock_cls.return_value = MagicMock()
+            open_source(1, frame_skip=3, max_frames=100)
+            mock_cls.assert_called_once_with(1, max_frames=100, frame_skip=3)
+
+
+# ---------------------------------------------------------------------------
 # VideoFileSource metadata (_probe consolidation)
 # ---------------------------------------------------------------------------
 

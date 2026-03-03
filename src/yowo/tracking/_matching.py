@@ -9,6 +9,9 @@ from numpy.typing import NDArray
 
 from yowo.tracking._strack import STrack
 
+# Scalar-vs-vectorized crossover threshold (empirical, numpy dispatch overhead)
+_INTRA_DEDUP_VECTORIZE_THRESHOLD = 20
+
 # Use scipy's C-extension linear_sum_assignment when available (~500x faster than
 # the pure-numpy fallback for N>=20). Install with: pip install yowo[tracking]
 try:
@@ -124,8 +127,16 @@ def _hungarian(
     Returns:
         (row_indices, col_indices) of optimal assignments.
     """
+    # All-inf matrix is infeasible — return empty assignment.
+    if not np.isfinite(cost).any():
+        return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
+
     if _has_scipy:
-        row_ind, col_ind = _scipy_lsa(cost)  # type: ignore[possibly-undefined]
+        try:
+            row_ind, col_ind = _scipy_lsa(cost)  # type: ignore[possibly-undefined]
+        except ValueError:
+            # Partial-inf matrix (e.g. class gate) makes assignment infeasible
+            return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
         return row_ind.astype(np.intp), col_ind.astype(np.intp)
 
     n_rows, n_cols = cost.shape
@@ -362,14 +373,24 @@ def needs_reid(
 def remove_duplicate_tracks(
     tracks_a: list[STrack],
     tracks_b: list[STrack],
+    *,
+    class_aware: bool = True,
+    embedding_veto_thresh: float = 0.40,
+    velocity_veto_thresh: float = 0.10,
 ) -> tuple[list[STrack], list[STrack]]:
     """Remove duplicate tracks across two track lists.
 
-    When two tracks have IoU distance < 0.15, the shorter-lived one is removed.
+    When two tracks have IoU distance < 0.15, the shorter-lived one is removed
+    **unless** a veto gate fires (same gates as ``remove_intra_duplicates``).
 
     Args:
         tracks_a: First list of tracks (typically active tracks).
-        tracks_b: Second list of tracks (typically re-activated or new tracks).
+        tracks_b: Second list of tracks (typically lost tracks).
+        class_aware: If True, different ``class_id`` vetoes removal.
+        embedding_veto_thresh: Cosine distance above which the embedding
+            gate vetoes removal.
+        velocity_veto_thresh: Height-normalised velocity difference above
+            which the velocity gate vetoes removal.
 
     Returns:
         (filtered_a, filtered_b) with duplicates removed.
@@ -386,6 +407,14 @@ def remove_duplicate_tracks(
 
     pairs = np.argwhere(dist_matrix < 0.15)
     for i, j in pairs:
+        if _should_veto_removal(
+            tracks_a[i],
+            tracks_b[j],
+            class_aware=class_aware,
+            embedding_veto_thresh=embedding_veto_thresh,
+            velocity_veto_thresh=velocity_veto_thresh,
+        ):
+            continue
         age_a = tracks_a[i].frame_id - tracks_a[i].start_frame
         age_b = tracks_b[j].frame_id - tracks_b[j].start_frame
         if age_a > age_b:
@@ -398,22 +427,76 @@ def remove_duplicate_tracks(
     return filtered_a, filtered_b
 
 
+def _should_veto_removal(
+    ti: STrack,
+    tj: STrack,
+    *,
+    class_aware: bool,
+    embedding_veto_thresh: float,
+    velocity_veto_thresh: float,
+) -> bool:
+    """Return True if the pair should NOT be treated as duplicates.
+
+    Three independent veto gates — any single veto preserves both tracks:
+
+    1. **Class mismatch**: Different ``class_id`` → never duplicates.
+    2. **Embedding divergence**: Cosine distance above threshold when both
+       tracks have ReID embeddings.  Assumes embeddings are L2-normalised
+       (``||e|| ≈ 1``); unnormalised vectors produce meaningless distances.
+    3. **Velocity divergence**: Height-normalised Kalman velocity difference
+       above threshold → objects moving differently.
+    """
+    # Gate 1: Class mismatch
+    if class_aware and ti.class_id != tj.class_id:
+        return True
+    # Gate 2: Appearance divergence (only when both have embeddings)
+    emb_i = ti.embedding
+    emb_j = tj.embedding
+    if emb_i is not None and emb_j is not None:
+        cos_dist = 1.0 - float(emb_i @ emb_j)
+        if cos_dist > embedding_veto_thresh:
+            return True
+    # Gate 3: Velocity divergence (height-normalised, scalar math)
+    vi = ti.velocity
+    vj = tj.velocity
+    dx = float(vi[0] - vj[0])
+    dy = float(vi[1] - vj[1])
+    vel_diff = (dx * dx + dy * dy) ** 0.5
+    box_i = ti.predicted_xyxy
+    box_j = tj.predicted_xyxy
+    h_avg = 0.5 * ((box_i[3] - box_i[1]) + (box_j[3] - box_j[1]))
+    return vel_diff / max(h_avg, 1.0) > velocity_veto_thresh
+
+
 def remove_intra_duplicates(
     tracks: list[STrack],
     dist_thresh: float = 0.30,
+    *,
+    class_aware: bool = True,
+    embedding_veto_thresh: float = 0.40,
+    velocity_veto_thresh: float = 0.10,
 ) -> list[STrack]:
     """Remove duplicate tracks within a single list.
 
     When two tracks in the same list have IoU distance below ``dist_thresh``
-    (i.e., IoU above ``1 - dist_thresh``), the shorter-lived track is removed.
+    (i.e., IoU above ``1 - dist_thresh``), the shorter-lived track is removed
+    **unless** a veto gate fires:
 
-    This handles the case where YOLO NMS lets two boxes through for one
-    object and both land in ``_tracked`` (which cross-list dedup cannot catch).
+    - **Class gate**: different ``class_id`` → never duplicates.
+    - **Embedding gate**: high cosine distance (when both have ReID
+      embeddings) → distinct appearance.
+    - **Velocity gate**: height-normalised Kalman velocity divergence →
+      objects moving differently.
 
     Args:
         tracks: List of active tracks to deduplicate.
         dist_thresh: IoU distance below which two tracks are considered
             duplicates.  Default 0.30 (IoU > 0.70).
+        class_aware: If True, different ``class_id`` vetoes removal.
+        embedding_veto_thresh: Cosine distance above which the embedding
+            gate vetoes removal.  Default 0.40.
+        velocity_veto_thresh: Height-normalised velocity difference above
+            which the velocity gate vetoes removal.  Default 0.10.
 
     Returns:
         Filtered list with duplicates removed.
@@ -421,24 +504,55 @@ def remove_intra_duplicates(
     if len(tracks) < 2:
         return tracks
 
+    n = len(tracks)
     boxes = np.array([t.predicted_xyxy for t in tracks], dtype=np.float64)
     ious = iou_batch(boxes, boxes)
-    n = len(tracks)
 
     remove: set[int] = set()
-    for i in range(n):
-        if i in remove:
-            continue
-        for j in range(i + 1, n):
-            if j in remove:
+    if n <= _INTRA_DEDUP_VECTORIZE_THRESHOLD:
+        # Scalar path: avoids np.triu/np.where overhead at small N
+        for i in range(n):
+            if i in remove:
                 continue
-            if (1.0 - ious[i, j]) < dist_thresh:
-                age_i = tracks[i].frame_id - tracks[i].start_frame
-                age_j = tracks[j].frame_id - tracks[j].start_frame
-                if age_i >= age_j:
-                    remove.add(j)
-                else:
-                    remove.add(i)
+            for j in range(i + 1, n):
+                if j in remove:
+                    continue
+                if (1.0 - ious[i, j]) < dist_thresh:
+                    if _should_veto_removal(
+                        tracks[i],
+                        tracks[j],
+                        class_aware=class_aware,
+                        embedding_veto_thresh=embedding_veto_thresh,
+                        velocity_veto_thresh=velocity_veto_thresh,
+                    ):
+                        continue
+                    age_i = tracks[i].frame_id - tracks[i].start_frame
+                    age_j = tracks[j].frame_id - tracks[j].start_frame
+                    if age_i >= age_j:
+                        remove.add(j)
+                    else:
+                        remove.add(i)
+    else:
+        # Vectorized path: np.triu + np.where for large N
+        ii, jj = np.where(np.triu(1.0 - ious < dist_thresh, k=1))
+        if ii.shape[0] == 0:
+            return tracks
+        ages = np.array([t.frame_id - t.start_frame for t in tracks])
+        for i, j in zip(ii.tolist(), jj.tolist(), strict=True):
+            if i in remove or j in remove:
+                continue
+            if _should_veto_removal(
+                tracks[i],
+                tracks[j],
+                class_aware=class_aware,
+                embedding_veto_thresh=embedding_veto_thresh,
+                velocity_veto_thresh=velocity_veto_thresh,
+            ):
+                continue
+            if ages[i] >= ages[j]:
+                remove.add(j)
+            else:
+                remove.add(i)
 
     if not remove:
         return tracks

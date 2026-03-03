@@ -138,12 +138,15 @@ class STrack:
     """
 
     __slots__ = (
+        "_cached_stationary",
+        "_cached_xyxy",
         "_covariance",
         "_det_xyxy",
         "_embedding",
         "_kalman",
         "_mean",
         "_min_hits",
+        "_stationary_thresh",
         "age",
         "class_id",
         "class_name",
@@ -165,6 +168,7 @@ class STrack:
         class_name: str,
         kalman: KalmanFilterXYAH,
         min_hits: int,
+        stationary_thresh: float = 0.01,
     ) -> None:
         self.track_id = track_id
         self.class_id = class_id
@@ -173,6 +177,7 @@ class STrack:
         self.state = TrackState.NEW
         self._kalman = kalman
         self._min_hits = min_hits
+        self._stationary_thresh = stationary_thresh
         self.hits = 0
         self.age = 0
         self.time_since_update = 0
@@ -180,6 +185,8 @@ class STrack:
         self.frame_id = 0
         self._embedding: NDArray[np.float32] | None = None
         self._det_xyxy = box_xyxy
+        self._cached_xyxy: tuple[float, float, float, float] | None = None
+        self._cached_stationary: bool | None = None
 
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = kalman.initiate(measurement)
@@ -190,6 +197,8 @@ class STrack:
         Lost tracks have their height velocity zeroed to prevent unchecked
         drift while they await re-association (matches reference impl).
         """
+        self._cached_xyxy = None
+        self._cached_stationary = None
         if self.state != TrackState.TRACKED:
             self._mean[7] = 0  # zero height velocity
         self._mean, self._covariance = self._kalman.predict(self._mean, self._covariance)
@@ -225,6 +234,8 @@ class STrack:
             class_name: Detected class name.
             frame_id: Current frame index.
         """
+        self._cached_xyxy = None
+        self._cached_stationary = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -255,6 +266,8 @@ class STrack:
             class_name: Detected class name.
             frame_id: Current frame index.
         """
+        self._cached_xyxy = None
+        self._cached_stationary = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -305,7 +318,35 @@ class STrack:
     @property
     def predicted_xyxy(self) -> tuple[float, float, float, float]:
         """Current predicted position as (x1, y1, x2, y2) pixel coordinates."""
-        return KalmanFilterXYAH.xyah_to_xyxy(self._mean[:4])
+        cached = self._cached_xyxy
+        if cached is None:
+            cached = KalmanFilterXYAH.xyah_to_xyxy(self._mean[:4])
+            self._cached_xyxy = cached
+        return cached
+
+    @property
+    def velocity(self) -> NDArray[np.float64]:
+        """Kalman-estimated velocity ``(v_cx, v_cy)`` in pixels/frame.
+
+        Returns a copy — mutations do not affect Kalman state.
+        """
+        return self._mean[4:6].copy()
+
+    @property
+    def is_stationary(self) -> bool:
+        """True if height-normalised velocity is below stationary threshold.
+
+        Uses ``v² / max(h², 1)`` where h is Kalman-estimated height.
+        Threshold configurable via ``stationary_thresh`` (default 0.01 ≈ 10%
+        of height per frame). Cached per predict/update cycle.
+        """
+        cached = self._cached_stationary
+        if cached is None:
+            v = self._mean[4:6]
+            h_sq = self._mean[3] ** 2
+            cached = float(v[0] * v[0] + v[1] * v[1]) / max(h_sq, 1.0) < self._stationary_thresh
+            self._cached_stationary = cached
+        return cached
 
     @property
     def output_xyxy(self) -> tuple[float, float, float, float]:
