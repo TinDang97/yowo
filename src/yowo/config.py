@@ -136,6 +136,72 @@ class InferenceConfig:
 
 
 # ---------------------------------------------------------------------------
+# ClassificationConfig
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ClassificationConfig:
+    """Runtime configuration for the classification inference engine.
+
+    Validation is performed in ``__post_init__``. Omits detection-specific
+    thresholds (confidence, IoU) in favour of ``top_k``.
+
+    Attributes:
+        model_family: YOLO model family to use.
+        model_size: Size variant of the model.
+        weights_path: Optional path to a local ``-cls.pt`` weights file. When
+            ``None`` the registry resolves the path automatically.
+        backend: Inference backend. ``None`` triggers automatic selection
+            based on available hardware and installed packages.
+        device: Device string (``"auto"``, ``"cuda"``, ``"cpu"``, …).
+            ``"auto"`` delegates to the hardware module.
+        precision: Numerical precision. ``None`` triggers automatic
+            selection (FP16 on CUDA, FP32 on CPU).
+        top_k: Number of top predictions to return per frame. Must be >= 1.
+        batch_size: Number of frames per inference batch. Must be >= 1.
+        frame_drop_policy: Backlog policy for ThreadedFrameReader when the
+            queue is full. ``NONE`` applies backpressure (offline default);
+            ``LATEST`` keeps only the newest frame (live default).
+        max_queue_size: Bounded queue depth for ThreadedFrameReader. Must
+            be >= 1.
+        prefetch: Enable threaded frame prefetch in ``stream()``.
+        pipeline_workers: Worker thread count for the pipeline. ``0`` means
+            auto-detect (2 on free-threaded Python, 1 otherwise).
+        metrics_enabled: Collect latency, throughput, and error metrics.
+        error_threshold: Number of cumulative errors before ``engine.health``
+            transitions to ``DEGRADED``. Must be >= 1.
+    """
+
+    model_family: ModelFamily = ModelFamily.YOLO11
+    model_size: ModelSize = ModelSize.NANO
+    weights_path: Path | None = None
+    backend: BackendType | None = None
+    device: str = "auto"
+    precision: Precision | None = None
+    top_k: int = 5
+    batch_size: int = 1
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST
+    max_queue_size: int = 2
+    prefetch: bool = True
+    pipeline_workers: int = 0
+    metrics_enabled: bool = True
+    error_threshold: int = 10
+
+    def __post_init__(self) -> None:
+        if self.top_k < 1:
+            raise ConfigError(f"top_k must be >= 1, got {self.top_k}")
+        if self.batch_size < 1:
+            raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.max_queue_size < 1:
+            raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
+        if self.pipeline_workers < 0:
+            raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
+        if self.error_threshold < 1:
+            raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
+
+
+# ---------------------------------------------------------------------------
 # ExportConfig
 # ---------------------------------------------------------------------------
 
@@ -557,6 +623,7 @@ def preset_config(
 
 
 __all__ = [
+    "ClassificationConfig",
     "ExportConfig",
     "InferenceConfig",
     "classify_device",

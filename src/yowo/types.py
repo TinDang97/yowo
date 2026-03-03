@@ -287,6 +287,60 @@ class Detection:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassificationResult:
+    """Inference result for a single frame from a classification model.
+
+    Attributes:
+        top1_class_id: Integer class index with the highest probability.
+        top1_score: Probability of the top-1 class in [0, 1].
+        topk_class_ids: Top-k class indices sorted descending by score.
+        topk_scores: Corresponding probabilities for top-k classes.
+        all_probs: Full probability vector (length == num_classes).
+        source_id: Opaque identifier of the input source; empty if unknown.
+        frame_index: Zero-based sequential index of the frame in its source.
+        inference_time_ms: Wall-clock time for the inference call only,
+            excluding preprocessing and postprocessing.
+        backend: Backend that produced this result.
+        model_spec: Model that produced this result.
+    """
+
+    top1_class_id: int
+    top1_score: float
+    topk_class_ids: tuple[int, ...]
+    topk_scores: tuple[float, ...]
+    all_probs: tuple[float, ...]
+    source_id: str
+    frame_index: int
+    inference_time_ms: float
+    backend: BackendType
+    model_spec: ModelSpec
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-safe dict.
+
+        ``all_probs`` is excluded by default (1000 floats for ImageNet) to
+        keep the serialized size manageable for logging and wire transport.
+        """
+        return {
+            "source_id": self.source_id,
+            "frame_index": self.frame_index,
+            "inference_time_ms": self.inference_time_ms,
+            "backend": str(self.backend),
+            "model": f"{self.model_spec.family.value}{self.model_spec.size.value}-cls",
+            "top1_class_id": self.top1_class_id,
+            "top1_score": self.top1_score,
+            "topk": [
+                {"class_id": int(cid), "score": float(sc)}
+                for cid, sc in zip(self.topk_class_ids, self.topk_scores, strict=False)
+            ],
+        }
+
+    def to_json(self, *, indent: int | None = None) -> str:
+        """Serialize to a JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
+
+
+@dataclass(frozen=True, slots=True)
 class ExportResult:
     """Record of a completed model export operation.
 
@@ -441,6 +495,7 @@ __all__ = [
     "BackendType",
     "BoundingBox",
     "CPUArch",
+    "ClassificationResult",
     "Detection",
     "DeviceCategory",
     "DeviceType",

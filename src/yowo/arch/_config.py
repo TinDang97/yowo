@@ -112,6 +112,74 @@ def get_config(family: ModelFamily, size: ModelSize) -> ModelConfig:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ClassifyConfig:
+    """Architecture configuration for a YOLO classification variant.
+
+    Shares the backbone scaling table with the detection config but omits
+    detection-specific fields (reg_max, end2end, neck_c3k, max_det).
+
+    Attributes:
+        family: YOLO model family.
+        size: Size variant (nano … xlarge).
+        depth_mult: Layer repeat multiplier.
+        width_mult: Channel width multiplier.
+        max_channels: Hard cap on scaled channel width.
+        backbone_c3k: True to use C3k in backbone C3k2 layers.
+        sppf_shortcut: True to add residual in SPPF (YOLO26 only).
+        num_classes: Number of output classes (1000 for ImageNet).
+        input_size: Default input spatial size (height, width).
+        dropout: Dropout probability in the classification head.
+    """
+
+    family: ModelFamily
+    size: ModelSize
+    depth_mult: float
+    width_mult: float
+    max_channels: int
+    backbone_c3k: bool
+    sppf_shortcut: bool
+    num_classes: int = 1000
+    input_size: tuple[int, int] = (224, 224)
+    dropout: float = 0.0
+
+
+def get_classify_config(
+    family: ModelFamily,
+    size: ModelSize,
+    *,
+    num_classes: int = 1000,
+) -> ClassifyConfig:
+    """Return the classification architecture config for a given family and size.
+
+    Reuses the shared ``_SCALE`` table and ``_FAMILY_DEFAULTS`` so backbone
+    dimensions exactly match the detection variants of the same family/size.
+
+    Raises:
+        ValueError: If the family is not supported.
+    """
+    if family not in _FAMILY_DEFAULTS:
+        raise ValueError(
+            f"Unsupported model family: {family.value}. "
+            f"Supported: {', '.join(f.value for f in _FAMILY_DEFAULTS)}"
+        )
+
+    depth, width, max_ch = _SCALE[size]
+    overrides = _FAMILY_DEFAULTS[family]
+    large_size = size in (ModelSize.MEDIUM, ModelSize.LARGE, ModelSize.XLARGE)
+
+    return ClassifyConfig(
+        family=family,
+        size=size,
+        depth_mult=depth,
+        width_mult=width,
+        max_channels=max_ch,
+        backbone_c3k=large_size,
+        sppf_shortcut=bool(overrides["sppf_shortcut"]),
+        num_classes=num_classes,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Channel / repeat scaling helpers
 # ---------------------------------------------------------------------------
@@ -134,4 +202,11 @@ def scale_repeats(n: int, config: ModelConfig) -> int:
     return max(round(n * config.depth_mult), 1)
 
 
-__all__ = ["ModelConfig", "get_config", "scale_channels", "scale_repeats"]
+__all__ = [
+    "ClassifyConfig",
+    "ModelConfig",
+    "get_classify_config",
+    "get_config",
+    "scale_channels",
+    "scale_repeats",
+]

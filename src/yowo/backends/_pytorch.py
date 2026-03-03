@@ -105,9 +105,6 @@ class PyTorchBackend:
 
         try:
             import torch  # type: ignore[import-untyped]
-
-            from yowo.arch import build_model
-            from yowo.arch._weights import load_weights
         except ImportError as exc:
             raise DependencyError("torch", "uv add yowo[pytorch]") from exc
 
@@ -132,49 +129,71 @@ class PyTorchBackend:
                 pass
 
         try:
-            # Build native model from spec
-            model = build_model(self._spec.family, self._spec.size)
-            load_weights(model, model_path)
+            # Build native model from spec — branch on task type
+            if self._spec.task == "classify":
+                from yowo.arch import build_classify_model
+                from yowo.arch._weights import load_classify_weights
+                from yowo.models._registry import get_cls
 
-            # Inference optimisations
-            model = model.fuse()
-            model.eval()
-            model.to(resolved)
-
-            # KV cache — opt-in attention/block caching for streaming
-            if self._kv_cache:
-                model.enable_kv_cache()
-                logger.info("KV cache enabled for streaming inference")
-
-            # Channels-last for GPU Tensor Core optimisation
-            if resolved.startswith("cuda"):
-                torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
-                model = model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
-
-            # torch.compile — opt-in kernel fusion (requires PyTorch >= 2.0)
-            if self._compile:
-                try:
-                    model.compile_for_inference(mode=self._compile_mode)
-                    logger.info("torch.compile enabled (mode=%s)", self._compile_mode)
-                except Exception as exc:
-                    logger.debug("torch.compile failed (falling back to eager): %s", exc)
-
-            # Register neck forward hook to capture features for caching
-            if self._feature_cache is not None:
-
-                def _capture_neck(
-                    _module: Any,
-                    _input: Any,
-                    output: Any,
-                ) -> None:
-                    # Keep as detached GPU tensors — defer D2H to cache update
-                    self._last_neck_output = tuple(t.detach() for t in output)
-
-                self._neck_hook_handle = model.neck.register_forward_hook(
-                    _capture_neck,
+                meta = get_cls(self._spec.family, self._spec.size)
+                cls_model = build_classify_model(
+                    self._spec.family, self._spec.size, num_classes=meta.num_classes
                 )
+                load_classify_weights(cls_model, model_path)
+                cls_model = cls_model.fuse()
+                cls_model.eval()
+                cls_model.to(resolved)
+                if resolved.startswith("cuda"):
+                    torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
+                    cls_model = cls_model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
+                # torch.compile and feature cache hooks are detection-only
+                self._model = cls_model
+                self._input_shape = (meta.input_height, meta.input_width)
+            else:
+                from yowo.arch import build_model
+                from yowo.arch._weights import load_weights
 
-            self._model = model
+                det_model = build_model(self._spec.family, self._spec.size)
+                load_weights(det_model, model_path)
+                det_model = det_model.fuse()
+                det_model.eval()
+                det_model.to(resolved)
+
+                # KV cache — opt-in attention/block caching for streaming
+                if self._kv_cache:
+                    det_model.enable_kv_cache()
+                    logger.info("KV cache enabled for streaming inference")
+
+                # Channels-last for GPU Tensor Core optimisation
+                if resolved.startswith("cuda"):
+                    torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
+                    det_model = det_model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
+
+                # torch.compile — opt-in kernel fusion (requires PyTorch >= 2.0)
+                if self._compile:
+                    try:
+                        det_model.compile_for_inference(mode=self._compile_mode)
+                        logger.info("torch.compile enabled (mode=%s)", self._compile_mode)
+                    except Exception as exc:
+                        logger.debug("torch.compile failed (falling back to eager): %s", exc)
+
+                # Register neck forward hook to capture features for caching
+                if self._feature_cache is not None:
+
+                    def _capture_neck(
+                        _module: Any,
+                        _input: Any,
+                        output: Any,
+                    ) -> None:
+                        # Keep as detached GPU tensors — defer D2H to cache update
+                        self._last_neck_output = tuple(t.detach() for t in output)
+
+                    self._neck_hook_handle = det_model.neck.register_forward_hook(
+                        _capture_neck,
+                    )
+
+                self._model = det_model
+
             self._device_str = resolved
         except RuntimeError as exc:
             self._model = None

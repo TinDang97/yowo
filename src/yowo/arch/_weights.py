@@ -1,4 +1,4 @@
-"""Load ultralytics ``.pt`` checkpoints into native YOLOModel.
+"""Load ultralytics ``.pt`` checkpoints into native YOLOModel and ClassifyModel.
 
 Maps ultralytics sequential layer indices (``model.0``, ``model.1``, …)
 to our semantic module paths (``backbone.stem``, ``neck.c3k2_fpn1``, …).
@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import torch
+if TYPE_CHECKING:
+    import torch as _torch
 
-from yowo.arch._yolo import YOLOModel
+    from yowo.arch._yolo import ClassifyModel, YOLOModel
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ def _remap_key(key: str) -> str | None:
     return None
 
 
-def _extract_state_dict(checkpoint_path: Path) -> dict[str, torch.Tensor]:
+def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     """Load checkpoint and extract the float32 state_dict.
 
     Handles ultralytics checkpoint format:
@@ -78,6 +80,8 @@ def _extract_state_dict(checkpoint_path: Path) -> dict[str, torch.Tensor]:
     - Converts to float32 (ultralytics may store FP16).
     - Handles both full checkpoint dicts and raw state_dicts.
     """
+    import torch
+
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
     # Raw state_dict (unlikely but handle gracefully)
@@ -125,7 +129,7 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
     src_state = _extract_state_dict(path)
 
     # Remap keys
-    mapped: dict[str, torch.Tensor] = {}
+    mapped: dict[str, _torch.Tensor] = {}
     skipped: list[str] = []
 
     for src_key, tensor in src_state.items():
@@ -196,4 +200,104 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
     )
 
 
-__all__ = ["load_weights"]
+# ---------------------------------------------------------------------------
+# Classification weight mapping
+# ---------------------------------------------------------------------------
+
+# Ultralytics cls checkpoints have 12 layers (0-11).
+# Layers 0-10 are identical to the detection backbone.
+# Layer 11 is the Classify head (Conv + pool + dropout + linear).
+
+_CLS_LAYER_MAP: dict[str, str] = {
+    # Backbone (layers 0-10) — identical to detection
+    "model.0.": "backbone.stem.",
+    "model.1.": "backbone.conv1.",
+    "model.2.": "backbone.c3k2_1.",
+    "model.3.": "backbone.conv2.",
+    "model.4.": "backbone.c3k2_2.",
+    "model.5.": "backbone.conv3.",
+    "model.6.": "backbone.c3k2_3.",
+    "model.7.": "backbone.conv4.",
+    "model.8.": "backbone.c3k2_4.",
+    "model.9.": "backbone.sppf.",
+    "model.10.": "backbone.c2psa.",
+    # Classification head (layer 11) — replaces neck+detect head
+    "model.11.": "head.",
+}
+
+# Sorted by longest prefix first for correct matching
+_CLS_SORTED_PREFIXES: tuple[str, ...] = tuple(sorted(_CLS_LAYER_MAP, key=len, reverse=True))
+
+
+def _remap_cls_key(key: str) -> str | None:
+    """Remap a single ultralytics cls state-dict key to our naming.
+
+    Returns None if the key does not match any known prefix.
+    """
+    for prefix in _CLS_SORTED_PREFIXES:
+        if key.startswith(prefix):
+            return _CLS_LAYER_MAP[prefix] + key[len(prefix) :]
+    return None
+
+
+def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> None:
+    """Load an ultralytics classification checkpoint into a ClassifyModel.
+
+    Args:
+        model: An initialised ``ClassifyModel`` (from ``build_classify_model()``).
+        weights_path: Path to an ultralytics ``-cls.pt`` checkpoint file.
+
+    Raises:
+        FileNotFoundError: If the weights file does not exist.
+        ValueError: If the checkpoint format is unrecognised.
+    """
+    path = Path(weights_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Weights file not found: {path}")
+
+    src_state = _extract_state_dict(path)
+
+    # Remap keys
+    mapped: dict[str, _torch.Tensor] = {}
+    skipped: list[str] = []
+
+    for src_key, tensor in src_state.items():
+        dst_key = _remap_cls_key(src_key)
+        if dst_key is None:
+            skipped.append(src_key)
+            continue
+        mapped[dst_key] = tensor
+
+    if skipped:
+        logger.debug(
+            "Skipped %d checkpoint keys (unremapped/neck/detect layers): %s",
+            len(skipped),
+            skipped[:5],
+        )
+
+    # Shape validation — warn on mismatch, remove offending key (don't crash)
+    dst_state = model.state_dict()
+    shape_mismatches: list[str] = []
+    for key in list(mapped.keys()):
+        if key in dst_state and mapped[key].shape != dst_state[key].shape:
+            shape_mismatches.append(
+                f"  {key}: checkpoint {mapped[key].shape} vs model {dst_state[key].shape}"
+            )
+            del mapped[key]
+
+    if shape_mismatches:
+        raise RuntimeError(
+            "Shape mismatches between checkpoint and model:\n" + "\n".join(shape_mismatches)
+        )
+
+    # Detach before loading: EMA checkpoint tensors may retain autograd graphs
+    model.load_state_dict({k: v.detach() for k, v in mapped.items()}, strict=False)
+    logger.info(
+        "Loaded %d/%d parameters from %s",
+        len(mapped),
+        len(dst_state),
+        path.name,
+    )
+
+
+__all__ = ["load_classify_weights", "load_weights"]

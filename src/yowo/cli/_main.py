@@ -493,6 +493,54 @@ def count_command(
         sys.exit(1)
 
 
+@cli.command("classify")
+@click.argument("source")
+@click.option("--model", "-m", default="yolo11n-cls", help="Model name, e.g. yolo11n-cls")
+@click.option(
+    "--backend",
+    default="auto",
+    type=click.Choice(["auto", "pytorch", "onnx", "tensorrt", "openvino"]),
+)
+@click.option("--device", default="auto")
+@click.option("--top-k", default=5, type=int, help="Number of top predictions to display.")
+@click.option("--batch-size", default=1, type=int)
+def classify_command(
+    source: str,
+    model: str,
+    backend: str,
+    device: str,
+    top_k: int,
+    batch_size: int,
+) -> None:
+    """Run image classification on SOURCE (image/video/RTSP/directory)."""
+    from yowo.classify_engine import ClassificationEngine
+    from yowo.io import open_source
+
+    spec = _parse_cls_model_spec(model)
+
+    try:
+        with ClassificationEngine(
+            model_family=spec.family,
+            model_size=spec.size,
+            backend=BackendType(backend) if backend != "auto" else None,
+            device=device,
+            batch_size=batch_size,
+            top_k=top_k,
+        ) as engine:
+            src = open_source(source)
+            for result in engine.stream(src):
+                parts = [
+                    f"Top-{rank + 1}: cls_{cid:04d} ({score:.3f})"
+                    for rank, (cid, score) in enumerate(
+                        zip(result.topk_class_ids, result.topk_scores, strict=True)
+                    )
+                ]
+                click.echo(f"[{result.frame_index}] {' | '.join(parts)}")
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @cli.command("info")
 def info_command() -> None:
     """Print hardware, backends, and installed library versions."""
@@ -584,6 +632,26 @@ def _load_lines(line_file: str | None) -> list | None:
         )
         for ln in data
     ]
+
+
+def _parse_cls_model_spec(model_name: str) -> ModelSpec:
+    """Parse a classification model name like ``"yolo11n-cls"`` into a :class:`ModelSpec`.
+
+    Accepts both the bare form (``"yolo11n"``) and the explicit ``-cls`` suffix
+    (``"yolo11n-cls"``).  The returned spec always carries ``task="classify"``.
+
+    Raises:
+        click.BadParameter: On unknown model name format.
+    """
+    from yowo._convenience import parse_model_name
+    from yowo.errors import ConfigError
+
+    bare = model_name.removesuffix("-cls")
+    try:
+        base = parse_model_name(bare)
+    except ConfigError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    return ModelSpec(base.family, base.size, task="classify")
 
 
 def _parse_model_spec(model_name: str) -> ModelSpec:
