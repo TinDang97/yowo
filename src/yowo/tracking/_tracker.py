@@ -15,6 +15,7 @@ from yowo.tracking._kalman import KalmanFilterXYAH
 from yowo.tracking._matching import (
     appearance_distance,
     gated_fused_cost,
+    iou_batch,
     iou_distance,
     linear_assignment,
     needs_reid,
@@ -76,7 +77,9 @@ class ByteTracker:
         self._track_low_thresh = track_low_thresh
         self._match_thresh = match_thresh
         self._stage2_thresh = 0.5  # hardcoded per paper
+        self._lost_low_age = max_age // 2  # Stage 2.5 recency limit
         self._max_age = max_age
+        self._stationary_max_age = max_age * 3  # extended retention for stationary tracks
         self._min_hits = min_hits
         self._fuse_score = fuse_score
         # Clamped to 1.0: high_thresh=0.9 → new_thresh=1.0, not 1.05 (which would block all births)
@@ -100,6 +103,7 @@ class ByteTracker:
         Association stages:
           1. High-conf dets → confirmed tracked + lost (IoU + optional fuse_score + ReID)
           2. Low-conf dets → unmatched confirmed tracked (IoU only, thresh=0.5)
+          2.5. Remaining low-conf dets → recent lost tracks (IoU, class guard)
           3. Appearance rescue for long-lost tracks (ReID only)
           4. Remaining high-conf dets → unconfirmed tracks (IoU, thresh=0.7)
           5. Birth new tracks from remaining unmatched high-conf dets
@@ -138,8 +142,16 @@ class ByteTracker:
                 low_cls_names.append(box.class_name)
 
         # --- Kalman predict all tracks ---
-        for track in self._tracked + self._lost:
-            track.predict()
+        all_active = self._tracked + self._lost
+        if len(all_active) > 16:
+            # Batch path: amortizes numpy dispatch overhead at scale
+            lost_mask = np.array(
+                [t.state != TrackState.TRACKED for t in all_active], dtype=np.bool_
+            )
+            self._kalman.predict_batch(all_active, lost_mask)
+        else:
+            for track in all_active:
+                track.predict()
 
         # --- Separate unconfirmed from confirmed tracks ---
         # Unconfirmed tracks (hits < min_hits) are excluded from Stage 1
@@ -225,9 +237,12 @@ class ByteTracker:
             else np.empty((0, 4), dtype=np.float64)
         )
         still_unmatched_tracked: list[STrack] = []
+        unmatched_low_s2: list[int] = list(range(len(low_boxes)))
         if unmatched_tracked and low_boxes:
             cost2 = iou_distance(unmatched_tracked, low_arr)
-            matches2, still_unmatched_idxs, _ = linear_assignment(cost2, self._stage2_thresh)
+            matches2, still_unmatched_idxs, unmatched_low_s2 = linear_assignment(
+                cost2, self._stage2_thresh
+            )
             for ti, di in matches2:
                 unmatched_tracked[ti].update(
                     low_boxes[di], low_confs[di], low_cls_ids[di], low_cls_names[di], frame_id
@@ -240,6 +255,46 @@ class ByteTracker:
         # Mark all remaining unmatched tracked tracks as lost
         for track in still_unmatched_tracked:
             track.mark_lost()
+
+        # --- STAGE 2.5: match remaining low-conf dets → recent lost tracks ---
+        # Addresses the gap where a low-conf detection of a reappearing
+        # object (e.g., stationary car at conf=0.56 after occlusion) cannot
+        # reconnect with its lost track via Stage 1 (high-conf only) or
+        # Stage 2 (tracked-state only).
+        if unmatched_low_s2 and self._lost:
+            recent_lost = [
+                t
+                for t in self._lost
+                if t.time_since_update <= self._lost_low_age
+                or (
+                    t.hits >= self._min_hits
+                    and float(t.velocity @ t.velocity) < 1.0
+                    and t.time_since_update <= self._stationary_max_age
+                )
+            ]
+            if recent_lost:
+                remaining_low = np.array(
+                    [low_boxes[i] for i in unmatched_low_s2],
+                    dtype=np.float64,
+                )
+                cost_2_5 = iou_distance(recent_lost, remaining_low)
+                # Class gate: inflate cost for class-mismatched pairs so
+                # the assignment can route detections to correct tracks.
+                for ti, lost_t in enumerate(recent_lost):
+                    for di, orig_di in enumerate(unmatched_low_s2):
+                        if lost_t.class_id != low_cls_ids[orig_di]:
+                            cost_2_5[ti, di] = 1.0
+                matches_2_5, _, _ = linear_assignment(cost_2_5, self._stage2_thresh)
+                for ti, di in matches_2_5:
+                    orig_di = unmatched_low_s2[di]
+                    recent_lost[ti].re_activate(
+                        low_boxes[orig_di],
+                        low_confs[orig_di],
+                        low_cls_ids[orig_di],
+                        low_cls_names[orig_di],
+                        frame_id,
+                    )
+                    refound.append(recent_lost[ti])
 
         # --- STAGE 3: Appearance rescue for long-lost tracks ---
         rescued_det_idxs: set[int] = set()
@@ -300,12 +355,23 @@ class ByteTracker:
 
         # --- NEW TRACKS from unmatched high-conf dets ---
         new_tracks: list[STrack] = []
-        matched_boxes = _collect_matched_boxes(matches1, high_boxes)
+        initial_boxes = _collect_matched_boxes(matches1, high_boxes)
+        n_initial = len(initial_boxes)
+        max_birth = n_initial + len(unmatched_high_idxs)
+        matched_arr = (
+            np.empty((max_birth, 4), dtype=np.float64)
+            if max_birth > 0
+            else np.empty((0, 4), dtype=np.float64)
+        )
+        if n_initial > 0:
+            matched_arr[:n_initial] = initial_boxes
+        n_filled = n_initial
+
         for idx in unmatched_high_idxs:
             if idx in rescued_det_idxs:
                 continue  # already rescued or consumed by unconfirmed
             if high_confs[idx] >= self._new_track_thresh:
-                if _overlaps_any(high_boxes[idx], matched_boxes, thresh=0.7):
+                if _overlaps_any(high_boxes[idx], matched_arr[:n_filled], thresh=0.7):
                     continue  # suppress — overlaps an already-matched track
                 track = STrack(
                     self._next_id,
@@ -323,7 +389,8 @@ class ByteTracker:
                     emb = det_embeddings[idx]
                     if float(np.linalg.norm(emb)) > 1e-8:
                         track.update_embedding(emb)
-                matched_boxes.append(high_boxes[idx])
+                matched_arr[n_filled] = high_boxes[idx]
+                n_filled += 1
                 new_tracks.append(track)
 
         # --- UPDATE LOST pool ---
@@ -332,7 +399,14 @@ class ByteTracker:
         for track in self._lost:
             if track.track_id in refound_ids:
                 continue
-            if track.time_since_update <= self._max_age:
+            # Confirmed stationary tracks (near-zero velocity) survive longer
+            # because their Kalman prediction stays accurate for many more
+            # frames.  Require min_hits to avoid granting extended retention
+            # to short-lived false-positive detections (C-1 fix).
+            v = track.velocity
+            is_stationary = track.hits >= self._min_hits and float(v[0] * v[0] + v[1] * v[1]) < 1.0
+            age_limit = self._stationary_max_age if is_stationary else self._max_age
+            if track.time_since_update <= age_limit:
                 new_lost.append(track)
             else:
                 track.mark_removed()
@@ -496,27 +570,31 @@ def _collect_matched_boxes(
 
 def _overlaps_any(
     box: tuple[float, float, float, float],
-    existing: list[tuple[float, float, float, float]],
+    existing: NDArray[np.float64],
     thresh: float,
 ) -> bool:
     """Check if box overlaps any existing box above the IoU threshold."""
-    if not existing:
+    n = existing.shape[0]
+    if n == 0:
         return False
-    x1, y1, x2, y2 = box
-    area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-    if area <= 0:
+    # Scalar path faster for small N (avoids numpy dispatch overhead)
+    if n <= 8:
+        bx1, by1, bx2, by2 = box
+        area_b = (bx2 - bx1) * (by2 - by1)
+        for i in range(n):
+            ex1, ey1, ex2, ey2 = existing[i]
+            ix1 = max(bx1, ex1)
+            iy1 = max(by1, ey1)
+            ix2 = min(bx2, ex2)
+            iy2 = min(by2, ey2)
+            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+            union = area_b + (ex2 - ex1) * (ey2 - ey1) - inter
+            if union > 0.0 and inter / union >= thresh:
+                return True
         return False
-    for ex1, ey1, ex2, ey2 in existing:
-        ix1 = max(x1, ex1)
-        iy1 = max(y1, ey1)
-        ix2 = min(x2, ex2)
-        iy2 = min(y2, ey2)
-        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-        area_e = max(0.0, ex2 - ex1) * max(0.0, ey2 - ey1)
-        union = area + area_e - inter
-        if union > 0 and inter / union >= thresh:
-            return True
-    return False
+    box_arr = np.array(box, dtype=np.float64).reshape(1, 4)
+    ious = iou_batch(box_arr, existing)  # (1, N)
+    return bool(np.any(ious >= thresh))
 
 
 __all__ = ["ByteTracker"]

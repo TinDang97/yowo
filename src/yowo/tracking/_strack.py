@@ -138,6 +138,7 @@ class STrack:
     """
 
     __slots__ = (
+        "_cached_xyxy",
         "_covariance",
         "_det_xyxy",
         "_embedding",
@@ -180,6 +181,7 @@ class STrack:
         self.frame_id = 0
         self._embedding: NDArray[np.float32] | None = None
         self._det_xyxy = box_xyxy
+        self._cached_xyxy: tuple[float, float, float, float] | None = None
 
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = kalman.initiate(measurement)
@@ -190,6 +192,7 @@ class STrack:
         Lost tracks have their height velocity zeroed to prevent unchecked
         drift while they await re-association (matches reference impl).
         """
+        self._cached_xyxy = None
         if self.state != TrackState.TRACKED:
             self._mean[7] = 0  # zero height velocity
         self._mean, self._covariance = self._kalman.predict(self._mean, self._covariance)
@@ -225,6 +228,7 @@ class STrack:
             class_name: Detected class name.
             frame_id: Current frame index.
         """
+        self._cached_xyxy = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -255,6 +259,7 @@ class STrack:
             class_name: Detected class name.
             frame_id: Current frame index.
         """
+        self._cached_xyxy = None
         measurement = KalmanFilterXYAH.xyxy_to_xyah(box_xyxy)
         self._mean, self._covariance = self._kalman.update(
             self._mean, self._covariance, measurement
@@ -305,7 +310,16 @@ class STrack:
     @property
     def predicted_xyxy(self) -> tuple[float, float, float, float]:
         """Current predicted position as (x1, y1, x2, y2) pixel coordinates."""
-        return KalmanFilterXYAH.xyah_to_xyxy(self._mean[:4])
+        cached = self._cached_xyxy
+        if cached is None:
+            cached = KalmanFilterXYAH.xyah_to_xyxy(self._mean[:4])
+            self._cached_xyxy = cached
+        return cached
+
+    @property
+    def velocity(self) -> NDArray[np.float64]:
+        """Kalman-estimated velocity ``(v_cx, v_cy)`` in pixels/frame."""
+        return self._mean[4:6]
 
     @property
     def output_xyxy(self) -> tuple[float, float, float, float]:

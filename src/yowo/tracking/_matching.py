@@ -398,22 +398,71 @@ def remove_duplicate_tracks(
     return filtered_a, filtered_b
 
 
+def _should_veto_removal(
+    ti: STrack,
+    tj: STrack,
+    *,
+    class_aware: bool,
+    embedding_veto_thresh: float,
+    velocity_veto_thresh: float,
+) -> bool:
+    """Return True if the pair should NOT be treated as duplicates.
+
+    Three independent veto gates — any single veto preserves both tracks:
+
+    1. **Class mismatch**: Different ``class_id`` → never duplicates.
+    2. **Embedding divergence**: Cosine distance above threshold when both
+       tracks have ReID embeddings.
+    3. **Velocity divergence**: Height-normalised Kalman velocity difference
+       above threshold → objects moving differently.
+    """
+    # Gate 1: Class mismatch
+    if class_aware and ti.class_id != tj.class_id:
+        return True
+    # Gate 2: Appearance divergence (only when both have embeddings)
+    emb_i = ti.embedding
+    emb_j = tj.embedding
+    if emb_i is not None and emb_j is not None:
+        cos_dist = 1.0 - float(emb_i @ emb_j)
+        if cos_dist > embedding_veto_thresh:
+            return True
+    # Gate 3: Velocity divergence (height-normalised)
+    vel_diff = float(np.linalg.norm(ti.velocity - tj.velocity))
+    box_i = ti.predicted_xyxy
+    box_j = tj.predicted_xyxy
+    h_avg = 0.5 * ((box_i[3] - box_i[1]) + (box_j[3] - box_j[1]))
+    return vel_diff / max(h_avg, 1.0) > velocity_veto_thresh
+
+
 def remove_intra_duplicates(
     tracks: list[STrack],
     dist_thresh: float = 0.30,
+    *,
+    class_aware: bool = True,
+    embedding_veto_thresh: float = 0.40,
+    velocity_veto_thresh: float = 0.10,
 ) -> list[STrack]:
     """Remove duplicate tracks within a single list.
 
     When two tracks in the same list have IoU distance below ``dist_thresh``
-    (i.e., IoU above ``1 - dist_thresh``), the shorter-lived track is removed.
+    (i.e., IoU above ``1 - dist_thresh``), the shorter-lived track is removed
+    **unless** a veto gate fires:
 
-    This handles the case where YOLO NMS lets two boxes through for one
-    object and both land in ``_tracked`` (which cross-list dedup cannot catch).
+    - **Class gate**: different ``class_id`` → never duplicates.
+    - **Embedding gate**: high cosine distance (when both have ReID
+      embeddings) → distinct appearance.
+    - **Velocity gate**: height-normalised Kalman velocity divergence →
+      objects moving differently.
 
     Args:
         tracks: List of active tracks to deduplicate.
         dist_thresh: IoU distance below which two tracks are considered
             duplicates.  Default 0.30 (IoU > 0.70).
+        class_aware: If True, different ``class_id`` vetoes removal.
+        embedding_veto_thresh: Cosine distance above which the embedding
+            gate vetoes removal.  Default 0.40.
+        velocity_veto_thresh: Height-normalised velocity difference above
+            which the velocity gate vetoes removal.  Default 0.10.
 
     Returns:
         Filtered list with duplicates removed.
@@ -421,24 +470,55 @@ def remove_intra_duplicates(
     if len(tracks) < 2:
         return tracks
 
+    n = len(tracks)
     boxes = np.array([t.predicted_xyxy for t in tracks], dtype=np.float64)
     ious = iou_batch(boxes, boxes)
-    n = len(tracks)
 
     remove: set[int] = set()
-    for i in range(n):
-        if i in remove:
-            continue
-        for j in range(i + 1, n):
-            if j in remove:
+    if n <= 20:
+        # Scalar path: avoids np.triu/np.where overhead at small N
+        for i in range(n):
+            if i in remove:
                 continue
-            if (1.0 - ious[i, j]) < dist_thresh:
-                age_i = tracks[i].frame_id - tracks[i].start_frame
-                age_j = tracks[j].frame_id - tracks[j].start_frame
-                if age_i >= age_j:
-                    remove.add(j)
-                else:
-                    remove.add(i)
+            for j in range(i + 1, n):
+                if j in remove:
+                    continue
+                if (1.0 - ious[i, j]) < dist_thresh:
+                    if _should_veto_removal(
+                        tracks[i],
+                        tracks[j],
+                        class_aware=class_aware,
+                        embedding_veto_thresh=embedding_veto_thresh,
+                        velocity_veto_thresh=velocity_veto_thresh,
+                    ):
+                        continue
+                    age_i = tracks[i].frame_id - tracks[i].start_frame
+                    age_j = tracks[j].frame_id - tracks[j].start_frame
+                    if age_i >= age_j:
+                        remove.add(j)
+                    else:
+                        remove.add(i)
+    else:
+        # Vectorized path: np.triu + np.where for large N
+        ii, jj = np.where(np.triu(1.0 - ious < dist_thresh, k=1))
+        if ii.shape[0] == 0:
+            return tracks
+        ages = np.array([t.frame_id - t.start_frame for t in tracks])
+        for i, j in zip(ii.tolist(), jj.tolist(), strict=True):
+            if i in remove or j in remove:
+                continue
+            if _should_veto_removal(
+                tracks[i],
+                tracks[j],
+                class_aware=class_aware,
+                embedding_veto_thresh=embedding_veto_thresh,
+                velocity_veto_thresh=velocity_veto_thresh,
+            ):
+                continue
+            if ages[i] >= ages[j]:
+                remove.add(j)
+            else:
+                remove.add(i)
 
     if not remove:
         return tracks
