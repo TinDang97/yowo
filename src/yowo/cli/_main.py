@@ -24,7 +24,7 @@ def cli() -> None:
     "-w",
     default=None,
     type=click.Path(exists=True),
-    help="Path to local .pt weights file (skips download)",
+    help="Path to local model file (.pt for PyTorch, .onnx for ONNX backend)",
 )
 @click.option(
     "--backend",
@@ -201,7 +201,7 @@ def detect_command(
     "-w",
     default=None,
     type=click.Path(exists=True),
-    help="Path to local .pt weights file (skips download)",
+    help="Path to local model file (.pt for PyTorch, .onnx for ONNX backend)",
 )
 @click.option(
     "--format",
@@ -493,6 +493,58 @@ def count_command(
         sys.exit(1)
 
 
+@cli.command("classify")
+@click.argument("source")
+@click.option("--model", "-m", default="yolo11n-cls", help="Model name, e.g. yolo11n-cls")
+@click.option("--weights", "-w", default=None, type=click.Path(exists=True))
+@click.option(
+    "--backend",
+    default="auto",
+    type=click.Choice(["auto", "pytorch", "onnx", "tensorrt", "openvino"]),
+)
+@click.option("--device", default="auto")
+@click.option("--top-k", default=5, type=int, help="Number of top predictions to display.")
+@click.option("--batch-size", default=1, type=int)
+def classify_command(
+    source: str,
+    model: str,
+    weights: str | None,
+    backend: str,
+    device: str,
+    top_k: int,
+    batch_size: int,
+) -> None:
+    """Run image classification on SOURCE (image/video/RTSP/directory)."""
+    from yowo.classify_engine import ClassificationEngine
+    from yowo.io import open_source
+
+    spec = _parse_cls_model_spec(model)
+    weights_path = Path(weights) if weights else spec.weights_path
+
+    try:
+        with ClassificationEngine(
+            model_family=spec.family,
+            model_size=spec.size,
+            weights_path=weights_path,
+            backend=BackendType(backend) if backend != "auto" else None,
+            device=device,
+            batch_size=batch_size,
+            top_k=top_k,
+        ) as engine:
+            src = open_source(source)
+            for result in engine.stream(src):
+                parts = [
+                    f"Top-{rank + 1}: cls_{cid:04d} ({score:.3f})"
+                    for rank, (cid, score) in enumerate(
+                        zip(result.topk_class_ids, result.topk_scores, strict=True)
+                    )
+                ]
+                click.echo(f"[{result.frame_index}] {' | '.join(parts)}")
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @cli.command("info")
 def info_command() -> None:
     """Print hardware, backends, and installed library versions."""
@@ -584,6 +636,29 @@ def _load_lines(line_file: str | None) -> list | None:
         )
         for ln in data
     ]
+
+
+def _parse_cls_model_spec(model_name: str) -> ModelSpec:
+    """Parse a classification model name like ``"yolo11n-cls"`` into a :class:`ModelSpec`.
+
+    The ``-cls`` suffix is required; bare detection names (``"yolo11n"``) are
+    rejected with a clear error rather than silently forced to classify task.
+
+    Raises:
+        click.BadParameter: On unknown model name or non-classification task.
+    """
+    from yowo._convenience import parse_model_name
+    from yowo.errors import ConfigError
+
+    try:
+        spec = parse_model_name(model_name)
+    except ConfigError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    if spec.task != "classify":
+        raise click.BadParameter(
+            f"Expected a classification model (e.g. yolo11n-cls), got: {model_name!r}"
+        )
+    return spec
 
 
 def _parse_model_spec(model_name: str) -> ModelSpec:

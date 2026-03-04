@@ -639,3 +639,68 @@ class TestPresetConfig:
         hw.cpu.cpu_arch = CPUArch.X86_64
         with pytest.raises(ConfigError, match="Unknown InferenceConfig fields"):
             preset_config(hw, SourceCategory.IMAGE, nonexistent_field=True)
+
+
+class TestClassificationConfig:
+    def test_defaults_are_valid(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        cfg = ClassificationConfig()
+        assert cfg.model_family == ModelFamily.YOLO11
+        assert cfg.model_size == ModelSize.NANO
+        assert cfg.top_k == 5
+        assert cfg.batch_size == 1
+
+    def test_top_k_zero_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="top_k"):
+            ClassificationConfig(top_k=0)
+
+    def test_top_k_negative_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="top_k"):
+            ClassificationConfig(top_k=-1)
+
+    def test_top_k_one_is_valid(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        cfg = ClassificationConfig(top_k=1)
+        assert cfg.top_k == 1
+
+    def test_batch_size_zero_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="batch_size"):
+            ClassificationConfig(batch_size=0)
+
+    def test_batch_size_negative_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="batch_size"):
+            ClassificationConfig(batch_size=-1)
+
+    def test_max_queue_size_zero_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="max_queue_size"):
+            ClassificationConfig(max_queue_size=0)
+
+    def test_pipeline_workers_negative_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="pipeline_workers"):
+            ClassificationConfig(pipeline_workers=-1)
+
+    def test_error_threshold_zero_raises(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        with pytest.raises(ConfigError, match="error_threshold"):
+            ClassificationConfig(error_threshold=0)
+
+    def test_pipeline_workers_zero_is_valid(self) -> None:
+        from yowo.config import ClassificationConfig
+
+        cfg = ClassificationConfig(pipeline_workers=0)
+        assert cfg.pipeline_workers == 0

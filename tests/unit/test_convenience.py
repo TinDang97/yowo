@@ -142,3 +142,83 @@ class TestDetect:
     def test_invalid_model_raises_config_error(self) -> None:
         with pytest.raises(ConfigError, match="Unknown model"):
             detect("img.jpg", model="badmodel")
+
+
+class TestClassify:
+    """classify() wiring — ClassificationEngine + source mocked."""
+
+    def _make_engine(self) -> MagicMock:
+        engine = MagicMock()
+        engine.__enter__ = MagicMock(return_value=engine)
+        engine.__exit__ = MagicMock(return_value=False)
+        engine.stream.return_value = iter([])
+        return engine
+
+    def test_default_wiring(self) -> None:
+        """classify() creates ClassificationEngine with yolo11n-cls defaults."""
+        from yowo._convenience import classify
+
+        engine = self._make_engine()
+        with (
+            patch("yowo.classify_engine.ClassificationEngine", return_value=engine) as eng_cls,
+            patch("yowo.io.open_source"),
+        ):
+            classify("image.jpg")
+
+        eng_cls.assert_called_once()
+        call_kwargs = eng_cls.call_args.kwargs
+        assert call_kwargs["model_family"] == ModelFamily.YOLO11
+        assert call_kwargs["model_size"] == ModelSize.NANO
+        assert call_kwargs["top_k"] == 5
+
+    def test_custom_model_and_top_k(self) -> None:
+        """classify() with model='yolo11s-cls' and top_k=3 passes correct args."""
+        from yowo._convenience import classify
+
+        engine = self._make_engine()
+        with (
+            patch("yowo.classify_engine.ClassificationEngine", return_value=engine) as eng_cls,
+            patch("yowo.io.open_source"),
+        ):
+            classify("video.mp4", model="yolo11s-cls", top_k=3)
+
+        call_kwargs = eng_cls.call_args.kwargs
+        assert call_kwargs["model_family"] == ModelFamily.YOLO11
+        assert call_kwargs["model_size"] == ModelSize.SMALL
+        assert call_kwargs["top_k"] == 3
+
+    def test_invalid_model_name_raises_config_error(self) -> None:
+        """classify() with an unrecognised model name raises ConfigError."""
+        from yowo._convenience import classify
+
+        with pytest.raises(ConfigError):
+            classify("image.jpg", model="badmodel-cls")
+
+    def test_yolo26_cls_model(self) -> None:
+        """classify() with model='yolo26n-cls' uses ModelFamily.YOLO26."""
+        from yowo._convenience import classify
+
+        engine = self._make_engine()
+        with (
+            patch("yowo.classify_engine.ClassificationEngine", return_value=engine) as eng_cls,
+            patch("yowo.io.open_source"),
+        ):
+            classify("image.jpg", model="yolo26n-cls")
+
+        call_kwargs = eng_cls.call_args.kwargs
+        assert call_kwargs["model_family"] == ModelFamily.YOLO26
+        assert call_kwargs["model_size"] == ModelSize.NANO
+
+    def test_extra_kwargs_forwarded(self) -> None:
+        """Keyword arguments are forwarded to ClassificationEngine."""
+        from yowo._convenience import classify
+
+        engine = self._make_engine()
+        with (
+            patch("yowo.classify_engine.ClassificationEngine", return_value=engine) as eng_cls,
+            patch("yowo.io.open_source"),
+        ):
+            classify("image.jpg", batch_size=4)
+
+        call_kwargs = eng_cls.call_args.kwargs
+        assert call_kwargs.get("batch_size") == 4

@@ -467,3 +467,30 @@ class TestCoreMLSelection:
         result = select_backend(profile, "n", backend_override="coreml")
         assert result.backend == BackendType.COREML
         assert "User override" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# MPS device type handling
+# ---------------------------------------------------------------------------
+
+
+class TestMPSDeviceType:
+    """Tests for DeviceType.MPS resolution in both override and auto paths."""
+
+    def test_mps_device_type_with_backend_override(self) -> None:
+        """Explicit backend override + device='mps' → DeviceType.MPS."""
+        profile = make_profile(has_torch=True)
+        result = select_backend(profile, "n", backend_override="pytorch", device_override="mps")
+        assert result.device_type == DeviceType.MPS
+
+    def test_mps_device_type_in_auto_select(self) -> None:
+        """Auto-selected backend + device='mps' → DeviceType.MPS."""
+        profile = make_profile(has_torch=True)
+        result = select_backend(profile, "n", device_override="mps")
+        assert result.device_type == DeviceType.MPS
+
+    def test_non_mps_device_stays_cpu(self) -> None:
+        """Auto-selected backend + device='cpu' → DeviceType.CPU (not MPS)."""
+        profile = make_profile(has_torch=True)
+        result = select_backend(profile, "n", device_override="cpu")
+        assert result.device_type == DeviceType.CPU

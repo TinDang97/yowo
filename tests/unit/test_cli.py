@@ -240,6 +240,40 @@ class TestInfoCommand:
         assert "Libraries" in result.output
 
 
+# ---------------------------------------------------------------------------
+# _parse_cls_model_spec
+# ---------------------------------------------------------------------------
+
+
+class TestParseClsModelSpec:
+    def test_yolo11n_cls_accepted(self) -> None:
+        """'yolo11n-cls' parsed to spec with task='classify', YOLO11, NANO."""
+        from yowo.cli._main import _parse_cls_model_spec
+
+        spec = _parse_cls_model_spec("yolo11n-cls")
+        assert spec.task == "classify"
+        assert spec.family == ModelFamily.YOLO11
+        assert spec.size == ModelSize.NANO
+
+    def test_bare_detect_name_rejected(self) -> None:
+        """Bare detection name 'yolo11n' raises BadParameter (no -cls suffix)."""
+        import click
+
+        from yowo.cli._main import _parse_cls_model_spec
+
+        with pytest.raises(click.BadParameter, match="classification model"):
+            _parse_cls_model_spec("yolo11n")
+
+    def test_unknown_name_rejected(self) -> None:
+        """Unknown family 'yolov8n-cls' raises BadParameter."""
+        import click
+
+        from yowo.cli._main import _parse_cls_model_spec
+
+        with pytest.raises(click.BadParameter):
+            _parse_cls_model_spec("yolov8n-cls")
+
+
 class TestModelsCommand:
     def test_models_command_runs(self) -> None:
         from click.testing import CliRunner

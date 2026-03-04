@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from yowo.io import FrameSource
-    from yowo.types import Detection
 
 
 async def astream(
@@ -21,8 +20,8 @@ async def astream(
     source: FrameSource,
     emit_fn: Callable[[str, object], None],
     stop_event: threading.Event | None = None,
-) -> AsyncIterator[Detection]:
-    """Yield detections asynchronously from any source.
+) -> AsyncIterator[Any]:
+    """Yield results asynchronously from any source.
 
     Background thread runs the sync *stream_fn*. Cancellation sets stop_event.
 
@@ -34,10 +33,10 @@ async def astream(
             thread exits its iteration loop early (used by engine.close()).
 
     Yields:
-        One :class:`Detection` per frame.
+        One result per frame (type depends on the engine).
     """
     loop = asyncio.get_running_loop()
-    q: asyncio.Queue[Detection | None] = asyncio.Queue(maxsize=64)
+    q: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
     _internal_stop = threading.Event()
 
     def _background() -> None:

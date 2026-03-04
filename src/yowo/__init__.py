@@ -8,14 +8,16 @@ Quick start::
             print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
-from yowo._convenience import detect, parse_model_name
+from yowo._convenience import classify, detect, parse_model_name
+from yowo.classify_engine import ClassificationEngine
 from yowo.config import (
-    ExportConfig as ExportConfig,
-)
-from yowo.config import (
+    ClassificationConfig,
     InferenceConfig,
     load_config,
     preset_config,
+)
+from yowo.config import (
+    ExportConfig as ExportConfig,
 )
 from yowo.config import (
     classify_device as classify_device,
@@ -31,7 +33,7 @@ from yowo.counter import (
     LineCrossEvent,
     ObjectCounter,
 )
-from yowo.engine import InferenceEngine
+from yowo.engine import DetectionEngine, InferenceEngine
 from yowo.errors import (
     BackendError,
     BackendLoadError,
@@ -77,6 +79,7 @@ from yowo.types import (
     BackendSelection,
     BackendType,
     BoundingBox,
+    ClassificationResult,
     Detection,
     ExportFormat,
     ExportResult,
@@ -120,6 +123,9 @@ __all__ = [
     "BatchScheduler",
     "BoundingBox",
     "ByteTracker",
+    "ClassificationConfig",
+    "ClassificationEngine",
+    "ClassificationResult",
     "ConfigError",
     "CountLine",
     "CountResult",
@@ -127,6 +133,7 @@ __all__ = [
     "CrossDirection",
     "DependencyError",
     "Detection",
+    "DetectionEngine",
     "DetectionRouter",
     "DeviceError",
     "ExportError",
@@ -161,6 +168,7 @@ __all__ = [
     "TrackingError",
     "YowoError",
     "__version__",
+    "classify",
     "detect",
     "export_model",
     "is_free_threaded",

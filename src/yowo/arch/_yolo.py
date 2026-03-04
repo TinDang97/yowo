@@ -14,8 +14,8 @@ from torch import Tensor
 
 from yowo.arch._attention import C2PSA, Attention, C3k2PSA
 from yowo.arch._blocks import SPPF, Bottleneck, C3k2, Conv, fuse_conv_and_bn
-from yowo.arch._config import ModelConfig, scale_channels, scale_repeats
-from yowo.arch._heads import Detect
+from yowo.arch._config import ClassifyConfig, ModelConfig, scale_channels, scale_repeats
+from yowo.arch._heads import Classify, Detect
 from yowo.arch._neck import FPNPANNeck
 
 logger = logging.getLogger(__name__)
@@ -67,16 +67,18 @@ class Backbone(nn.Module):
         # Layer 8: c5→c5, C3k2 block (c3k=True)
         self.c3k2_4 = C3k2(c5, c5, n=n2, c3k=True, shortcut=True)
 
-        # Layer 9: SPPF
-        self.sppf = SPPF(c5, c5, k=5, shortcut=config.sppf_shortcut)
+        # Layer 9: SPPF — detection only; classification models omit this layer
+        if config.has_sppf:
+            self.sppf = SPPF(c5, c5, k=5, shortcut=config.sppf_shortcut)
 
-        # Layer 10: C2PSA — attention
+        # Layer 10 (detection) / Layer 9 (classification): C2PSA — attention
         self.c2psa = C2PSA(c5, c5, n=n2)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Run backbone, return (P3, P4, P5) feature maps.
 
-        Saved outputs correspond to layers 4, 6, 10 in the full model.
+        Saved outputs correspond to layers 4, 6, and 10 (detection) or 9
+        (classification, where SPPF is absent) in the full model.
         """
         x = self.stem(x)  # Layer 0: /2
         x = self.conv1(x)  # Layer 1: /4
@@ -90,8 +92,9 @@ class Backbone(nn.Module):
 
         x = self.conv4(p4)  # Layer 7: /32
         x = self.c3k2_4(x)  # Layer 8
-        x = self.sppf(x)  # Layer 9
-        p5 = self.c2psa(x)  # Layer 10 — save for neck
+        if hasattr(self, "sppf"):
+            x = self.sppf(x)  # Layer 9 (detection only)
+        p5 = self.c2psa(x)  # Layer 9 (cls) / Layer 10 (detection)
 
         return p3, p4, p5
 
@@ -233,4 +236,69 @@ class YOLOModel(nn.Module):
                 m.clear_block_cache()
 
 
-__all__ = ["Backbone", "YOLOModel"]
+def _classify_to_model_config(config: ClassifyConfig) -> ModelConfig:
+    """Convert a ClassifyConfig to a ModelConfig for Backbone construction.
+
+    Fills detection-specific defaults that Backbone needs but ClassifyConfig
+    does not carry. The returned config is only used to drive backbone
+    channel/repeat scaling — neck and head fields are unused.
+    """
+    return ModelConfig(
+        family=config.family,
+        size=config.size,
+        depth_mult=config.depth_mult,
+        width_mult=config.width_mult,
+        max_channels=config.max_channels,
+        num_classes=80,
+        reg_max=16,
+        end2end=False,
+        sppf_shortcut=config.sppf_shortcut,
+        neck_c3k=False,
+        backbone_c3k=config.backbone_c3k,
+        has_sppf=config.has_sppf,
+        max_det=300,
+        input_size=(640, 640),
+    )
+
+
+class ClassifyModel(nn.Module):
+    """YOLO classification model: Backbone → Classify head (no neck).
+
+    Uses the same backbone as YOLOModel but discards P3/P4 and feeds P5
+    directly into a pooling+linear classification head. No FPN/PAN neck needed.
+    """
+
+    def __init__(self, config: ClassifyConfig) -> None:
+        super().__init__()
+        self.config = config
+        det_config = _classify_to_model_config(config)
+        self.backbone = Backbone(det_config)
+        head_ch = scale_channels(1024, det_config)
+        self.head = Classify(head_ch, config.num_classes, config.dropout)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Returns raw logits (B, nc).
+
+        Args:
+            x: ``(B, 3, H, W)`` input tensor (RGB, normalized 0-1).
+
+        Returns:
+            ``(B, nc)`` raw logits.
+        """
+        _p3, _p4, p5 = self.backbone(x)
+        return self.head(p5)
+
+    def fuse(self) -> ClassifyModel:
+        """Fold BatchNorm into Conv2d weights for inference.
+
+        Returns self for method chaining.
+        """
+        for m in self.modules():
+            if isinstance(m, Conv) and hasattr(m, "bn"):
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                delattr(m, "bn")
+                m.forward = m.forward_fuse  # type: ignore[method-assign]
+        return self
+
+
+__all__ = ["Backbone", "ClassifyModel", "YOLOModel"]

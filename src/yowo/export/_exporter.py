@@ -66,22 +66,34 @@ def export_model(
     except ImportError as exc:
         raise DependencyError("torch", "uv add yowo[pytorch]") from exc
 
-    from yowo.arch import build_model
-    from yowo.arch._weights import load_weights
-
     weights_path = resolve_weights(spec)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build and prepare model
-    model = build_model(spec.family, spec.size)
-    load_weights(model, weights_path)
-    model = model.fuse().eval()
+    # Build and prepare model — branch on task type
+    if spec.task == "classify":
+        from yowo.arch import build_classify_model
+        from yowo.arch._weights import load_classify_weights
+        from yowo.models._registry import get_cls
+
+        meta = get_cls(spec.family, spec.size)
+        model = build_classify_model(spec.family, spec.size, num_classes=meta.num_classes)
+        load_classify_weights(model, weights_path)
+        model = model.fuse().eval()
+        input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
+    else:
+        from yowo.arch import build_model
+        from yowo.arch._weights import load_weights
+
+        model = build_model(spec.family, spec.size)
+        load_weights(model, weights_path)
+        model = model.fuse().eval()
+        input_tensor = torch.zeros(1, 3, imgsz, imgsz)
 
     # CoreML handles FP16 via compute_precision — keep model/dummy FP32
     if precision == Precision.FP16 and target_format != ExportFormat.COREML:
         model = model.half()
 
-    dummy = torch.zeros(1, 3, imgsz, imgsz)
+    dummy = input_tensor
     if precision == Precision.FP16 and target_format != ExportFormat.COREML:
         dummy = dummy.half()
 
@@ -111,9 +123,12 @@ def export_model(
         # Step 1: Produce ONNX first
         onnx_path = output_dir / f"{model_stem}.onnx"
 
-        if kv_cache:
+        # KV-cache export is detection-only — not supported for classify task
+        if kv_cache and spec.task != "classify":
+            from yowo.arch._yolo import YOLOModel
             from yowo.export._kv_wrapper import YOLOKVWrapper
 
+            assert isinstance(model, YOLOModel), "kv_cache is only supported for detection models"
             wrapper = YOLOKVWrapper(model)
             _export_onnx_kv(wrapper, dummy, onnx_path, dynamic_batch=dynamic_batch)
         else:

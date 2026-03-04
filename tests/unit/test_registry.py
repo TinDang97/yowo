@@ -128,3 +128,67 @@ class TestRegister:
                 reg._REGISTRY[(ModelFamily.YOLO26, ModelSize.SMALL)] = original
             else:
                 reg._REGISTRY.pop((ModelFamily.YOLO26, ModelSize.SMALL), None)
+
+
+class TestGetCls:
+    def test_returns_correct_meta_for_yolo11_nano(self) -> None:
+        from yowo.models._registry import get_cls
+
+        meta = get_cls(ModelFamily.YOLO11, ModelSize.NANO)
+        assert meta.family == ModelFamily.YOLO11
+        assert meta.size == ModelSize.NANO
+        assert meta.input_height == 224
+        assert meta.input_width == 224
+        assert meta.num_classes == 1000
+        assert "yolo11n-cls.pt" in meta.default_weights_url
+
+    def test_returns_correct_meta_for_yolo26_nano(self) -> None:
+        from yowo.models._registry import get_cls
+
+        meta = get_cls(ModelFamily.YOLO26, ModelSize.NANO)
+        assert meta.input_height == 224
+        assert meta.num_classes == 1000
+        assert "yolo26n-cls.pt" in meta.default_weights_url
+
+    def test_yolo11_cls_uses_v83_assets(self) -> None:
+        from yowo.models._registry import get_cls
+
+        for size in ModelSize:
+            meta = get_cls(ModelFamily.YOLO11, size)
+            assert "v8.3.0" in meta.default_weights_url
+
+    def test_yolo26_cls_uses_v84_assets(self) -> None:
+        from yowo.models._registry import get_cls
+
+        for size in ModelSize:
+            meta = get_cls(ModelFamily.YOLO26, size)
+            assert "v8.4.0" in meta.default_weights_url
+
+    def test_all_10_cls_variants_registered(self) -> None:
+        from yowo.models import _registry as reg
+
+        assert len(reg._CLS_REGISTRY) == 10
+
+    def test_raises_model_not_found_for_unknown_combo(self) -> None:
+        from yowo.models import _registry as reg
+        from yowo.models._registry import get_cls
+
+        saved = reg._CLS_REGISTRY.pop((ModelFamily.YOLO11, ModelSize.XLARGE), None)
+        try:
+            with pytest.raises(ModelNotFoundError, match="Classification model"):
+                get_cls(ModelFamily.YOLO11, ModelSize.XLARGE)
+        finally:
+            if saved is not None:
+                reg._CLS_REGISTRY[(ModelFamily.YOLO11, ModelSize.XLARGE)] = saved
+
+    def test_error_message_contains_available_list(self) -> None:
+        from yowo.models import _registry as reg
+        from yowo.models._registry import get_cls
+
+        saved = reg._CLS_REGISTRY.pop((ModelFamily.YOLO26, ModelSize.NANO), None)
+        try:
+            with pytest.raises(ModelNotFoundError, match="Available"):
+                get_cls(ModelFamily.YOLO26, ModelSize.NANO)
+        finally:
+            if saved is not None:
+                reg._CLS_REGISTRY[(ModelFamily.YOLO26, ModelSize.NANO)] = saved

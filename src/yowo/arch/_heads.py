@@ -15,7 +15,11 @@ from torch import Tensor
 
 from yowo.arch._blocks import Conv, DWConv
 
-__all__ = ["DFL", "Detect"]
+__all__ = [
+    "DFL",
+    "Classify",
+    "Detect",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +319,28 @@ class Detect(nn.Module):
         self._anchor_cache_key = None
         self._cached_anchors_t = None
         self._cached_strides_t = None
+
+
+# ---------------------------------------------------------------------------
+# Classify — pooling + linear classification head
+# ---------------------------------------------------------------------------
+
+
+class Classify(nn.Module):
+    """Classification head: Conv → AdaptiveAvgPool2d → Dropout → Linear.
+
+    Matches ultralytics Classify architecture exactly for weight compatibility.
+    c_ = 1280 is hardcoded (efficientnet_b0 size) — do NOT change this.
+    """
+
+    def __init__(self, c1: int, nc: int = 1000, dropout: float = 0.0) -> None:
+        super().__init__()
+        c_ = 1280  # CRITICAL: must match ultralytics
+        self.conv = Conv(c1, c_, 1)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.drop = nn.Dropout(p=dropout, inplace=True)
+        self.linear = nn.Linear(c_, nc)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Returns raw logits (B, nc). Softmax applied in postprocessing."""
+        return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))

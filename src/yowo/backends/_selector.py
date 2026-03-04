@@ -125,6 +125,8 @@ def select_backend(
 
     if device_override is not None:
         device_str = device_override
+        if device_override.startswith("mps"):
+            device_type = DeviceType.MPS
 
     device_index = _parse_device_index(device_str)
 
@@ -319,9 +321,13 @@ def _resolve_override(
     # Determine device type
     gpu_backend = backend in (BackendType.TENSORRT, BackendType.ONNX) and hw.has_nvidia_gpu
     torch_cuda_backend = backend == BackendType.PYTORCH and libs.torch_cuda_available
+    mps_requested = device_override is not None and device_override.startswith("mps")
     if gpu_backend or torch_cuda_backend:
         device_type = DeviceType.CUDA
         device_str = device_override or "cuda:0"
+    elif mps_requested and device_override is not None:
+        device_type = DeviceType.MPS
+        device_str = device_override
     else:
         device_type = DeviceType.CPU
         device_str = device_override or "cpu"

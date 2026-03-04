@@ -160,7 +160,7 @@ class MetricsCollector:
     ) -> None:
         """Record a successful inference call.
 
-        Called from ``_detect_from_tensor`` immediately after backend.infer().
+        Called from ``_infer_from_tensor`` immediately after backend.infer().
 
         Args:
             elapsed_ms: Backend infer() wall time in milliseconds.
