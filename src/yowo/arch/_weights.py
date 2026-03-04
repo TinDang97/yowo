@@ -278,6 +278,15 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
 
     # Shape validation — warn on mismatch, remove offending key (don't crash)
     dst_state = model.state_dict()
+
+    missing = set(dst_state.keys()) - set(mapped.keys())
+    if missing:
+        logger.warning(
+            "%d keys missing from checkpoint (possible version/family mismatch): %s",
+            len(missing),
+            sorted(missing)[:5],
+        )
+
     shape_mismatches: list[str] = []
     for key in list(mapped.keys()):
         if key in dst_state and mapped[key].shape != dst_state[key].shape:

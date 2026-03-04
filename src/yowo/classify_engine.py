@@ -17,8 +17,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -83,9 +82,6 @@ class ClassificationEngine(BaseEngine):
         metrics_enabled: Enable latency/throughput metrics collection.
         error_threshold: Cumulative errors before health → DEGRADED.
 
-    Raises:
-        ValueError: If ``kv_cache=True`` is passed (not supported for
-            classification models).
     """
 
     def __init__(
@@ -230,44 +226,6 @@ class ClassificationEngine(BaseEngine):
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
         return self._stream_dispatch(source)  # type: ignore[return-value]
-
-    async def astream(self, source: FrameSource) -> AsyncIterator[ClassificationResult]:
-        """Async stream classification results.
-
-        Delegates to :func:`yowo._async.astream` (same helper as DetectionEngine).
-
-        Args:
-            source: Any :class:`~yowo.io.FrameSource`.
-
-        Yields:
-            One :class:`~yowo.types.ClassificationResult` per frame.
-
-        Raises:
-            ShutdownError: If the engine is shutting down.
-        """
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        from yowo._async import astream as _astream
-
-        try:
-            async for result in _astream(self.stream, source, self._event_bus.emit, _stop):  # type: ignore[misc]
-                yield result  # type: ignore[misc]
-        finally:
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-
-    def __enter__(self) -> ClassificationEngine:
-        self.load()
-        return self
-
-    async def __aenter__(self) -> ClassificationEngine:
-        await asyncio.to_thread(self.load)
-        return self
 
 
 __all__ = ["ClassificationEngine"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -120,3 +121,40 @@ class TestLoadClassifyWeights:
         fresh_model = ClassifyModel(config)
         with pytest.raises(RuntimeError, match="Shape mismatches"):
             load_classify_weights(fresh_model, ckpt_path)
+
+    def test_missing_keys_emits_warning(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Partial checkpoint (backbone.stem.* only) emits WARNING containing 'missing'."""
+        config = get_classify_config(ModelFamily.YOLO11, ModelSize.NANO)
+        model = ClassifyModel(config)
+        yowo_state = model.state_dict()
+
+        # Build inverse map: yowo prefix -> ultralytics prefix
+        inverse: dict[str, str] = {v: k for k, v in _CLS_LAYER_MAP.items()}
+
+        # Only include backbone.stem.* keys — all others will be missing
+        partial_ult_state: dict[str, torch.Tensor] = {}
+        for yowo_key, tensor in yowo_state.items():
+            if not yowo_key.startswith("backbone.stem."):
+                continue
+            for yowo_prefix in sorted(inverse.keys(), key=len, reverse=True):
+                if yowo_key.startswith(yowo_prefix):
+                    ult_prefix = inverse[yowo_prefix]
+                    ult_key = ult_prefix + yowo_key[len(yowo_prefix) :]
+                    partial_ult_state[ult_key] = tensor.clone()
+                    break
+
+        ckpt_path = tmp_path / "partial_cls.pt"
+        torch.save(partial_ult_state, ckpt_path)
+
+        fresh_model = ClassifyModel(config)
+        with caplog.at_level(logging.WARNING, logger="yowo.arch._weights"):
+            load_classify_weights(fresh_model, ckpt_path)
+
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("missing" in msg for msg in warning_messages), (
+            f"Expected a WARNING containing 'missing'; got: {warning_messages}"
+        )

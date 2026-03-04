@@ -26,7 +26,7 @@ import time
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -320,14 +320,14 @@ class BaseEngine:
             self._preprocess_buf = None
             self._postprocess_buf = None
 
-    def __enter__(self) -> BaseEngine:
+    def __enter__(self) -> Self:
         self.load()
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
 
-    async def __aenter__(self) -> BaseEngine:
+    async def __aenter__(self) -> Self:
         await asyncio.to_thread(self.load)
         return self
 
@@ -338,6 +338,41 @@ class BaseEngine:
         exc_tb: object,
     ) -> None:
         await asyncio.to_thread(self.close)
+
+    def stream(self, source: FrameSource) -> Iterator[Any]:
+        """Yield results from a FrameSource. Implemented by subclasses."""
+        raise NotImplementedError
+
+    async def astream(self, source: FrameSource) -> AsyncIterator[Any]:
+        """Async stream results from a FrameSource.
+
+        Delegates to :func:`yowo._async.astream` for thread-safe async bridging.
+        Stop-event is registered in _active_streams for close() signaling.
+
+        Args:
+            source: Any FrameSource (image, video, RTSP, …).
+
+        Yields:
+            One result per frame (Detection or ClassificationResult depending on engine).
+
+        Raises:
+            ShutdownError: If the engine is shutting down.
+        """
+        _stop = threading.Event()
+        with self._shutdown_lock:
+            if self._shutting_down.is_set():
+                raise ShutdownError("Engine is shutting down")
+            self._active_streams.add(_stop)
+            self._streams_drained.clear()
+        from yowo._async import astream as _astream
+
+        try:
+            async for result in _astream(self.stream, source, self._event_bus.emit, _stop):
+                yield result
+        finally:
+            self._active_streams.discard(_stop)
+            if not self._active_streams:
+                self._streams_drained.set()
 
     def _infer_from_tensor(
         self,
@@ -677,20 +712,7 @@ class DetectionEngine(BaseEngine):
             raise ShutdownError("Engine is shutting down")
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
-        try:
-            return self._run_batch(frames)  # type: ignore[return-value]
-        except Exception:
-            raise
-
-    def _detect_from_tensor(
-        self,
-        tensor: PreprocessedTensor,
-        frames: list[Frame],
-        *,
-        scratch: PostprocessBuffer | None,
-    ) -> list[Detection]:
-        """Backward-compatible alias for _infer_from_tensor."""
-        return self._infer_from_tensor(tensor, frames, scratch=scratch)  # type: ignore[return-value]
+        return self._run_batch(frames)  # type: ignore[return-value]
 
     async def adetect(self, frames: list[Frame]) -> list[Detection]:
         """Async wrapper — offloads detect() to a thread pool."""
@@ -703,32 +725,6 @@ class DetectionEngine(BaseEngine):
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
         return self._stream_dispatch(source)  # type: ignore[return-value]
-
-    async def astream(self, source: FrameSource) -> AsyncIterator[Detection]:
-        """Async stream; stop-event registered in _active_streams for close() signaling."""
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        from yowo._async import astream as _astream
-
-        try:
-            async for det in _astream(self.stream, source, self._event_bus.emit, _stop):
-                yield det
-        finally:
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-
-    def __enter__(self) -> DetectionEngine:
-        self.load()
-        return self
-
-    async def __aenter__(self) -> DetectionEngine:
-        await asyncio.to_thread(self.load)
-        return self
 
 
 # ---------------------------------------------------------------------------

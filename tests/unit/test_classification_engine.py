@@ -165,3 +165,120 @@ class TestClassificationEngineLifecycle:
 
         assert len(received) == 1
         assert isinstance(received[0], ClassificationResult)
+
+
+# ---------------------------------------------------------------------------
+# stream method tests
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationEngineStream:
+    def test_stream_not_loaded_raises_inference_error(self) -> None:
+        """stream() before load() raises InferenceError."""
+        from unittest.mock import MagicMock
+
+        backend = _make_mock_backend()
+        engine = ClassificationEngine(backend_instance=backend)
+        mock_source = MagicMock()
+        mock_source.total_frames = 1
+        mock_source.is_live = False
+
+        with pytest.raises(InferenceError, match="not loaded"):
+            engine.stream(mock_source)
+
+    def test_stream_after_close_raises_shutdown_error(self) -> None:
+        """stream() after close() raises ShutdownError."""
+        from unittest.mock import MagicMock
+
+        backend = _make_mock_backend()
+        mock_source = MagicMock()
+        mock_source.total_frames = 1
+        mock_source.is_live = False
+
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/cls.pt")):
+            engine = ClassificationEngine(backend_instance=backend)
+            engine.load()
+            engine.close()
+
+        with pytest.raises(ShutdownError):
+            engine.stream(mock_source)
+
+
+# ---------------------------------------------------------------------------
+# aclassify method tests
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationEngineAClassify:
+    async def test_aclassify_returns_results(self) -> None:
+        """await engine.aclassify([frame]) returns a list of ClassificationResult."""
+        backend = _make_mock_backend()
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/cls.pt")):
+            engine = ClassificationEngine(backend_instance=backend)
+            engine.load()
+            try:
+                results = await engine.aclassify([_make_frame()])
+            finally:
+                engine.close()
+
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert isinstance(results[0], ClassificationResult)
+
+    async def test_aclassify_not_loaded_raises_inference_error(self) -> None:
+        """await engine.aclassify([frame]) before load() raises InferenceError."""
+        backend = _make_mock_backend()
+        engine = ClassificationEngine(backend_instance=backend)
+
+        with pytest.raises(InferenceError, match="not loaded"):
+            await engine.aclassify([_make_frame()])
+
+
+# ---------------------------------------------------------------------------
+# astream method tests
+# ---------------------------------------------------------------------------
+
+
+class TestClassificationEngineAStream:
+    async def test_astream_after_close_raises_shutdown_error(self) -> None:
+        """astream() after close() raises ShutdownError."""
+        from unittest.mock import MagicMock
+
+        backend = _make_mock_backend()
+        mock_source = MagicMock()
+        mock_source.total_frames = 1
+        mock_source.is_live = False
+
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/cls.pt")):
+            engine = ClassificationEngine(backend_instance=backend)
+            engine.load()
+            engine.close()
+
+        with pytest.raises(ShutdownError):
+            async for _ in engine.astream(mock_source):
+                pass
+
+    async def test_astream_yields_classification_results(self) -> None:
+        """astream() over a mock source yields ClassificationResult instances."""
+        from unittest.mock import MagicMock
+
+        backend = _make_mock_backend()
+        frame = _make_frame()
+        mock_source = MagicMock()
+        mock_source.total_frames = 1
+        mock_source.is_live = False
+        mock_source.__iter__ = MagicMock(return_value=iter([frame]))
+        mock_source.close = MagicMock()
+
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/cls.pt")):
+            engine = ClassificationEngine(backend_instance=backend)
+            engine.load()
+            try:
+                collected: list[ClassificationResult] = []
+                async for result in engine.astream(mock_source):
+                    collected.append(result)
+            finally:
+                engine.close()
+
+        assert len(collected) == 1
+        assert isinstance(collected[0], ClassificationResult)

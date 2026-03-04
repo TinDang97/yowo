@@ -637,21 +637,24 @@ def _load_lines(line_file: str | None) -> list | None:
 def _parse_cls_model_spec(model_name: str) -> ModelSpec:
     """Parse a classification model name like ``"yolo11n-cls"`` into a :class:`ModelSpec`.
 
-    Accepts both the bare form (``"yolo11n"``) and the explicit ``-cls`` suffix
-    (``"yolo11n-cls"``).  The returned spec always carries ``task="classify"``.
+    The ``-cls`` suffix is required; bare detection names (``"yolo11n"``) are
+    rejected with a clear error rather than silently forced to classify task.
 
     Raises:
-        click.BadParameter: On unknown model name format.
+        click.BadParameter: On unknown model name or non-classification task.
     """
     from yowo._convenience import parse_model_name
     from yowo.errors import ConfigError
 
-    bare = model_name.removesuffix("-cls")
     try:
-        base = parse_model_name(bare)
+        spec = parse_model_name(model_name)
     except ConfigError as exc:
         raise click.BadParameter(str(exc)) from exc
-    return ModelSpec(base.family, base.size, task="classify")
+    if spec.task != "classify":
+        raise click.BadParameter(
+            f"Expected a classification model (e.g. yolo11n-cls), got: {model_name!r}"
+        )
+    return spec
 
 
 def _parse_model_spec(model_name: str) -> ModelSpec:
