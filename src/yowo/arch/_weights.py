@@ -204,9 +204,10 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
 # Classification weight mapping
 # ---------------------------------------------------------------------------
 
-# Ultralytics cls checkpoints have 12 layers (0-11).
-# Layers 0-10 are identical to the detection backbone.
-# Layer 11 is the Classify head (Conv + pool + dropout + linear).
+# Ultralytics cls checkpoints have 11 layers (0-10).
+# Backbone layers 0-8 match detection; SPPF (detection layer 9) is absent,
+# so C2PSA sits at layer 9 instead of 10.
+# Layer 10 is the Classify head (Conv + pool + dropout + linear).
 
 _CLS_LAYER_MAP: dict[str, str] = {
     # Backbone (layers 0-9) — same as detection except SPPF is omitted:

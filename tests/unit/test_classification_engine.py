@@ -152,19 +152,22 @@ class TestClassificationEngineLifecycle:
             engine.classify([_make_frame()])
 
     def test_events_fired_on_classify(self) -> None:
-        """on('detection', cb) fires after classify() (engine emits 'detection')."""
+        """on('classification', cb) fires after classify(); 'detection' does NOT fire."""
         backend = _make_mock_backend()
-        received: list[object] = []
+        cls_received: list[object] = []
+        det_received: list[object] = []
 
         with patch("yowo.engine.resolve_weights", return_value=Path("/fake/cls.pt")):
             engine = ClassificationEngine(backend_instance=backend)
-            engine.on("detection", lambda results: received.extend(results))
+            engine.on("classification", lambda results: cls_received.extend(results))
+            engine.on("detection", lambda results: det_received.extend(results))
             engine.load()
             engine.classify([_make_frame()])
             engine.close()
 
-        assert len(received) == 1
-        assert isinstance(received[0], ClassificationResult)
+        assert len(cls_received) == 1
+        assert isinstance(cls_received[0], ClassificationResult)
+        assert len(det_received) == 0, "ClassificationEngine must not emit 'detection' events"
 
 
 # ---------------------------------------------------------------------------

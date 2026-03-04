@@ -77,7 +77,8 @@ class Backbone(nn.Module):
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         """Run backbone, return (P3, P4, P5) feature maps.
 
-        Saved outputs correspond to layers 4, 6, 10 in the full model.
+        Saved outputs correspond to layers 4, 6, and 10 (detection) or 9
+        (classification, where SPPF is absent) in the full model.
         """
         x = self.stem(x)  # Layer 0: /2
         x = self.conv1(x)  # Layer 1: /4

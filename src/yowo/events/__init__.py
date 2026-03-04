@@ -5,9 +5,10 @@ Sync and async callbacks are both supported. Non-blocking emit().
 
 Well-known event constants:
 
-    EVENT_DETECTION    - payload: list[Detection]
-    EVENT_ERROR        - payload: Exception
-    EVENT_HEALTH_CHANGE - payload: HealthStatus
+    EVENT_DETECTION      - payload: list[Detection]
+    EVENT_CLASSIFICATION - payload: list[ClassificationResult]
+    EVENT_ERROR          - payload: Exception
+    EVENT_HEALTH_CHANGE  - payload: HealthStatus
 """
 
 from __future__ import annotations
@@ -26,7 +27,10 @@ _ListenerEntry = tuple[Callable[..., Any], bool, asyncio.AbstractEventLoop | Non
 # ---------------------------------------------------------------------------
 
 EVENT_DETECTION = "detection"
-"""Emitted after each successful inference batch. Payload: list[Detection]."""
+"""Emitted after each successful detection batch. Payload: list[Detection]."""
+
+EVENT_CLASSIFICATION = "classification"
+"""Emitted after each successful classification batch. Payload: list[ClassificationResult]."""
 
 EVENT_ERROR = "error"
 """Emitted on inference or backend error. Payload: Exception."""
@@ -261,6 +265,7 @@ class EventBus:
 
 
 __all__ = [
+    "EVENT_CLASSIFICATION",
     "EVENT_DETECTION",
     "EVENT_ERROR",
     "EVENT_HEALTH_CHANGE",

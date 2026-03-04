@@ -148,6 +148,10 @@ class ClassificationEngine(BaseEngine):
             error_threshold=cfg.error_threshold,
         )
 
+    @property
+    def _result_event_name(self) -> str:
+        return "classification"
+
     def _process_batch(
         self,
         raw_output: NDArray[np.float32],

@@ -177,6 +177,15 @@ class BaseEngine:
     ) -> list[Any]: ...
 
     @property
+    def _result_event_name(self) -> str:
+        """Event name emitted after each inference batch.
+
+        Subclasses override to emit task-specific events (e.g.
+        ``EVENT_CLASSIFICATION`` for classification engines).
+        """
+        return "detection"
+
+    @property
     def selection(self) -> BackendSelection:
         """The resolved backend selection (backend, device, precision)."""
         return self._selection
@@ -391,7 +400,7 @@ class BaseEngine:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
         results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
-        self._event_bus.emit("detection", results)
+        self._event_bus.emit(self._result_event_name, results)
         return results
 
     def _run_batch(self, frames: list[Frame]) -> list[Any]:
