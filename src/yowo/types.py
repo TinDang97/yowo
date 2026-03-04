@@ -39,6 +39,7 @@ class DeviceType(enum.StrEnum):
 
     CUDA = "cuda"
     CPU = "cpu"
+    MPS = "mps"
 
 
 class CPUArch(enum.StrEnum):

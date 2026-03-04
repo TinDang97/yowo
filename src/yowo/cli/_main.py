@@ -24,7 +24,7 @@ def cli() -> None:
     "-w",
     default=None,
     type=click.Path(exists=True),
-    help="Path to local .pt weights file (skips download)",
+    help="Path to local model file (.pt for PyTorch, .onnx for ONNX backend)",
 )
 @click.option(
     "--backend",
@@ -201,7 +201,7 @@ def detect_command(
     "-w",
     default=None,
     type=click.Path(exists=True),
-    help="Path to local .pt weights file (skips download)",
+    help="Path to local model file (.pt for PyTorch, .onnx for ONNX backend)",
 )
 @click.option(
     "--format",
