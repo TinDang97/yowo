@@ -15,6 +15,92 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [2.2.2] — 2026-03-04
+
+### Added
+
+- **classify**: `ClassificationEngine` — YOLO image classification inference
+  engine. Mirrors `DetectionEngine` API but outputs `ClassificationResult`
+  instead of `Detection`. No NMS, no bounding boxes — just top-k class
+  probabilities. Supports all streaming modes (image, video, RTSP, webcam),
+  async inference via `aclassify()`, and the same backend fallback chain as
+  detection.
+
+- **classify**: `ClassifyModel` — backbone → Classify head architecture (no
+  neck). `Classify` head: `Conv(c1, 1280) → AvgPool → Dropout → Linear`.
+  c\_=1280 hardcoded to match ultralytics. Classification backbone has **no
+  SPPF** — layers 0–8 match detection, then C2PSA at layer 9 (not 10).
+
+- **classify**: `postprocess_classify()` — ndim guard (1-D → 2-D auto,
+  3-D+ raises `ValueError`), dtype coercion, `_is_softmaxed` heuristic,
+  in-place softmax (single allocation), `tuple(row.tolist())` for all_probs.
+
+- **classify**: `ClassificationResult` dataclass with `top1_class_id`,
+  `top1_score`, `top_k` list of `(class_id, score)` pairs, and `all_probs`
+  tuple for full probability distribution access.
+
+- **classify**: `ClassificationConfig` — configuration dataclass with `top_k`
+  parameter (default 5) and all `BaseEngine` fields (batch_size, device,
+  precision, streaming, metrics).
+
+- **classify**: `_CLS_LAYER_MAP` weight mapping — maps ultralytics cls
+  checkpoint layers (0–10) to yowo backbone/head. SPPF absent; detection
+  layer 9 shifted out.
+
+- **cli**: `yowo classify SOURCE` command — classify images/video with
+  `--model` (e.g. `yolo11n-cls`), `--weights/-w`, `--backend`, `--device`,
+  `--top-k` options. `-cls` suffix required; bare detection names raise
+  `BadParameter`.
+
+- **convenience**: `classify()` one-liner — `from yowo import classify;
+  results = classify("photo.jpg", model="yolo11n-cls")`.
+
+- **events**: `EVENT_CLASSIFICATION` constant — `ClassificationEngine` emits
+  `"classification"` events (not `"detection"`), enabling clean event
+  separation when both engines share an event bus.
+
+- **types**: `DeviceType.MPS` enum value for Apple Metal GPU device selection.
+
+### Refactored
+
+- **engine**: `BaseEngine` extracted from `engine.py` — shared by
+  `DetectionEngine` and `ClassificationEngine`. `InferenceEngine` is now an
+  alias for `DetectionEngine` (backward-compatible).
+
+- **engine**: `astream()` promoted from `DetectionEngine` to `BaseEngine` —
+  single implementation inherited by both engines (eliminates 65-line
+  duplicate).
+
+- **engine**: `__enter__`/`__aenter__` use `Self` return type — context
+  managers return correct subclass type; per-class overrides removed.
+
+- **engine**: `_result_event_name` property — subclasses override to emit
+  task-specific events (detection vs classification).
+
+- **classify**: `ClassificationEngine.__init__` uses config-object coalesce
+  pattern — `cfg = config or ClassificationConfig(...)` (eliminates 30-line
+  dual-branch).
+
+- **backends**: `cudnn.benchmark = True` hoisted to shared path in
+  `_pytorch.py` — runs for both classification and detection on CUDA.
+
+- **backends**: MPS device type resolution fixed in `_selector.py` — explicit
+  `device_override.startswith("mps")` branch.
+
+- **weights**: `_weights.py` defers `torch` import inside
+  `_extract_state_dict()`. Shape mismatch raises `RuntimeError`; missing keys
+  emit `WARNING` (not silent skip).
+
+### Tests
+
+- 1543 unit tests (up from 1288 in v2.2.1). 255 new tests covering
+  ClassificationEngine lifecycle, classify postprocess, classify weights,
+  classify head, classify model, ClassificationResult, ClassificationConfig,
+  BaseEngine, DetectionEngine alias, CLI classify command, MPS device type,
+  model name parsing, model registry, and convenience API.
+
+---
+
 ## [2.2.0] — 2026-03-01
 
 ### Added
@@ -461,6 +547,7 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 Initial beta release.
 
+[2.2.2]: https://github.com/TinDang97/yowo/compare/v2.2.1...v2.2.2
 [2.2.0]: https://github.com/TinDang97/yowo/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/TinDang97/yowo/compare/v2.0.0...v2.1.0
 [1.3.1]: https://github.com/TinDang97/yowo/compare/v1.3.0...v1.3.1

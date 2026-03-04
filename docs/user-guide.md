@@ -15,12 +15,14 @@
    - [yowo export](#34-yowo-export)
    - [yowo track](#35-yowo-track)
    - [yowo count](#36-yowo-count)
+   - [yowo classify](#37-yowo-classify)
 4. [Python API Reference](#4-python-api-reference)
    - [InferenceEngine](#41-inferenceengine)
-   - [open_source](#42-open_source)
-   - [Core Types](#43-core-types)
-   - [Configuration](#44-configuration)
-   - [IO Utilities](#45-io-utilities)
+   - [ClassificationEngine](#42-classificationengine)
+   - [open_source](#43-open_source)
+   - [Core Types](#44-core-types)
+   - [Configuration](#45-configuration)
+   - [IO Utilities](#46-io-utilities)
 5. [Backend Selection](#5-backend-selection)
 6. [Streaming Pipeline](#6-streaming-pipeline)
 7. [Multi-Stream Pipeline](#7-multi-stream-pipeline)
@@ -59,6 +61,7 @@
     - [Multi-Camera Warehouse Monitoring](#167-multi-camera-warehouse-monitoring)
     - [Traffic Counting with ByteTrack](#168-traffic-counting-with-bytetrack)
     - [Cross-Camera Vehicle ReID](#169-cross-camera-vehicle-reid)
+    - [Image Classification](#1610-image-classification)
 17. [Performance Reference](#17-performance-reference)
 
 ---
@@ -141,6 +144,20 @@ with InferenceEngine(
 
 write_annotated_frames(results, "output/")
 print(f"Processed {len(results)} frames")
+```
+
+### CLI — classification
+
+```bash
+yowo classify photo.jpg --model yolo11n-cls
+```
+
+### Python — classification
+
+```python
+from yowo import classify
+results = classify("photo.jpg", model="yolo11n-cls", top_k=3)
+print(results[0].top1_class_id, results[0].top1_score)
 ```
 
 ---
@@ -376,6 +393,48 @@ yowo count video.mp4 --model yolo26s --line lines.json --track --json
 
 ---
 
+### 3.7 `yowo classify`
+
+Run image classification on any source type.
+
+```
+yowo classify SOURCE [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `SOURCE` | Image file, video file, directory, `rtsp://…` URL, or webcam index |
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model`, `-m` | `yolo11n-cls` | Classification model name (must end with `-cls`) |
+| `--weights`, `-w` | auto | Path to local `-cls.pt` or `.onnx` weights file |
+| `--backend` | `auto` | `auto`, `pytorch`, `onnx`, `tensorrt`, `openvino` |
+| `--device` | `auto` | `auto`, `cpu`, `mps`, `cuda`, `cuda:0` |
+| `--top-k` | `5` | Number of top predictions per frame |
+
+**Examples:**
+
+```bash
+# Single image
+yowo classify photo.jpg --model yolo11n-cls
+
+# Video with top-3 predictions
+yowo classify video.mp4 --model yolo11s-cls --top-k 3
+
+# Local weights, specific backend
+yowo classify image.jpg --model yolo26n-cls --weights ./best-cls.pt --backend pytorch
+
+# MPS (Apple Metal GPU)
+yowo classify image.jpg --model yolo11n-cls --device mps
+```
+
+---
+
 ## 4. Python API Reference
 
 ### 4.1 `InferenceEngine`
@@ -492,7 +551,95 @@ with InferenceEngine(config) as eng:
 
 ---
 
-### 4.2 `open_source`
+### 4.2 `ClassificationEngine`
+
+Image classification engine. Same lifecycle as `InferenceEngine` but outputs `ClassificationResult` instead of `Detection`.
+
+```python
+from yowo.classify_engine import ClassificationEngine
+from yowo.types import ModelFamily, ModelSize
+```
+
+**Constructor:**
+
+```python
+ClassificationEngine(
+    config: ClassificationConfig | None = None,
+    *,
+    model_family: ModelFamily = ModelFamily.YOLO11,
+    model_size: ModelSize = ModelSize.NANO,
+    weights_path: Path | None = None,
+    backend: BackendType | None = None,
+    backend_instance: InferenceBackend | None = None,
+    device: str = "auto",           # "auto", "cpu", "mps", "cuda"
+    precision: Precision | None = None,
+    batch_size: int = 1,
+    top_k: int = 5,                 # number of top predictions per frame
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
+    max_queue_size: int = 2,
+    prefetch: bool = True,
+    pipeline_workers: int = 0,
+    metrics_enabled: bool = True,
+    error_threshold: int = 10,
+)
+```
+
+**Methods:**
+
+```python
+engine.classify(frames: list[Frame]) -> list[ClassificationResult]
+```
+Run classification on a list of frames. Returns one `ClassificationResult` per frame.
+
+```python
+engine.stream(source: FrameSource) -> Iterator[ClassificationResult]
+```
+Yield classification results from a `FrameSource`. Same source-aware dispatch as `InferenceEngine`.
+
+```python
+await engine.aclassify(frames: list[Frame]) -> list[ClassificationResult]
+```
+Async wrapper — offloads `classify()` to a thread pool.
+
+**Context manager:**
+
+```python
+with ClassificationEngine(model_family=ModelFamily.YOLO11, model_size=ModelSize.NANO) as eng:
+    results = eng.classify([frame])
+    print(results[0].top1_class_id, results[0].top1_score)
+```
+
+**Events:**
+
+`ClassificationEngine` emits `EVENT_CLASSIFICATION` (not `EVENT_DETECTION`):
+
+```python
+from yowo.events import EVENT_CLASSIFICATION
+
+engine.on(EVENT_CLASSIFICATION, lambda results: print(f"{len(results)} classified"))
+```
+
+**Convenience one-liner:**
+
+```python
+from yowo import classify
+results = classify("photo.jpg", model="yolo11n-cls", top_k=3)
+```
+
+**`ClassificationResult` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `top1_class_id` | `int` | Predicted class index |
+| `top1_score` | `float` | Top-1 probability |
+| `top_k` | `list[tuple[int, float]]` | Top-k `(class_id, score)` pairs |
+| `all_probs` | `tuple[float, ...]` | Full probability distribution |
+| `inference_time_ms` | `float` | Backend inference time |
+| `frame` | `Frame` | Input frame reference |
+
+---
+
+### 4.3 `open_source`
 
 Factory that returns the appropriate `FrameSource` by inspecting the input.
 
@@ -538,7 +685,7 @@ src.is_live        # bool: True for RTSP and webcam sources
 
 ---
 
-### 4.3 Core Types
+### 4.4 Core Types
 
 All public types are in `yowo.types`.
 
@@ -610,7 +757,7 @@ from yowo.types import (
 
 ---
 
-### 4.4 Configuration
+### 4.5 Configuration
 
 #### `InferenceConfig`
 
@@ -666,7 +813,7 @@ Load order (later entries win):
 
 ---
 
-### 4.5 IO Utilities
+### 4.6 IO Utilities
 
 ```python
 from yowo.io import (
@@ -2394,6 +2541,34 @@ print(f"Gallery: {tracker.gallery_size} entries, {tracker.camera_count} cameras"
 | `needs_reid()` skip rate | 99.8% |
 | ReID extraction (CoreML) | 15.5 img/s |
 | FPS impact (tracking + ReID) | < 1% |
+
+---
+
+### 16.10 Image Classification
+
+Classify product images or scene categories using YOLO classification models.
+
+```python
+from yowo import ClassificationEngine, open_source
+from yowo.types import ModelFamily, ModelSize
+
+with ClassificationEngine(
+    model_family=ModelFamily.YOLO11,
+    model_size=ModelSize.SMALL,
+    top_k=5,
+) as engine:
+    for result in engine.stream(open_source("/images/products/")):
+        print(f"Frame {result.frame.frame_index}: "
+              f"class={result.top1_class_id} score={result.top1_score:.3f}")
+        for class_id, score in result.top_k:
+            print(f"  {class_id}: {score:.3f}")
+```
+
+**CLI equivalent:**
+
+```bash
+yowo classify /images/products/ --model yolo11s-cls --top-k 5
+```
 
 ---
 

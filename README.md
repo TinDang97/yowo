@@ -55,6 +55,9 @@ yowo detect rtsp://camera-ip:554/stream --model yolo26n --confidence 0.4
 # Save detections to JSON
 yowo detect ./images/ --model yolo11s --output detections.json
 
+# Classify images
+yowo classify image.jpg --model yolo11n-cls
+
 # Track objects with persistent IDs (ByteTrack)
 yowo track video.mp4 --model yolo26n
 
@@ -73,11 +76,16 @@ yowo models
 ```python
 from yowo import InferenceEngine, open_source
 
-# Minimal: auto-select everything (defaults to YOLO26 Nano)
+# Detection: auto-select everything (defaults to YOLO26 Nano)
 with InferenceEngine(confidence_threshold=0.35) as engine:
     for detection in engine.stream(open_source("image.jpg")):
         for box in detection.boxes:
             print(f"{box.class_name}: {box.confidence:.2f} @ {box.as_xyxy()}")
+
+# Classification: one-liner
+from yowo import classify
+results = classify("photo.jpg", model="yolo11n-cls", top_k=3)
+print(results[0].top1_class_id, results[0].top1_score)
 ```
 
 ---
@@ -455,6 +463,41 @@ for line_id, dirs in counter.line_totals.items():
 
 ---
 
+## Classify
+
+YOLO image classification — top-k class probabilities, no bounding boxes.
+
+### CLI
+
+```bash
+yowo classify image.jpg --model yolo11n-cls
+yowo classify video.mp4 --model yolo11s-cls --top-k 3
+yowo classify image.jpg --model yolo11n-cls --weights ./best-cls.pt
+```
+
+### Python API
+
+```python
+from yowo import ClassificationEngine, open_source
+
+with ClassificationEngine(model_family="yolo11", model_size="n") as engine:
+    for result in engine.stream(open_source("image.jpg")):
+        print(f"Top-1: class {result.top1_class_id} ({result.top1_score:.3f})")
+        for class_id, score in result.top_k:
+            print(f"  {class_id}: {score:.3f}")
+```
+
+One-liner convenience:
+
+```python
+from yowo import classify
+results = classify("photo.jpg", model="yolo11n-cls", top_k=5)
+```
+
+Classification models use the `-cls` suffix (e.g. `yolo11n-cls`, `yolo26s-cls`). Weights are downloaded automatically.
+
+---
+
 ## Annotate
 
 Reusable drawing utilities for detection, tracking, and counting overlays.
@@ -657,10 +700,10 @@ except YowoError as e:
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| core | [`src/yowo/`](src/yowo/README.md) | `InferenceEngine`, public API surface, `engine.py`, `config.py`, `types.py`, `errors.py` |
-| arch | [`src/yowo/arch/`](src/yowo/arch/README.md) | Native YOLO11 and YOLO26 PyTorch — backbone, FPN-PAN neck, detection head, scaling, weight loading |
+| core | [`src/yowo/`](src/yowo/README.md) | `InferenceEngine` (detection), `ClassificationEngine`, public API surface, `engine.py`, `classify_engine.py`, `config.py`, `types.py`, `errors.py` |
+| arch | [`src/yowo/arch/`](src/yowo/arch/README.md) | Native YOLO11 and YOLO26 PyTorch — backbone, FPN-PAN neck, detection head, classification head, scaling, weight loading |
 | backends | [`src/yowo/backends/`](src/yowo/backends/README.md) | Inference backend implementations (TensorRT, ONNX, OpenVINO, PyTorch) and automatic priority-chain selection |
-| cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `export`, `info`, `models`, `track`, `count` commands |
+| cli | [`src/yowo/cli/`](src/yowo/cli/README.md) | Click-based CLI — `detect`, `classify`, `export`, `info`, `models`, `track`, `count` commands |
 | counter | `src/yowo/counter/` | Zone occupancy (ray-casting PIP) and line-crossing counting (cross-product sign test) |
 | export | [`src/yowo/export/`](src/yowo/export/README.md) | Export `.pt` weights to ONNX / TensorRT / OpenVINO with calibration, metadata sidecar, and output validation |
 | hardware | [`src/yowo/hardware/`](src/yowo/hardware/README.md) | One-time hardware detection (GPU, CPU arch, installed libs), cached for session lifetime |
