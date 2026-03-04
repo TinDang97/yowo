@@ -39,6 +39,8 @@ def postprocess_classify(
     raw_output = np.asarray(raw_output, dtype=np.float32)
     if raw_output.ndim == 1:
         raw_output = raw_output[np.newaxis, :]
+    if raw_output.ndim != 2:
+        raise ValueError(f"Expected 2-D output (batch, nc), got ndim={raw_output.ndim}")
 
     batch_size = raw_output.shape[0]
     nc = raw_output.shape[1]

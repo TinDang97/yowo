@@ -144,7 +144,6 @@ class PyTorchBackend:
                 cls_model.eval()
                 cls_model.to(resolved)
                 if resolved.startswith("cuda"):
-                    torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
                     cls_model = cls_model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
                 # torch.compile and feature cache hooks are detection-only
                 self._model = cls_model
@@ -166,7 +165,6 @@ class PyTorchBackend:
 
                 # Channels-last for GPU Tensor Core optimisation
                 if resolved.startswith("cuda"):
-                    torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
                     det_model = det_model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
 
                 # torch.compile — opt-in kernel fusion (requires PyTorch >= 2.0)
@@ -194,6 +192,8 @@ class PyTorchBackend:
 
                 self._model = det_model
 
+            if resolved.startswith("cuda"):
+                torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
             self._device_str = resolved
         except RuntimeError as exc:
             self._model = None

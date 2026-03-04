@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from yowo.postprocess._classify import _is_softmaxed, _softmax, postprocess_classify
 from yowo.types import BackendType, Frame, ModelFamily, ModelSize, ModelSpec
@@ -152,3 +153,14 @@ class TestPostprocessClassify:
         """_is_softmaxed returns False for raw logits."""
         raw = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
         assert _is_softmaxed(raw) is False
+
+    def test_invalid_ndim_raises(self) -> None:
+        """3-D input raises ValueError after 1-D auto-promotion."""
+        bad = np.ones((2, 3, 4), dtype=np.float32)
+        with pytest.raises(ValueError, match="Expected 2-D"):
+            postprocess_classify(
+                bad,
+                [],
+                model_spec=_make_spec(),
+                backend=BackendType.PYTORCH,
+            )

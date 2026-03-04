@@ -17,9 +17,8 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import threading
-from collections.abc import AsyncIterator, Generator, Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import numpy as np
@@ -109,57 +108,48 @@ class ClassificationEngine(BaseEngine):
         metrics_enabled: bool = True,
         error_threshold: int = 10,
     ) -> None:
-        if config is not None:
-            family = config.model_family
-            size = config.model_size
-            wp = config.weights_path
-            be = config.backend
-            dev = config.device
-            prec = config.precision
-            bs = config.batch_size
-            tk = config.top_k
-            fdp = config.frame_drop_policy
-            mqs = config.max_queue_size
-            pf = config.prefetch
-            pw = config.pipeline_workers
-            me = config.metrics_enabled
-            et = config.error_threshold
-        else:
-            family = model_family
-            size = model_size
-            wp = weights_path
-            be = backend
-            dev = device
-            prec = precision
-            bs = batch_size
-            tk = top_k
-            fdp = frame_drop_policy
-            mqs = max_queue_size
-            pf = prefetch
-            pw = pipeline_workers
-            me = metrics_enabled
-            et = error_threshold
+        cfg = config or ClassificationConfig(
+            model_family=model_family,
+            model_size=model_size,
+            weights_path=weights_path,
+            backend=backend,
+            device=device,
+            precision=precision,
+            batch_size=batch_size,
+            top_k=top_k,
+            frame_drop_policy=frame_drop_policy,
+            max_queue_size=max_queue_size,
+            prefetch=prefetch,
+            pipeline_workers=pipeline_workers,
+            metrics_enabled=metrics_enabled,
+            error_threshold=error_threshold,
+        )
 
-        self._top_k = tk
-        spec = ModelSpec(family=family, size=size, task="classify", weights_path=wp)
+        self._top_k = cfg.top_k
+        spec = ModelSpec(
+            family=cfg.model_family,
+            size=cfg.model_size,
+            task="classify",
+            weights_path=cfg.weights_path,
+        )
 
         super().__init__(
             spec=spec,
             backend_instance=backend_instance,
-            backend_override=be.value if be else None,
-            device=dev,
-            precision=prec,
-            batch_size=bs,
+            backend_override=cfg.backend.value if cfg.backend else None,
+            device=cfg.device,
+            precision=cfg.precision,
+            batch_size=cfg.batch_size,
             # Classification models don't support feature cache or kv_cache
             cache=False,
             cache_dir=None,
             kv_cache=False,
-            frame_drop_policy=fdp,
-            max_queue_size=mqs,
-            prefetch=pf,
-            pipeline_workers=pw,
-            metrics_enabled=me,
-            error_threshold=et,
+            frame_drop_policy=cfg.frame_drop_policy,
+            max_queue_size=cfg.max_queue_size,
+            prefetch=cfg.prefetch,
+            pipeline_workers=cfg.pipeline_workers,
+            metrics_enabled=cfg.metrics_enabled,
+            error_threshold=cfg.error_threshold,
         )
 
     def _process_batch(
@@ -203,10 +193,7 @@ class ClassificationEngine(BaseEngine):
         if not self._loaded:
             raise InferenceError("Engine not loaded. Call load() or use as context manager.")
 
-        try:
-            return self._run_batch(frames)  # type: ignore[return-value]
-        except Exception:
-            raise
+        return self._run_batch(frames)  # type: ignore[return-value]
 
     async def aclassify(self, frames: list[Frame]) -> list[ClassificationResult]:
         """Async wrapper — offloads classify() to a thread pool.
@@ -247,8 +234,7 @@ class ClassificationEngine(BaseEngine):
     async def astream(self, source: FrameSource) -> AsyncIterator[ClassificationResult]:
         """Async stream classification results.
 
-        Runs the sync :meth:`stream` generator on a background thread and
-        bridges results to the async caller via an asyncio.Queue.
+        Delegates to :func:`yowo._async.astream` (same helper as DetectionEngine).
 
         Args:
             source: Any :class:`~yowo.io.FrameSource`.
@@ -265,47 +251,12 @@ class ClassificationEngine(BaseEngine):
                 raise ShutdownError("Engine is shutting down")
             self._active_streams.add(_stop)
             self._streams_drained.clear()
+        from yowo._async import astream as _astream
 
-        loop = asyncio.get_running_loop()
-        q: asyncio.Queue[ClassificationResult | None] = asyncio.Queue(maxsize=64)
-        _internal_stop = threading.Event()
-
-        def _background() -> None:
-            # stream() returns a generator at runtime; type: ignore lets us call .close()
-            gen: Generator[ClassificationResult, None, None] = self.stream(source)  # type: ignore[assignment]
-            try:
-                for result in gen:
-                    if _internal_stop.is_set() or _stop.is_set():
-                        break
-                    future = asyncio.run_coroutine_threadsafe(q.put(result), loop)
-                    try:
-                        future.result(timeout=1.0)
-                    except Exception:
-                        break
-            except Exception as exc:
-                self._event_bus.emit("error", exc)
-            finally:
-                # Generator.close() triggers _stream_* finally blocks immediately
-                # (reader.stop(), source.close()) rather than waiting for GC.
-                with contextlib.suppress(Exception):
-                    gen.close()
-                with contextlib.suppress(Exception):
-                    asyncio.run_coroutine_threadsafe(q.put(None), loop).result(timeout=2.0)
-
-        thread = threading.Thread(target=_background, name="yowo-cls-astream", daemon=True)
-        thread.start()
         try:
-            while True:
-                item = await q.get()
-                if item is None:
-                    break
-                yield item
-        except (asyncio.CancelledError, GeneratorExit):
-            _internal_stop.set()
-            raise
+            async for result in _astream(self.stream, source, self._event_bus.emit, _stop):  # type: ignore[misc]
+                yield result  # type: ignore[misc]
         finally:
-            _internal_stop.set()
-            thread.join(timeout=5.0)
             self._active_streams.discard(_stop)
             if not self._active_streams:
                 self._streams_drained.set()

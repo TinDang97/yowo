@@ -250,6 +250,7 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
     Raises:
         FileNotFoundError: If the weights file does not exist.
         ValueError: If the checkpoint format is unrecognised.
+        RuntimeError: If weight shapes do not match the model architecture.
     """
     path = Path(weights_path)
     if not path.exists():
