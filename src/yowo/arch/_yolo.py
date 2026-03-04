@@ -67,10 +67,11 @@ class Backbone(nn.Module):
         # Layer 8: c5→c5, C3k2 block (c3k=True)
         self.c3k2_4 = C3k2(c5, c5, n=n2, c3k=True, shortcut=True)
 
-        # Layer 9: SPPF
-        self.sppf = SPPF(c5, c5, k=5, shortcut=config.sppf_shortcut)
+        # Layer 9: SPPF — detection only; classification models omit this layer
+        if config.has_sppf:
+            self.sppf = SPPF(c5, c5, k=5, shortcut=config.sppf_shortcut)
 
-        # Layer 10: C2PSA — attention
+        # Layer 10 (detection) / Layer 9 (classification): C2PSA — attention
         self.c2psa = C2PSA(c5, c5, n=n2)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
@@ -90,8 +91,9 @@ class Backbone(nn.Module):
 
         x = self.conv4(p4)  # Layer 7: /32
         x = self.c3k2_4(x)  # Layer 8
-        x = self.sppf(x)  # Layer 9
-        p5 = self.c2psa(x)  # Layer 10 — save for neck
+        if hasattr(self, "sppf"):
+            x = self.sppf(x)  # Layer 9 (detection only)
+        p5 = self.c2psa(x)  # Layer 9 (cls) / Layer 10 (detection)
 
         return p3, p4, p5
 
@@ -252,6 +254,7 @@ def _classify_to_model_config(config: ClassifyConfig) -> ModelConfig:
         sppf_shortcut=config.sppf_shortcut,
         neck_c3k=False,
         backbone_c3k=config.backbone_c3k,
+        has_sppf=config.has_sppf,
         max_det=300,
         input_size=(640, 640),
     )

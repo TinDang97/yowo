@@ -17,20 +17,27 @@ from yowo.types import ModelFamily, ModelSize
 
 class TestClsLayerMap:
     def test_backbone_keys_present(self) -> None:
-        """All backbone layer keys (model.0. through model.10.) are in _CLS_LAYER_MAP."""
-        for i in range(11):
+        """All backbone layer keys (model.0. through model.9.) are in _CLS_LAYER_MAP.
+
+        Note: cls backbone has 10 layers (0-9) — SPPF is absent so C2PSA is at
+        layer 9 instead of layer 10 as in the detection model.
+        """
+        for i in range(10):
             key = f"model.{i}."
             assert key in _CLS_LAYER_MAP, f"Missing backbone key: {key}"
 
     def test_head_key_present(self) -> None:
-        """'model.11.' maps to 'head.'."""
-        assert "model.11." in _CLS_LAYER_MAP
-        assert _CLS_LAYER_MAP["model.11."] == "head."
+        """'model.10.' maps to 'head.' (cls head is at layer 10, one earlier than detection)."""
+        assert "model.10." in _CLS_LAYER_MAP
+        assert _CLS_LAYER_MAP["model.10."] == "head."
+
+    def test_no_sppf_key(self) -> None:
+        """'backbone.sppf.' must NOT appear in _CLS_LAYER_MAP — cls backbone omits SPPF."""
+        assert all(v != "backbone.sppf." for v in _CLS_LAYER_MAP.values())
 
     def test_no_neck_keys(self) -> None:
-        """Detection neck/head keys (model.12 through model.22) are NOT in _CLS_LAYER_MAP."""
-        neck_indices = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-        for i in neck_indices:
+        """Detection neck/head keys (model.11 through model.23) are NOT in _CLS_LAYER_MAP."""
+        for i in range(11, 24):
             key = f"model.{i}."
             assert key not in _CLS_LAYER_MAP, f"Neck key should not be in map: {key}"
 

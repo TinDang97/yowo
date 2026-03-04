@@ -209,7 +209,8 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
 # Layer 11 is the Classify head (Conv + pool + dropout + linear).
 
 _CLS_LAYER_MAP: dict[str, str] = {
-    # Backbone (layers 0-10) — identical to detection
+    # Backbone (layers 0-9) — same as detection except SPPF is omitted:
+    # ultralytics cls backbone goes C3k2_4 (layer 8) → C2PSA (layer 9) directly.
     "model.0.": "backbone.stem.",
     "model.1.": "backbone.conv1.",
     "model.2.": "backbone.c3k2_1.",
@@ -219,10 +220,10 @@ _CLS_LAYER_MAP: dict[str, str] = {
     "model.6.": "backbone.c3k2_3.",
     "model.7.": "backbone.conv4.",
     "model.8.": "backbone.c3k2_4.",
-    "model.9.": "backbone.sppf.",
-    "model.10.": "backbone.c2psa.",
-    # Classification head (layer 11) — replaces neck+detect head
-    "model.11.": "head.",
+    # No SPPF in classification models (detection layer 9 is absent)
+    "model.9.": "backbone.c2psa.",
+    # Classification head (layer 10) — replaces neck+detect head
+    "model.10.": "head.",
 }
 
 # Sorted by longest prefix first for correct matching

@@ -496,6 +496,7 @@ def count_command(
 @cli.command("classify")
 @click.argument("source")
 @click.option("--model", "-m", default="yolo11n-cls", help="Model name, e.g. yolo11n-cls")
+@click.option("--weights", "-w", default=None, type=click.Path(exists=True))
 @click.option(
     "--backend",
     default="auto",
@@ -507,6 +508,7 @@ def count_command(
 def classify_command(
     source: str,
     model: str,
+    weights: str | None,
     backend: str,
     device: str,
     top_k: int,
@@ -517,11 +519,13 @@ def classify_command(
     from yowo.io import open_source
 
     spec = _parse_cls_model_spec(model)
+    weights_path = Path(weights) if weights else spec.weights_path
 
     try:
         with ClassificationEngine(
             model_family=spec.family,
             model_size=spec.size,
+            weights_path=weights_path,
             backend=BackendType(backend) if backend != "auto" else None,
             device=device,
             batch_size=batch_size,

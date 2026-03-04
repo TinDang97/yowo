@@ -44,6 +44,7 @@ class ModelConfig:
     sppf_shortcut: bool = False
     neck_c3k: bool = False
     backbone_c3k: bool = False
+    has_sppf: bool = True
     max_det: int = 300
     input_size: tuple[int, int] = (640, 640)
 
@@ -127,6 +128,8 @@ class ClassifyConfig:
         max_channels: Hard cap on scaled channel width.
         backbone_c3k: True to use C3k in backbone C3k2 layers.
         sppf_shortcut: True to add residual in SPPF (YOLO26 only).
+        has_sppf: False for classification models — ultralytics cls backbone
+            omits SPPF entirely (C3k2_4 → C2PSA directly).
         num_classes: Number of output classes (1000 for ImageNet).
         input_size: Default input spatial size (height, width).
         dropout: Dropout probability in the classification head.
@@ -139,6 +142,7 @@ class ClassifyConfig:
     max_channels: int
     backbone_c3k: bool
     sppf_shortcut: bool
+    has_sppf: bool = False
     num_classes: int = 1000
     input_size: tuple[int, int] = (224, 224)
     dropout: float = 0.0
