@@ -28,7 +28,7 @@ def _make_noop_embedding_fn() -> Any:
     import chromadb  # already imported by caller
     from chromadb.utils.embedding_functions import register_embedding_function
 
-    @register_embedding_function
+    @register_embedding_function  # type: ignore[misc]
     class _NoOp(chromadb.EmbeddingFunction):  # type: ignore[type-arg]
         def __init__(self) -> None:
             pass  # skip base class deprecation warning
