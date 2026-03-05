@@ -102,7 +102,7 @@ class TestEventBusOverflow:
 
         # Block the worker so the queue doesn't drain
         gate = threading.Event()
-        bus.on("slow", lambda _: gate.wait())
+        bus.on("slow", lambda _: gate.wait(timeout=5.0))
 
         # First emit fills the slot; subsequent emits should be dropped.
         for i in range(5):

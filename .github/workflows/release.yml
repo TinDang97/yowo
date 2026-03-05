@@ -37,6 +37,7 @@ jobs:
 
       - name: Unit tests
         run: uv run pytest tests/unit/ -x -q --tb=short
+        timeout-minutes: 10
 
   release:
     name: Semantic Release
