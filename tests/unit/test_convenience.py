@@ -76,6 +76,7 @@ class TestDetect:
         eng_cls.assert_called_once_with(
             model_family=ModelFamily.YOLO26,
             model_size=ModelSize.NANO,
+            num_classes=None,
             confidence_threshold=0.25,
             iou_threshold=0.45,
             device="auto",
@@ -98,6 +99,7 @@ class TestDetect:
         eng_cls.assert_called_once_with(
             model_family=ModelFamily.YOLO11,
             model_size=ModelSize.XLARGE,
+            num_classes=None,
             confidence_threshold=0.5,
             iou_threshold=0.6,
             device="auto",
@@ -132,6 +134,7 @@ class TestDetect:
         eng_cls.assert_called_once_with(
             model_family=ModelFamily.YOLO26,
             model_size=ModelSize.NANO,
+            num_classes=None,
             confidence_threshold=0.25,
             iou_threshold=0.45,
             device="auto",

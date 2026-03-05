@@ -9,6 +9,7 @@ Quick start::
 """
 
 from yowo._convenience import classify, detect, parse_model_name
+from yowo.backends import ModelBuilder
 from yowo.classify_engine import ClassificationEngine
 from yowo.config import (
     ClassificationConfig,
@@ -149,6 +150,7 @@ __all__ = [
     "InferenceEngine",
     "InferenceError",
     "LineCrossEvent",
+    "ModelBuilder",
     "ModelError",
     "ModelFamily",
     "ModelLoadError",

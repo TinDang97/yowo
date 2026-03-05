@@ -175,12 +175,16 @@ class ModelSpec:
         task: Ultralytics task string; "detect" for object detection.
         weights_path: Path to a pre-downloaded .pt file, or None to use
             the registry default for this family/size combination.
+        num_classes: Override number of output classes. When ``None`` the
+            registry default is used (80 for COCO detection, 1000 for
+            ImageNet classification).
     """
 
     family: ModelFamily
     size: ModelSize
     task: str = "detect"
     weights_path: Path | None = None
+    num_classes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

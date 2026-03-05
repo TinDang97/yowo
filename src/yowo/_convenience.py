@@ -77,6 +77,7 @@ def detect(
     confidence: float = 0.25,
     iou: float = 0.45,
     device: str = "auto",
+    num_classes: int | None = None,
     **engine_kwargs: Any,
 ) -> list[Detection]:
     """Run YOLO inference and return all detections.
@@ -93,6 +94,7 @@ def detect(
         confidence: Confidence threshold (default 0.25).
         iou: IoU threshold for NMS (default 0.45).
         device: Device string (default ``"auto"``).
+        num_classes: Override output class count (default ``None`` = registry).
         **engine_kwargs: Extra kwargs forwarded to :class:`InferenceEngine`.
 
     Returns:
@@ -113,6 +115,7 @@ def detect(
     with InferenceEngine(
         model_family=spec.family,
         model_size=spec.size,
+        num_classes=num_classes,
         confidence_threshold=confidence,
         iou_threshold=iou,
         device=device,
@@ -127,6 +130,7 @@ def classify(
     model: str = "yolo11n-cls",
     top_k: int = 5,
     device: str = "auto",
+    num_classes: int | None = None,
     **engine_kwargs: Any,
 ) -> list[ClassificationResult]:
     """Run YOLO classification inference and return all results.
@@ -142,6 +146,7 @@ def classify(
         model: Short classification model name (default ``"yolo11n-cls"``).
         top_k: Number of top predictions to return per frame (default 5).
         device: Device string (default ``"auto"``).
+        num_classes: Override output class count (default ``None`` = registry).
         **engine_kwargs: Extra kwargs forwarded to
             :class:`~yowo.classify_engine.ClassificationEngine`.
 
@@ -163,6 +168,7 @@ def classify(
         model_family=spec.family,
         model_size=spec.size,
         weights_path=spec.weights_path,
+        num_classes=num_classes,
         top_k=top_k,
         device=device,
         **engine_kwargs,

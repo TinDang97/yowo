@@ -62,6 +62,7 @@
     - [Traffic Counting with ByteTrack](#168-traffic-counting-with-bytetrack)
     - [Cross-Camera Vehicle ReID](#169-cross-camera-vehicle-reid)
     - [Image Classification](#1610-image-classification)
+    - [Custom Architecture with ModelBuilder](#1611-custom-architecture-with-modelbuilder)
 17. [Performance Reference](#17-performance-reference)
 
 ---
@@ -456,10 +457,12 @@ InferenceEngine(
     model_family: ModelFamily = ModelFamily.YOLO26,
     model_size: ModelSize = ModelSize.NANO,
     weights_path: Path | None = None,
+    num_classes: int | None = None,  # override registry default (80 COCO)
 
     # Backend
     backend: BackendType | None = None,   # None = auto-select
     backend_instance: InferenceBackend | None = None,  # bypass auto-select entirely
+    model_builder: ModelBuilder | None = None,  # custom architecture protocol
     device: str = "auto",                 # "auto", "cpu", "cuda", "cuda:0"
     precision: Precision | None = None,   # None = auto (fp16 on CUDA, fp32 on CPU)
 
@@ -569,8 +572,10 @@ ClassificationEngine(
     model_family: ModelFamily = ModelFamily.YOLO11,
     model_size: ModelSize = ModelSize.NANO,
     weights_path: Path | None = None,
+    num_classes: int | None = None,  # override registry default (1000 ImageNet)
     backend: BackendType | None = None,
     backend_instance: InferenceBackend | None = None,
+    model_builder: ModelBuilder | None = None,  # custom architecture protocol
     device: str = "auto",           # "auto", "cpu", "mps", "cuda"
     precision: Precision | None = None,
     batch_size: int = 1,
@@ -771,6 +776,7 @@ config = InferenceConfig(
     model_family=ModelFamily.YOLO26,
     model_size=ModelSize.NANO,
     weights_path=None,           # None → auto-resolve from registry
+    num_classes=None,            # None → registry default (80 COCO / 1000 ImageNet)
     backend=None,                # None → auto-select
     device="auto",
     precision=None,              # None → fp16 on CUDA, fp32 on CPU
@@ -794,6 +800,7 @@ config = InferenceConfig(
 - `batch_size >= 1`
 - `max_queue_size >= 1`
 - `pipeline_workers >= 0`
+- `num_classes >= 1` (when not `None`)
 
 #### `load_config`
 
@@ -1820,6 +1827,7 @@ All `InferenceConfig` fields can be set via `YOWO_*` environment variables. Env 
 | `YOWO_MAX_QUEUE_SIZE` | `max_queue_size` (int) |
 | `YOWO_PREFETCH` | `prefetch` (`true`/`false`) |
 | `YOWO_PIPELINE_WORKERS` | `pipeline_workers` (int, `0` = auto) |
+| `YOWO_NUM_CLASSES` | `num_classes` (int, override registry default) |
 
 **Example:**
 
@@ -1993,6 +2001,8 @@ with InferenceEngine(config) as eng:
 
 **Scenario:** Run a YOLO11s model fine-tuned on 7 vehicle classes (car, motorcycle, bus, truck, transporter, container, big_transporter).
 
+Use `num_classes=7` to override the registry default (80 COCO classes). Without this, the detection head would have a shape mismatch on the fine-tuned weights.
+
 ```python
 from pathlib import Path
 from yowo.config import InferenceConfig
@@ -2004,6 +2014,7 @@ config = InferenceConfig(
     model_family=ModelFamily.YOLO11,
     model_size=ModelSize.SMALL,
     weights_path=Path("./best.pt"),
+    num_classes=7,                   # 7 vehicle classes, not 80 COCO
     backend=BackendType.PYTORCH,
     confidence_threshold=0.25,
 )
@@ -2021,6 +2032,12 @@ from collections import Counter
 class_counts = Counter(box.class_name for box in all_boxes)
 for name, count in class_counts.most_common():
     print(f"  {name}: {count}")
+```
+
+**CLI equivalent:**
+
+```bash
+yowo detect ./surveillance_footage/ --model yolo11s --weights best.pt --num-classes 7
 ```
 
 **Tip:** For production throughput on Apple Silicon, export the fine-tuned weights to ONNX FP16 first:
@@ -2569,6 +2586,49 @@ with ClassificationEngine(
 ```bash
 yowo classify /images/products/ --model yolo11s-cls --top-k 5
 ```
+
+---
+
+### 16.11 Custom Architecture with ModelBuilder
+
+**Scenario:** Use a non-YOLO detection model (e.g. a custom ResNet-FPN detector) with yowo's inference pipeline — streaming, batching, metrics, event bus, and backend fallback.
+
+The `ModelBuilder` protocol lets you plug any `torch.nn.Module` into `PyTorchBackend`. The builder is responsible for architecture construction, weight loading, and device placement. yowo handles everything else.
+
+```python
+import torch
+from yowo import InferenceEngine, open_source
+from yowo.backends import ModelBuilder
+
+class MyResNetFPN:
+    """Implements the ModelBuilder protocol."""
+
+    def build(self, num_classes: int, device: str) -> torch.nn.Module:
+        from my_models import ResNetFPNDetector
+        model = ResNetFPNDetector(num_classes=num_classes)
+        model.load_state_dict(torch.load("resnet_fpn.pt", map_location=device))
+        model.to(device).eval()
+        return model
+
+    @property
+    def input_shape(self) -> tuple[int, int]:
+        return (640, 640)
+
+with InferenceEngine(
+    model_builder=MyResNetFPN(),
+    num_classes=15,
+    device="cpu",
+    confidence_threshold=0.3,
+) as engine:
+    for detection in engine.stream(open_source("video.mp4")):
+        for box in detection.boxes:
+            print(f"{box.class_name}: {box.confidence:.2f}")
+```
+
+**Notes:**
+- `model_builder` only works with `PyTorchBackend`. ONNX/TensorRT/OpenVINO backends load serialized models and ignore the builder.
+- When the model family/size combination isn't in the registry, yowo synthesizes a `ModelMeta` from the builder's `input_shape`.
+- The builder owns all optimization (fuse, compile, quantize). yowo does not apply its standard optimization pipeline to builder-provided models.
 
 ---
 

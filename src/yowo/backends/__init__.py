@@ -19,6 +19,7 @@ from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
+    "ModelBuilder",
     "create_backend",
     "get_fallback_backends",
     "select_backend",
@@ -102,11 +103,43 @@ class InferenceBackend(Protocol):
         ...
 
 
+@runtime_checkable
+class ModelBuilder(Protocol):
+    """Protocol for custom model architectures.
+
+    Implement this to use custom (non-YOLO) architectures with
+    ``PyTorchBackend``'s device management and inference pipeline.
+
+    The ``build()`` method is fully responsible for architecture
+    construction, weight loading, ``fuse()``/``eval()``/device placement.
+    The returned module must be ready for ``forward(x)`` inference.
+    """
+
+    def build(self, num_classes: int, device: str) -> Any:
+        """Build and return a ``torch.nn.Module`` ready for inference.
+
+        Args:
+            num_classes: Number of output classes.
+            device: Target device string (``"cpu"``, ``"cuda:0"``, etc.).
+
+        Returns:
+            A ``torch.nn.Module`` on *device*, in eval mode, with weights
+            loaded.
+        """
+        ...
+
+    @property
+    def input_shape(self) -> tuple[int, int]:
+        """Expected ``(H, W)`` input spatial dimensions."""
+        ...
+
+
 def create_backend(
     backend_type: BackendType,
     hw_profile: HardwareProfile,
     *,
     model_spec: ModelSpec | None = None,
+    model_builder: ModelBuilder | None = None,
     feature_cache: Any | None = None,
     kv_cache: bool = False,
 ) -> InferenceBackend:
@@ -140,6 +173,7 @@ def create_backend(
             return PyTorchBackend(
                 hw_profile,
                 model_spec=model_spec,
+                model_builder=model_builder,
                 feature_cache=feature_cache,
                 kv_cache=kv_cache,
             )

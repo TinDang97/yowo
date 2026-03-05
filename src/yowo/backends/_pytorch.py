@@ -37,6 +37,7 @@ class PyTorchBackend:
         hw_profile: HardwareProfile,
         *,
         model_spec: ModelSpec | None = None,
+        model_builder: Any | None = None,
         compile: bool = False,
         compile_mode: str = "reduce-overhead",
         fp16: bool = False,
@@ -50,6 +51,7 @@ class PyTorchBackend:
             )
         self._hw = hw_profile
         self._spec = model_spec
+        self._model_builder = model_builder
         self._model: Any = None  # YOLOModel at runtime
         self._torch: Any = None  # cached torch module from load()
         self._device_str: str = "cpu"
@@ -97,20 +99,35 @@ class PyTorchBackend:
             BackendLoadError: Model file could not be loaded.
             DeviceError: Requested device is unavailable or out of memory.
         """
-        if self._spec is None:
-            raise BackendLoadError(
-                "PyTorchBackend: model_spec is required to build the native model. "
-                "Pass model_spec when creating the backend."
-            )
-
         try:
             import torch  # type: ignore[import-untyped]
         except ImportError as exc:
             raise DependencyError("torch", "uv add yowo[pytorch]") from exc
 
         self._torch = torch  # cache for hot path
-
         resolved = self._resolve_device(device)
+
+        # --- Custom model builder: delegate entirely to caller ---
+        if self._model_builder is not None:
+            try:
+                nc = self._spec.num_classes if self._spec and self._spec.num_classes else 80
+                self._model = self._model_builder.build(num_classes=nc, device=resolved)
+                self._input_shape = self._model_builder.input_shape
+                self._device_str = resolved
+                if resolved.startswith("cuda"):
+                    torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
+                return
+            except Exception as exc:
+                self._model = None
+                raise BackendLoadError(
+                    f"PyTorchBackend: model_builder.build() failed: {exc}"
+                ) from exc
+
+        if self._spec is None:
+            raise BackendLoadError(
+                "PyTorchBackend: model_spec is required to build the native model. "
+                "Pass model_spec when creating the backend."
+            )
 
         # Cap CPU thread pool to avoid memory-bandwidth saturation on
         # machines with many cores (e.g. Apple Silicon M-series).
@@ -136,9 +153,9 @@ class PyTorchBackend:
                 from yowo.models._registry import get_cls
 
                 meta = get_cls(self._spec.family, self._spec.size)
-                cls_model = build_classify_model(
-                    self._spec.family, self._spec.size, num_classes=meta.num_classes
-                )
+                spec_nc = self._spec.num_classes
+                nc = spec_nc if spec_nc is not None else meta.num_classes
+                cls_model = build_classify_model(self._spec.family, self._spec.size, num_classes=nc)
                 load_classify_weights(cls_model, model_path)
                 cls_model = cls_model.fuse()
                 cls_model.eval()
@@ -152,7 +169,8 @@ class PyTorchBackend:
                 from yowo.arch import build_model
                 from yowo.arch._weights import load_weights
 
-                det_model = build_model(self._spec.family, self._spec.size)
+                nc = self._spec.num_classes if self._spec.num_classes is not None else 80
+                det_model = build_model(self._spec.family, self._spec.size, num_classes=nc)
                 load_weights(det_model, model_path)
                 det_model = det_model.fuse()
                 det_model.eval()

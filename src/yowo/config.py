@@ -70,6 +70,8 @@ class InferenceConfig:
         model_size: Size variant of the model.
         weights_path: Optional path to a local .pt weights file. When
             ``None`` the registry resolves the path automatically.
+        num_classes: Override number of output classes. When ``None`` the
+            registry default is used (80 for COCO detection).
         backend: Inference backend. ``None`` triggers automatic selection
             based on available hardware and installed packages.
         device: Device string (``"auto"``, ``"cuda"``, ``"cpu"``,
@@ -102,6 +104,7 @@ class InferenceConfig:
     model_family: ModelFamily = ModelFamily.YOLO26
     model_size: ModelSize = ModelSize.NANO
     weights_path: Path | None = None
+    num_classes: int | None = None
     backend: BackendType | None = None
     device: str = "auto"
     precision: Precision | None = None
@@ -119,6 +122,8 @@ class InferenceConfig:
     error_threshold: int = 10
 
     def __post_init__(self) -> None:
+        if self.num_classes is not None and self.num_classes < 1:
+            raise ConfigError(f"num_classes must be >= 1, got {self.num_classes}")
         if not (0.0 <= self.confidence_threshold <= 1.0):
             raise ConfigError(
                 f"confidence_threshold must be in [0.0, 1.0], got {self.confidence_threshold}"
@@ -152,6 +157,8 @@ class ClassificationConfig:
         model_size: Size variant of the model.
         weights_path: Optional path to a local ``-cls.pt`` weights file. When
             ``None`` the registry resolves the path automatically.
+        num_classes: Override number of output classes. When ``None`` the
+            registry default is used (1000 for ImageNet classification).
         backend: Inference backend. ``None`` triggers automatic selection
             based on available hardware and installed packages.
         device: Device string (``"auto"``, ``"cuda"``, ``"cpu"``, …).
@@ -176,6 +183,7 @@ class ClassificationConfig:
     model_family: ModelFamily = ModelFamily.YOLO11
     model_size: ModelSize = ModelSize.NANO
     weights_path: Path | None = None
+    num_classes: int | None = None
     backend: BackendType | None = None
     device: str = "auto"
     precision: Precision | None = None
@@ -189,6 +197,8 @@ class ClassificationConfig:
     error_threshold: int = 10
 
     def __post_init__(self) -> None:
+        if self.num_classes is not None and self.num_classes < 1:
+            raise ConfigError(f"num_classes must be >= 1, got {self.num_classes}")
         if self.top_k < 1:
             raise ConfigError(f"top_k must be >= 1, got {self.top_k}")
         if self.batch_size < 1:
@@ -273,6 +283,8 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.model_size = ModelSize(v)
     if (v := env.get("YOWO_WEIGHTS_PATH")) is not None:
         cfg.weights_path = Path(v)
+    if (v := env.get("YOWO_NUM_CLASSES")) is not None:
+        cfg.num_classes = int(v)
     if (v := env.get("YOWO_BACKEND")) is not None:
         cfg.backend = BackendType(v)
     if (v := env.get("YOWO_DEVICE")) is not None:
