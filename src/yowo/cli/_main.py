@@ -27,6 +27,13 @@ def cli() -> None:
     help="Path to local model file (.pt for PyTorch, .onnx for ONNX backend)",
 )
 @click.option(
+    "--num-classes",
+    "num_classes",
+    default=None,
+    type=int,
+    help="Override output class count.",
+)
+@click.option(
     "--backend",
     default="auto",
     type=click.Choice(["auto", "pytorch", "onnx", "tensorrt", "openvino"]),
@@ -73,6 +80,7 @@ def detect_command(
     source: str,
     model: str,
     weights: str | None,
+    num_classes: int | None,
     backend: str,
     device: str,
     precision: str,
@@ -111,6 +119,7 @@ def detect_command(
             "model_family": spec.family,
             "model_size": spec.size,
             "weights_path": weights_path,
+            "num_classes": num_classes,
         }
         if _is_explicit("backend"):
             cli_overrides["backend"] = BackendType(backend) if backend != "auto" else None
@@ -136,6 +145,7 @@ def detect_command(
             model_family=spec.family,
             model_size=spec.size,
             weights_path=weights_path,
+            num_classes=num_classes,
             batch_size=batch,
             confidence_threshold=confidence,
             iou_threshold=iou,
@@ -498,6 +508,13 @@ def count_command(
 @click.option("--model", "-m", default="yolo11n-cls", help="Model name, e.g. yolo11n-cls")
 @click.option("--weights", "-w", default=None, type=click.Path(exists=True))
 @click.option(
+    "--num-classes",
+    "num_classes",
+    default=None,
+    type=int,
+    help="Override output class count.",
+)
+@click.option(
     "--backend",
     default="auto",
     type=click.Choice(["auto", "pytorch", "onnx", "tensorrt", "openvino"]),
@@ -509,6 +526,7 @@ def classify_command(
     source: str,
     model: str,
     weights: str | None,
+    num_classes: int | None,
     backend: str,
     device: str,
     top_k: int,
@@ -526,6 +544,7 @@ def classify_command(
             model_family=spec.family,
             model_size=spec.size,
             weights_path=weights_path,
+            num_classes=num_classes,
             backend=BackendType(backend) if backend != "auto" else None,
             device=device,
             batch_size=batch_size,

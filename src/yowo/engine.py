@@ -31,6 +31,7 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import NDArray
 
+from yowo._streaming import StreamingMixin
 from yowo.backends import (
     InferenceBackend,
     create_backend,
@@ -38,20 +39,25 @@ from yowo.backends import (
     select_backend,
 )
 from yowo.config import InferenceConfig
-from yowo.errors import BackendError, BackendLoadError, InferenceError, ShutdownError
+from yowo.errors import (
+    BackendError,
+    BackendLoadError,
+    InferenceError,
+    ModelNotFoundError,
+    ShutdownError,
+)
 from yowo.events import EventBus
 from yowo.hardware import get_hardware_profile
 from yowo.io import (
     FrameSource,
-    PreparedItem,
     PreprocessBuffer,
-    ThreadedFrameReader,
     preprocess,
     preprocess_into,
 )
 from yowo.metrics import EngineMetrics, MetricsCollector
 from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
+from yowo.models._registry import ModelMeta
 from yowo.models._registry import get_cls as _registry_get_cls
 from yowo.postprocess import PostprocessBuffer, postprocess
 from yowo.types import (
@@ -73,12 +79,40 @@ from yowo.types import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_model_meta(spec: ModelSpec, model_builder: Any | None) -> ModelMeta:
+    """Resolve model metadata from registry, with custom builder fallback."""
+    try:
+        meta = (
+            _registry_get_cls(spec.family, spec.size)
+            if spec.task == "classify"
+            else _registry_get(spec.family, spec.size)
+        )
+    except ModelNotFoundError:
+        if model_builder is None:
+            raise
+        h, w = model_builder.input_shape
+        return ModelMeta(
+            family=spec.family,
+            size=spec.size,
+            input_height=h,
+            input_width=w,
+            num_classes=spec.num_classes or 0,
+            weight_stem="custom",
+            default_weights_url="",
+        )
+    if spec.num_classes is not None:
+        from dataclasses import replace as _dc_replace
+
+        meta = _dc_replace(meta, num_classes=spec.num_classes)
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # BaseEngine — shared lifecycle, streaming, metrics
 # ---------------------------------------------------------------------------
 
 
-class BaseEngine:
+class BaseEngine(StreamingMixin):
     """Shared lifecycle base for all YOWO inference engines.
 
     Subclasses implement :meth:`_process_batch` for task-specific output
@@ -92,6 +126,7 @@ class BaseEngine:
         self,
         spec: ModelSpec,
         *,
+        model_builder: Any | None = None,
         backend_instance: InferenceBackend | None = None,
         backend_override: str | None = None,
         device: str = "auto",
@@ -108,6 +143,7 @@ class BaseEngine:
         error_threshold: int = 10,
     ) -> None:
         self._spec = spec
+        self._model_builder = model_builder
         self._batch_size = batch_size
         self._device = device
         self._feature_cache = None
@@ -141,14 +177,11 @@ class BaseEngine:
                 self._selection.backend,
                 self._hw,
                 model_spec=self._spec,
+                model_builder=self._model_builder,
                 feature_cache=self._feature_cache,
                 kv_cache=kv_cache,
             )
-        self._model_meta = (
-            _registry_get_cls(spec.family, spec.size)
-            if spec.task == "classify"
-            else _registry_get(spec.family, spec.size)
-        )
+        self._model_meta = _resolve_model_meta(spec, model_builder)
         self._loaded = False
         self._frame_drop_policy = frame_drop_policy
         self._max_queue_size = max_queue_size
@@ -243,7 +276,10 @@ class BaseEngine:
 
     def load(self) -> None:
         """Resolve weights, load into backend, warmup. Falls back on failure."""
-        weights_path = resolve_weights(self._spec)
+        if self._model_builder is not None and self._spec.weights_path is None:
+            weights_path = Path("")  # builder handles weights internally
+        else:
+            weights_path = resolve_weights(self._spec)
         if self._user_provided_backend:
             self._backend.load(weights_path, device=self._device)
             self._backend.warmup(batch_size=self._batch_size)
@@ -264,6 +300,7 @@ class BaseEngine:
                         bt,
                         self._hw,
                         model_spec=self._spec,
+                        model_builder=self._model_builder,
                         feature_cache=self._feature_cache,
                         kv_cache=self._kv_cache,
                     )
@@ -424,178 +461,8 @@ class BaseEngine:
         """
         return self._run_batch(frames)
 
-    def _stream_dispatch(self, source: FrameSource) -> Iterator[Any]:
-        self._backend.clear_kv_cache()
-        if not self._prefetch:
-            yield from self._stream_sync(source)
-        elif source.total_frames == 1:
-            yield from self._stream_single(source)
-        elif source.is_live:
-            yield from self._stream_live(source)
-        else:
-            yield from self._stream_pipeline(source)
-
-    def _stream_single(self, source: FrameSource) -> Iterator[Any]:
-        """Fast path for single-image sources — no threading overhead."""
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        try:
-            for frame in source:
-                if _stop.is_set():
-                    break
-                yield from self._dispatch_frames([frame])
-        finally:
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-            source.close()
-
-    def _stream_live(self, source: FrameSource) -> Iterator[Any]:
-        """Live source path: threaded reader, batch=1, 30 s idle timeout."""
-        _MAX_IDLE_S = 30.0
-        _POLL_TIMEOUT = 1.0
-        if self._batch_size > 1:
-            logger.debug(
-                "Live source: using batch=1 (configured batch_size=%d ignored)", self._batch_size
-            )
-        target_size = (self._model_meta.input_height, self._model_meta.input_width)
-        reader = ThreadedFrameReader(
-            source,
-            max_queue_size=self._max_queue_size,
-            policy=self._frame_drop_policy,
-            preprocess_fn=preprocess,
-            target_size=target_size,
-        )
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        reader.start()
-        try:
-            idle_since: float | None = None
-            while not _stop.is_set():
-                item = reader.get(timeout=_POLL_TIMEOUT)
-                if item is not None:
-                    idle_since = None
-                    assert isinstance(item, PreparedItem)
-                    yield from self._infer_from_tensor(
-                        item.tensor, [item.frame], scratch=self._postprocess_buf
-                    )
-                elif reader.is_exhausted:
-                    break
-                else:
-                    now = time.monotonic()
-                    if idle_since is None:
-                        idle_since = now
-                    elif now - idle_since >= _MAX_IDLE_S:
-                        logger.warning(
-                            "Live source idle for %.0fs, terminating stream", now - idle_since
-                        )
-                        break
-        finally:
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-            reader.stop()
-            source.close()
-
-    def _stream_pipeline(self, source: FrameSource) -> Iterator[Any]:
-        """Offline source: threaded prefetch + pipeline overlap."""
-        from collections import deque as Deque
-        from concurrent.futures import Future, ThreadPoolExecutor
-
-        from yowo.io._decode import PreprocessBufferPool
-
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        reader = ThreadedFrameReader(
-            source, max_queue_size=self._batch_size * 2, policy=FrameDropPolicy.NONE
-        )
-        reader.start()
-        concurrent = self._pipeline_workers > 1
-        infer_lock = threading.Lock() if concurrent else None
-        target = (self._model_meta.input_height, self._model_meta.input_width)
-        buffer_pool: PreprocessBufferPool | None = None
-        if concurrent:
-            buffer_pool = PreprocessBufferPool(self._pipeline_workers, self._batch_size, target)
-
-        def _infer_batch(frames: list[Frame]) -> list[Any]:
-            if concurrent:
-                assert buffer_pool is not None
-                buf = buffer_pool.acquire()
-                try:
-                    tensor = preprocess_into(frames, target, buf)
-                    with infer_lock:  # type: ignore[union-attr]
-                        return self._infer_from_tensor(tensor, frames, scratch=None)
-                except Exception:
-                    self._metrics.record_error()
-                    raise
-                finally:
-                    buffer_pool.release(buf)
-            return self._run_batch(frames)
-
-        pending: Deque[Future[list[Any]]] = Deque()
-        try:
-            batch: list[Frame] = []
-            max_pending = self._pipeline_workers
-            with ThreadPoolExecutor(max_workers=self._pipeline_workers) as pool:
-                while not _stop.is_set():
-                    raw = reader.get(timeout=5.0)
-                    frame: Frame | None = raw  # type: ignore[assignment]
-                    if frame is not None:
-                        batch.append(frame)
-                    if len(batch) >= self._batch_size or (frame is None and batch):
-                        if len(pending) >= max_pending:
-                            yield from pending.popleft().result()
-                        pending.append(pool.submit(_infer_batch, batch))
-                        batch = []
-                    if frame is None and reader.is_exhausted:
-                        break
-                while pending:
-                    yield from pending.popleft().result()
-        finally:
-            for fut in pending:
-                fut.cancel()
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-            reader.stop()
-            source.close()
-
-    def _stream_sync(self, source: FrameSource) -> Iterator[Any]:
-        """Legacy sequential streaming path (prefetch=False)."""
-        _stop = threading.Event()
-        with self._shutdown_lock:
-            if self._shutting_down.is_set():
-                raise ShutdownError("Engine is shutting down")
-            self._active_streams.add(_stop)
-            self._streams_drained.clear()
-        batch: list[Frame] = []
-        try:
-            for frame in source:
-                if _stop.is_set():
-                    break
-                batch.append(frame)
-                if len(batch) >= self._batch_size:
-                    yield from self._dispatch_frames(batch)
-                    batch.clear()
-            if batch and not _stop.is_set():
-                yield from self._dispatch_frames(batch)
-        finally:
-            self._active_streams.discard(_stop)
-            if not self._active_streams:
-                self._streams_drained.set()
-            source.close()
+    # Streaming strategies (_stream_dispatch, _stream_single, _stream_live,
+    # _stream_pipeline, _stream_sync) are inherited from StreamingMixin.
 
 
 # ---------------------------------------------------------------------------
@@ -624,10 +491,12 @@ class DetectionEngine(BaseEngine):
         self,
         config: InferenceConfig | None = None,
         *,
+        model_builder: Any | None = None,
         backend_instance: InferenceBackend | None = None,
         model_family: ModelFamily = ModelFamily.YOLO26,
         model_size: ModelSize = ModelSize.NANO,
         weights_path: Path | None = None,
+        num_classes: int | None = None,
         backend: BackendType | None = None,
         device: str = "auto",
         precision: Precision | None = None,
@@ -651,6 +520,7 @@ class DetectionEngine(BaseEngine):
                 model_family=model_family,
                 model_size=model_size,
                 weights_path=weights_path,
+                num_classes=num_classes,
                 backend=backend,
                 device=device,
                 precision=precision,
@@ -669,9 +539,15 @@ class DetectionEngine(BaseEngine):
             )
         self._confidence = cfg.confidence_threshold
         self._iou_threshold = cfg.iou_threshold
-        spec = ModelSpec(cfg.model_family, cfg.model_size, weights_path=cfg.weights_path)
+        spec = ModelSpec(
+            cfg.model_family,
+            cfg.model_size,
+            weights_path=cfg.weights_path,
+            num_classes=cfg.num_classes,
+        )
         super().__init__(
             spec=spec,
+            model_builder=model_builder,
             backend_instance=backend_instance,
             backend_override=cfg.backend.value if cfg.backend else None,
             device=cfg.device,

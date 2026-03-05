@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -88,10 +89,12 @@ class ClassificationEngine(BaseEngine):
         self,
         config: ClassificationConfig | None = None,
         *,
+        model_builder: Any | None = None,
         backend_instance: InferenceBackend | None = None,
         model_family: ModelFamily = ModelFamily.YOLO11,
         model_size: ModelSize = ModelSize.NANO,
         weights_path: Path | None = None,
+        num_classes: int | None = None,
         backend: BackendType | None = None,
         device: str = "auto",
         precision: Precision | None = None,
@@ -108,6 +111,7 @@ class ClassificationEngine(BaseEngine):
             model_family=model_family,
             model_size=model_size,
             weights_path=weights_path,
+            num_classes=num_classes,
             backend=backend,
             device=device,
             precision=precision,
@@ -127,10 +131,12 @@ class ClassificationEngine(BaseEngine):
             size=cfg.model_size,
             task="classify",
             weights_path=cfg.weights_path,
+            num_classes=cfg.num_classes,
         )
 
         super().__init__(
             spec=spec,
+            model_builder=model_builder,
             backend_instance=backend_instance,
             backend_override=cfg.backend.value if cfg.backend else None,
             device=cfg.device,

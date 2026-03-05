@@ -1185,8 +1185,8 @@ class TestStreamLiveIdleTimeout:
         mono_times = iter([0.0, 0.0, 31.0])  # first call sets idle_since=0, third triggers break
 
         with (
-            patch("yowo.engine.ThreadedFrameReader") as mock_reader_cls,
-            patch("yowo.engine.time") as mock_time,
+            patch("yowo._streaming.ThreadedFrameReader") as mock_reader_cls,
+            patch("yowo._streaming.time") as mock_time,
         ):
             mock_reader = MagicMock()
             mock_reader.get.return_value = None
