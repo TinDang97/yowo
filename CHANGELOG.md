@@ -13,6 +13,42 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **engine**: Custom `num_classes` support — override the registry default (80
+  COCO / 1000 ImageNet) for fine-tuned models. Thread from user API
+  (`InferenceEngine(num_classes=10)`, `ClassificationEngine(num_classes=10)`,
+  `detect(..., num_classes=10)`, `classify(..., num_classes=10)`) down through
+  `InferenceConfig` / `ClassificationConfig` → `ModelSpec` → `PyTorchBackend` →
+  `build_model()` / `build_classify_model()`. Validation: `num_classes < 1`
+  raises `ConfigError`. Env var: `YOWO_NUM_CLASSES`.
+
+- **engine**: `ModelBuilder` protocol — plug custom (non-YOLO) architectures
+  into `PyTorchBackend`'s optimization pipeline (fuse, eval, channels_last, KV
+  cache, feature cache hooks). Runtime-checkable structural protocol with
+  `build(num_classes, device) -> Module` and `input_shape -> (H, W)`. Builder
+  owns architecture construction, weight loading, and device placement. When no
+  matching registry entry exists, `_resolve_model_meta()` synthesizes a
+  `ModelMeta` from the builder's `input_shape`. Non-PyTorch backends ignore the
+  builder (they load serialized models).
+
+- **cli**: `--num-classes` option on `yowo detect` and `yowo classify` commands.
+
+### Refactored
+
+- **engine**: Streaming strategy methods (`_stream_dispatch`, `_stream_single`,
+  `_stream_live`, `_stream_pipeline`, `_stream_sync`) extracted from `engine.py`
+  into `_streaming.py` as `StreamingMixin`. `BaseEngine` inherits from the mixin.
+  Reduces `engine.py` from 790 to 620 lines (under the 700-line limit).
+
+### Tests
+
+- 1583 unit tests (up from 1543 in v2.2.2). 40 new tests covering
+  `num_classes` threading (ModelSpec, InferenceConfig, ClassificationConfig,
+  DetectionEngine, ClassificationEngine, PyTorchBackend, convenience API) and
+  `ModelBuilder` protocol (structural check, create_backend, PyTorchBackend
+  delegation, engine threading, `_resolve_model_meta` fallback).
+
 ---
 
 ## [2.2.2] — 2026-03-04

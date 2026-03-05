@@ -246,6 +246,49 @@ with InferenceEngine(prefetch=True) as engine:
 # ~1.5x throughput vs GIL Python on CPU inference (YOLO26n: 39 → 58 FPS)
 ```
 
+### Custom fine-tuned model (num_classes override)
+
+```python
+# Model trained on 7 vehicle classes instead of 80 COCO classes
+with InferenceEngine(
+    model_family=ModelFamily.YOLO11,
+    model_size=ModelSize.SMALL,
+    weights_path=Path("./best.pt"),
+    num_classes=7,  # override default 80
+) as engine:
+    for detection in engine.stream(open_source("traffic.mp4")):
+        ...
+```
+
+```bash
+# CLI equivalent
+yowo detect traffic.mp4 --model yolo11s --weights best.pt --num-classes 7
+```
+
+### Custom architecture (ModelBuilder)
+
+Plug a non-YOLO model into yowo's inference pipeline:
+
+```python
+from yowo import InferenceEngine, ModelBuilder
+
+class MyDetector:
+    """Implements ModelBuilder protocol."""
+    def build(self, num_classes: int, device: str):
+        model = MyCustomArch(num_classes=num_classes).to(device)
+        model.load_state_dict(torch.load("custom.pt"))
+        model.eval()
+        return model
+
+    @property
+    def input_shape(self) -> tuple[int, int]:
+        return (640, 640)
+
+with InferenceEngine(model_builder=MyDetector(), num_classes=10) as engine:
+    for detection in engine.stream(open_source("video.mp4")):
+        ...
+```
+
 ### Using InferenceConfig
 
 ```python
