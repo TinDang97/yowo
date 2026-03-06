@@ -363,6 +363,12 @@ def _stop_entry(entry: _StreamEntry) -> None:
         logger.exception("Error stopping reader")
     if entry.bridge is not None:
         entry.bridge.join(timeout=5.0)
+        if entry.bridge.is_alive():
+            logger.warning(
+                "Bridge thread '%s' did not exit within 5 s after stop; "
+                "it may still be running and holding a reference to the shared queue.",
+                entry.bridge.name,
+            )
     try:
         entry.source.close()
     except Exception:

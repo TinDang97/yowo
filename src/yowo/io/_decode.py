@@ -152,11 +152,21 @@ def preprocess(
     For 16:9 input this reduces pixel count by ~40%, yielding ~1.4-1.6x
     faster inference.
 
+    .. warning::
+        ``auto_letterbox=True`` produces tensors with non-square spatial
+        dimensions.  Only backends that accept **dynamic input shapes** at
+        inference time support this mode.  The PyTorch backend (default) works
+        correctly.  ONNX, CoreML, OpenVINO, and TensorRT backends are compiled
+        with a fixed input shape and will raise ``InferenceError`` at runtime
+        when fed a non-square tensor.  The engine enforces this restriction in
+        ``_finalize_load()`` and will raise ``ConfigError`` for incompatible
+        backend/auto_letterbox combinations.
+
     Args:
         frames: List of ``Frame`` objects in BGR uint8 HWC format.
         target_size: ``(height, width)`` — the model input spatial dimensions.
         auto_letterbox: Use stride-aligned non-square dimensions instead of
-            always padding to *target_size*.
+            always padding to *target_size*. Requires PyTorch backend.
 
     Returns:
         ``PreprocessedTensor`` with ``data`` of shape

@@ -423,6 +423,69 @@ def load_config(path: Path | None = None) -> InferenceConfig:
     return cfg
 
 
+def _apply_classification_env_overrides(cfg: ClassificationConfig) -> None:
+    """Mutate *cfg* in-place using YOWO_ environment variables.
+
+    Only the subset of env vars applicable to classification is handled.
+    """
+    env = os.environ
+
+    if (v := env.get("YOWO_MODEL_FAMILY")) is not None:
+        cfg.model_family = ModelFamily(v)
+    if (v := env.get("YOWO_MODEL_SIZE")) is not None:
+        cfg.model_size = ModelSize(v)
+    if (v := env.get("YOWO_WEIGHTS_PATH")) is not None:
+        cfg.weights_path = Path(v)
+    if (v := env.get("YOWO_NUM_CLASSES")) is not None:
+        cfg.num_classes = int(v)
+    if (v := env.get("YOWO_BACKEND")) is not None:
+        cfg.backend = BackendType(v)
+    if (v := env.get("YOWO_DEVICE")) is not None:
+        cfg.device = v
+    if (v := env.get("YOWO_PRECISION")) is not None:
+        cfg.precision = Precision(v)
+    if (v := env.get("YOWO_TOP_K")) is not None:
+        cfg.top_k = int(v)
+    if (v := env.get("YOWO_BATCH_SIZE")) is not None:
+        cfg.batch_size = int(v)
+    if (v := env.get("YOWO_FRAME_DROP_POLICY")) is not None:
+        cfg.frame_drop_policy = FrameDropPolicy(v)
+    if (v := env.get("YOWO_MAX_QUEUE_SIZE")) is not None:
+        cfg.max_queue_size = int(v)
+    if (v := env.get("YOWO_PREFETCH")) is not None:
+        cfg.prefetch = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_AUTO_LETTERBOX")) is not None:
+        cfg.auto_letterbox = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_PIPELINE_WORKERS")) is not None:
+        cfg.pipeline_workers = int(v)
+    if (v := env.get("YOWO_METRICS_ENABLED")) is not None:
+        cfg.metrics_enabled = v.lower() in ("true", "1", "yes")
+    if (v := env.get("YOWO_ERROR_THRESHOLD")) is not None:
+        cfg.error_threshold = int(v)
+
+
+def load_classification_config() -> ClassificationConfig:
+    """Build a ClassificationConfig from env vars.
+
+    Load order (later entries win):
+    1. Hard-coded dataclass defaults.
+    2. ``YOWO_*`` environment variables.
+
+    Returns:
+        Validated ClassificationConfig instance.
+
+    Raises:
+        ConfigError: When an env var contains an invalid value.
+    """
+    cfg = ClassificationConfig()
+    try:
+        _apply_classification_env_overrides(cfg)
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(f"Invalid YOWO_ environment variable: {exc}") from exc
+    cfg.__post_init__()
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # Preset inference: source classification
 # ---------------------------------------------------------------------------
@@ -656,6 +719,7 @@ __all__ = [
     "InferenceConfig",
     "classify_device",
     "classify_source",
+    "load_classification_config",
     "load_config",
     "preset_config",
 ]

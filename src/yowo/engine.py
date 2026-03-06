@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -42,6 +43,7 @@ from yowo.config import InferenceConfig
 from yowo.errors import (
     BackendError,
     BackendLoadError,
+    ConfigError,
     InferenceError,
     ModelNotFoundError,
     ShutdownError,
@@ -331,6 +333,15 @@ class BaseEngine(StreamingMixin):
 
     def _finalize_load(self) -> None:
         """Allocate reusable buffers and resolve pipeline workers."""
+        if self._auto_letterbox and self._backend.backend_type != BackendType.PYTORCH:
+            with contextlib.suppress(Exception):
+                self._backend.unload()
+            raise ConfigError(
+                f"auto_letterbox requires a backend with dynamic spatial input shapes. "
+                f"Backend '{self._backend.backend_type.value}' has a fixed compiled input "
+                f"shape and will reject tensors with non-square dimensions at inference time. "
+                f"Use BackendType.PYTORCH or disable auto_letterbox."
+            )
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
         if not self._auto_letterbox:
             self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)

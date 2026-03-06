@@ -71,7 +71,7 @@ class StreamingMixin:
             self._model_meta.input_width,  # type: ignore[attr-defined]
         )
         auto_lb: bool = self._auto_letterbox  # type: ignore[attr-defined]
-        pp_fn = functools.partial(preprocess, auto_letterbox=auto_lb) if auto_lb else preprocess
+        pp_fn = functools.partial(preprocess, auto_letterbox=auto_lb)
         reader = ThreadedFrameReader(
             source,
             max_queue_size=self._max_queue_size,  # type: ignore[attr-defined]

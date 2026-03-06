@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from yowo.backends import InferenceBackend
 from yowo.engine import DetectionEngine
@@ -108,3 +109,48 @@ class TestBaseEngineLifecycle:
         backend = _make_mock_backend()
         engine = DetectionEngine(backend_instance=backend)
         assert engine.events_dropped == 0
+
+
+class TestAutoLetterboxValidation:
+    def test_auto_letterbox_pytorch_backend_ok(self) -> None:
+        """auto_letterbox with PyTorch backend loads successfully."""
+        backend = _make_mock_backend()
+        backend.backend_type = BackendType.PYTORCH
+        engine = DetectionEngine(backend_instance=backend, auto_letterbox=True)
+        with patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt")):
+            engine.load()
+        assert engine.is_loaded
+
+    def test_auto_letterbox_non_pytorch_raises_config_error(self) -> None:
+        """auto_letterbox with non-PyTorch backend raises ConfigError and unloads backend."""
+        from yowo.errors import ConfigError
+
+        backend = _make_mock_backend()
+        backend.backend_type = BackendType.ONNX
+
+        engine = DetectionEngine(backend_instance=backend, auto_letterbox=True)
+        fake_weights = patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt"))
+        with fake_weights, pytest.raises(ConfigError, match="auto_letterbox"):
+            engine.load()
+
+        # Backend must be unloaded to prevent resource leak.
+        backend.unload.assert_called_once()
+        assert not engine.is_loaded
+
+    def test_auto_letterbox_non_pytorch_close_does_not_double_unload(self) -> None:
+        """close() after a ConfigError from load() skips backend.unload() (not loaded)."""
+        import contextlib
+
+        from yowo.errors import ConfigError
+
+        backend = _make_mock_backend()
+        backend.backend_type = BackendType.ONNX
+
+        engine = DetectionEngine(backend_instance=backend, auto_letterbox=True)
+        fake_weights = patch("yowo.engine.resolve_weights", return_value=Path("/fake/weights.pt"))
+        with fake_weights, contextlib.suppress(ConfigError):
+            engine.load()
+
+        engine.close()
+        # unload called once in _finalize_load cleanup, NOT again in close()
+        backend.unload.assert_called_once()

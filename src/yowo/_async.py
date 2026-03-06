@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import threading
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from yowo.io import FrameSource
@@ -30,6 +33,11 @@ def _enqueue_or_drop(
     try:
         q.put_nowait(item)
     except asyncio.QueueFull:
+        logger.debug(
+            "astream: result dropped — async queue full (maxsize=%d); "
+            "consumer is slower than the source. Consider increasing max_queue_size.",
+            q.maxsize,
+        )
         if on_drop is not None:
             on_drop()
 
