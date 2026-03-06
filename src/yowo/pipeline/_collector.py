@@ -9,6 +9,7 @@ is protected by an explicit threading.Lock.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -25,14 +26,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FrameCollector"]
 
-# Sentinel posted to the shared queue when the collector is closed.
-_CLOSED: None = None
-
 
 class _StreamEntry:
     """Internal bookkeeping for a single managed stream."""
 
-    __slots__ = ("bridge", "error", "reader", "source", "state", "stop_flag")
+    __slots__ = ("bridge", "error", "reader", "source", "state", "stop_event")
 
     def __init__(self, reader: ThreadedFrameReader, source: FrameSource) -> None:
         self.reader: ThreadedFrameReader = reader
@@ -40,7 +38,25 @@ class _StreamEntry:
         self.state: StreamState = StreamState.RUNNING
         self.error: BaseException | None = None
         self.bridge: threading.Thread | None = None
-        self.stop_flag: bool = False
+        self.stop_event: threading.Event = threading.Event()
+
+
+def _put_or_stop(
+    shared_q: queue.Queue[tuple[str, Frame | None] | None],
+    item: tuple[str, Frame | None],
+    stop: threading.Event,
+) -> bool:
+    """Put *item* on the bounded queue, retrying until success or *stop* is set.
+
+    Returns ``True`` if the item was enqueued, ``False`` if *stop* fired first.
+    """
+    while not stop.is_set():
+        try:
+            shared_q.put(item, timeout=0.5)
+            return True
+        except queue.Full:
+            continue
+    return False
 
 
 def _run_bridge(
@@ -53,7 +69,7 @@ def _run_bridge(
     Posts ``(stream_id, None)`` as exhaustion sentinel before exiting.
     """
     try:
-        while not entry.stop_flag:
+        while not entry.stop_event.is_set():
             try:
                 item = entry.reader.get(timeout=0.1)
             except Exception as exc:
@@ -63,7 +79,8 @@ def _run_bridge(
                 break
 
             if isinstance(item, Frame):
-                shared_q.put((stream_id, item))
+                if not _put_or_stop(shared_q, (stream_id, item), entry.stop_event):
+                    break
             elif item is None:
                 if entry.reader.is_exhausted:
                     entry.state = StreamState.STOPPED
@@ -82,8 +99,9 @@ def _run_bridge(
                 )
                 break
     finally:
-        # Always post exhaustion sentinel so __iter__ tracks active count.
-        shared_q.put((stream_id, None))
+        # Best-effort sentinel so __iter__ tracks active count.
+        with contextlib.suppress(queue.Full):
+            shared_q.put((stream_id, None), timeout=2.0)
 
 
 class FrameCollector:
@@ -124,7 +142,9 @@ class FrameCollector:
         self._streams: dict[str, _StreamEntry] = {}
         self._lock: threading.Lock = threading.Lock()
         self._closed: bool = False
-        self._shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue()
+        self._shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue(
+            maxsize=max_queue_size * 8,
+        )
 
     # ------------------------------------------------------------------
     # Stream management
@@ -294,7 +314,8 @@ class FrameCollector:
             _stop_entry(entry)
 
         # Unblock __iter__ if it's waiting on shared_q.get()
-        self._shared_q.put(None)
+        with contextlib.suppress(queue.Full):
+            self._shared_q.put(None, timeout=2.0)
 
         logger.info("FrameCollector closed (%d streams)", len(entries))
 
@@ -316,12 +337,14 @@ class FrameCollector:
 
 
 def _stop_entry(entry: _StreamEntry) -> None:
-    """Stop a reader and close its source, suppressing cleanup errors."""
-    entry.stop_flag = True
+    """Stop a reader, join bridge thread, and close source."""
+    entry.stop_event.set()
     try:
         entry.reader.stop()
     except Exception:
         logger.exception("Error stopping reader")
+    if entry.bridge is not None:
+        entry.bridge.join(timeout=2.0)
     try:
         entry.source.close()
     except Exception:

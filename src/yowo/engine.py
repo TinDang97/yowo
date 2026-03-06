@@ -442,6 +442,19 @@ class BaseEngine(StreamingMixin):
         self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
         return raw_output, elapsed_ms
 
+    def _postprocess_and_emit(
+        self,
+        raw_output: NDArray[np.float32],
+        tensor: PreprocessedTensor,
+        frames: list[Frame],
+        elapsed_ms: float,
+        scratch: PostprocessBuffer | None,
+    ) -> list[Any]:
+        """Run task-specific postprocess and emit result event."""
+        results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
+        self._event_bus.emit(self._result_event_name, results)
+        return results
+
     def _infer_from_tensor(
         self,
         tensor: PreprocessedTensor,
@@ -451,9 +464,7 @@ class BaseEngine(StreamingMixin):
     ) -> list[Any]:
         """Run backend inference + task-specific postprocess."""
         raw_output, elapsed_ms = self._run_gpu(tensor, frames)
-        results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
-        self._event_bus.emit(self._result_event_name, results)
-        return results
+        return self._postprocess_and_emit(raw_output, tensor, frames, elapsed_ms, scratch)
 
     def _run_batch(self, frames: list[Frame]) -> list[Any]:
         """Preprocess frames and run _infer_from_tensor."""

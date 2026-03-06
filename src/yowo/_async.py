@@ -15,6 +15,17 @@ if TYPE_CHECKING:
     from yowo.io import FrameSource
 
 
+def _enqueue_or_drop(q: asyncio.Queue[Any], item: Any) -> None:
+    """Put an item on the async queue, dropping it if full.
+
+    Runs on the event loop thread (via ``call_soon_threadsafe``).
+    Explicitly handles ``QueueFull`` instead of letting it propagate
+    as an unhandled callback exception.
+    """
+    with contextlib.suppress(asyncio.QueueFull):
+        q.put_nowait(item)
+
+
 async def astream(
     stream_fn: Callable[..., Any],
     source: FrameSource,
@@ -53,7 +64,7 @@ async def astream(
                 try:
                     # Fire-and-forget: O(1) cross-thread overhead instead of
                     # one event-loop round-trip per frame.
-                    loop.call_soon_threadsafe(q.put_nowait, detection)
+                    loop.call_soon_threadsafe(_enqueue_or_drop, q, detection)
                 except RuntimeError:
                     break  # event loop is closed
         except Exception as exc:

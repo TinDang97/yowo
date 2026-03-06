@@ -1,4 +1,4 @@
-"""Tests for FrameCollector multi-stream round-robin dispatch."""
+"""Tests for FrameCollector multi-stream shared-queue dispatch."""
 
 from __future__ import annotations
 
