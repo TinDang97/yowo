@@ -98,9 +98,14 @@ def _run_bridge(
                 )
                 break
     finally:
-        # Best-effort sentinel so __iter__ tracks active count.
-        if not _put_or_stop(shared_q, (stream_id, None), entry.stop_event):
-            logger.warning("Bridge %s: sentinel dropped (queue full on shutdown)", stream_id)
+        # Always deliver the exhaustion sentinel so __iter__ can decrement
+        # active-stream count. Do NOT use _put_or_stop here — stop_event is
+        # already set on normal shutdown, which would cause an immediate
+        # False return and drop the sentinel.
+        try:
+            shared_q.put((stream_id, None), timeout=5.0)
+        except queue.Full:
+            logger.warning("Bridge %s: sentinel dropped (queue full after 5 s)", stream_id)
 
 
 class FrameCollector:
