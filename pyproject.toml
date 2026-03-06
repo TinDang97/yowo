@@ -59,6 +59,7 @@ dev = [
     "onnxruntime>=1.17",
     "setuptools>=82.0.0",
     "onnxscript>=0.6.2",
+    "ultralytics>=8.4.21",
 ]
 
 [build-system]

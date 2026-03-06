@@ -58,6 +58,8 @@ class StreamingMixin:
 
     def _stream_live(self, source: FrameSource) -> Iterator[Any]:
         """Live source path: threaded reader, batch=1, 30 s idle timeout."""
+        import functools
+
         _MAX_IDLE_S = 30.0
         _POLL_TIMEOUT = 1.0
         if self._batch_size > 1:  # type: ignore[attr-defined]
@@ -69,11 +71,13 @@ class StreamingMixin:
             self._model_meta.input_height,  # type: ignore[attr-defined]
             self._model_meta.input_width,  # type: ignore[attr-defined]
         )
+        auto_lb: bool = self._auto_letterbox  # type: ignore[attr-defined]
+        pp_fn = functools.partial(preprocess, auto_letterbox=auto_lb) if auto_lb else preprocess
         reader = ThreadedFrameReader(
             source,
             max_queue_size=self._max_queue_size,  # type: ignore[attr-defined]
             policy=self._frame_drop_policy,  # type: ignore[attr-defined]
-            preprocess_fn=preprocess,
+            preprocess_fn=pp_fn,
             target_size=target_size,
         )
         _stop = threading.Event()
@@ -138,8 +142,9 @@ class StreamingMixin:
             self._model_meta.input_height,  # type: ignore[attr-defined]
             self._model_meta.input_width,  # type: ignore[attr-defined]
         )
+        auto_lb: bool = self._auto_letterbox  # type: ignore[attr-defined]
         buffer_pool: PreprocessBufferPool | None = None
-        if concurrent:
+        if concurrent and not auto_lb:
             buffer_pool = PreprocessBufferPool(
                 self._pipeline_workers,  # type: ignore[attr-defined]
                 self._batch_size,  # type: ignore[attr-defined]
@@ -148,11 +153,28 @@ class StreamingMixin:
 
         def _infer_batch(frames: list[Frame]) -> list[Any]:
             if concurrent:
-                assert buffer_pool is not None
-                buf = buffer_pool.acquire()
+                if buffer_pool is not None:
+                    buf = buffer_pool.acquire()
+                    try:
+                        tensor = preprocess_into(frames, target, buf)
+                        # Lock covers GPU only — NMS runs outside for concurrency
+                        with infer_lock:  # type: ignore[union-attr]
+                            raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
+                        return self._postprocess_and_emit(  # type: ignore[attr-defined]
+                            raw_output,
+                            tensor,
+                            frames,
+                            elapsed_ms,
+                            scratch=None,
+                        )
+                    except Exception:
+                        self._metrics.record_error()  # type: ignore[attr-defined]
+                        raise
+                    finally:
+                        buffer_pool.release(buf)
+                # auto_letterbox: allocate per-call (dynamic dimensions)
                 try:
-                    tensor = preprocess_into(frames, target, buf)
-                    # Lock covers GPU only — NMS runs outside for concurrency
+                    tensor = preprocess(frames, target, auto_letterbox=auto_lb)
                     with infer_lock:  # type: ignore[union-attr]
                         raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
                     return self._postprocess_and_emit(  # type: ignore[attr-defined]
@@ -165,8 +187,6 @@ class StreamingMixin:
                 except Exception:
                     self._metrics.record_error()  # type: ignore[attr-defined]
                     raise
-                finally:
-                    buffer_pool.release(buf)
             return self._run_batch(frames)  # type: ignore[attr-defined]
 
         pending: Deque[Future[list[Any]]] = Deque()

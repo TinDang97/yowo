@@ -415,3 +415,122 @@ class TestPreprocessBuffer:
         assert buf.needs_reset(1, 480, 640, 80, 0) is False
         # Slot 2 never used
         assert buf.needs_reset(2, 480, 640, 80, 0) is True
+
+
+# ---------------------------------------------------------------------------
+# Auto letterbox tests
+# ---------------------------------------------------------------------------
+
+
+class TestAlignToStride:
+    """Tests for _align_to_stride helper."""
+
+    def test_exact_multiple_unchanged(self) -> None:
+        from yowo.io._decode import _align_to_stride
+
+        assert _align_to_stride(640) == 640
+        assert _align_to_stride(384) == 384
+
+    def test_rounds_up(self) -> None:
+        from yowo.io._decode import _align_to_stride
+
+        assert _align_to_stride(385) == 416
+        assert _align_to_stride(353) == 384
+        assert _align_to_stride(361) == 384
+
+    def test_custom_stride(self) -> None:
+        from yowo.io._decode import _align_to_stride
+
+        assert _align_to_stride(97, stride=16) == 112
+        assert _align_to_stride(64, stride=16) == 64
+
+
+class TestAutoLetterbox:
+    """Tests for preprocess() with auto_letterbox=True."""
+
+    def test_16_9_input_produces_non_square_tensor(self) -> None:
+        """1280x720 (16:9) should produce 384x640, not 640x640."""
+        frame = _make_frame(720, 1280)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+
+        # scale = min(640/720, 640/1280) = 0.5
+        # new_h = 360, new_w = 640
+        # aligned_h = ceil_stride(360, 32) = 384, aligned_w = 640
+        assert tensor.data.shape == (1, 3, 384, 640)
+
+    def test_4_3_input_produces_non_square_tensor(self) -> None:
+        """640x480 (4:3) should produce 480x640."""
+        frame = _make_frame(480, 640)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+
+        # scale = min(640/480, 640/640) = 1.0
+        # new_h = 480, new_w = 640
+        # aligned_h = 480, aligned_w = 640
+        assert tensor.data.shape == (1, 3, 480, 640)
+
+    def test_square_input_stays_square(self) -> None:
+        """640x640 input should remain 640x640."""
+        frame = _make_frame(640, 640)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+
+        assert tensor.data.shape == (1, 3, 640, 640)
+
+    def test_dimensions_divisible_by_32(self) -> None:
+        """All output dimensions must be divisible by 32."""
+        test_cases = [
+            (720, 1280),  # 16:9
+            (1080, 1920),  # 16:9
+            (480, 640),  # 4:3
+            (480, 854),  # 16:9 ish
+            (100, 300),  # 3:1
+            (300, 100),  # 1:3
+        ]
+        for h, w in test_cases:
+            frame = _make_frame(h, w)
+            tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+            _, _, out_h, out_w = tensor.data.shape
+            assert out_h % 32 == 0, f"Height {out_h} not divisible by 32 for input ({h}, {w})"
+            assert out_w % 32 == 0, f"Width {out_w} not divisible by 32 for input ({h}, {w})"
+
+    def test_scale_factor_uniform(self) -> None:
+        """Scale must be uniform (same for h and w)."""
+        frame = _make_frame(720, 1280)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+        scale_h, scale_w = tensor.scale_factors[0]
+        assert scale_h == scale_w
+
+    def test_input_shape_records_model_target(self) -> None:
+        """input_shape should still record the model's declared size."""
+        frame = _make_frame(720, 1280)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+        assert tensor.input_shape == (640, 640)
+
+    def test_default_false_unchanged_behavior(self) -> None:
+        """auto_letterbox=False (default) produces same output as before."""
+        frame = _make_frame(720, 1280)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=False)
+        assert tensor.data.shape == (1, 3, 640, 640)
+
+    def test_pixel_values_in_unit_range(self) -> None:
+        """Output values must be in [0, 1]."""
+        frame = _make_frame(720, 1280, fill=200)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+        assert float(tensor.data.min()) >= 0.0
+        assert float(tensor.data.max()) <= 1.0
+
+    def test_minimum_size_guard(self) -> None:
+        """Very small inputs should produce at least 32x32 output."""
+        frame = _make_frame(10, 10)
+        tensor = preprocess([frame], (640, 640), auto_letterbox=True)
+        _, _, out_h, out_w = tensor.data.shape
+        assert out_h >= 32
+        assert out_w >= 32
+
+    def test_batch_consistency(self) -> None:
+        """All frames in a batch should produce the same tensor shape."""
+        f1 = _make_frame(720, 1280)
+        f2 = _make_frame(720, 1280)
+        tensor = preprocess([f1, f2], (640, 640), auto_letterbox=True)
+        assert tensor.data.shape[0] == 2
+        assert tensor.data.shape[2] == 384
+        assert tensor.data.shape[3] == 640

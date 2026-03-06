@@ -124,9 +124,16 @@ class PreprocessBufferPool:
         self._sem.release()
 
 
+def _align_to_stride(size: int, stride: int = 32) -> int:
+    """Round *size* up to the nearest multiple of *stride*."""
+    return ((size + stride - 1) // stride) * stride
+
+
 def preprocess(
     frames: list[Frame],
     target_size: tuple[int, int],
+    *,
+    auto_letterbox: bool = False,
 ) -> PreprocessedTensor:
     """Letterbox resize + normalize frames to a batched BCHW tensor.
 
@@ -140,15 +147,20 @@ def preprocess(
        ``cv2.dnn.blobFromImages`` C++ call (replaces per-frame cvtColor +
        transpose + divide).
 
-    All frames stacked on axis 0 -> shape ``(B, 3, H_target, W_target)``.
+    When *auto_letterbox* is ``True``, target dimensions are replaced with
+    stride-aligned (divisible by 32) scaled dimensions, minimizing padding.
+    For 16:9 input this reduces pixel count by ~40%, yielding ~1.4-1.6x
+    faster inference.
 
     Args:
         frames: List of ``Frame`` objects in BGR uint8 HWC format.
         target_size: ``(height, width)`` — the model input spatial dimensions.
+        auto_letterbox: Use stride-aligned non-square dimensions instead of
+            always padding to *target_size*.
 
     Returns:
         ``PreprocessedTensor`` with ``data`` of shape
-        ``(B, 3, target_h, target_w)`` and transform metadata.
+        ``(B, 3, actual_h, actual_w)`` and transform metadata.
     """
     if not frames:
         raise ValueError("frames list must not be empty")
@@ -167,6 +179,16 @@ def preprocess(
         new_h = int(frame_h * scale)
         new_w = int(frame_w * scale)
 
+        if auto_letterbox:
+            # Stride-aligned dimensions: minimal padding, non-square tensor.
+            actual_h = _align_to_stride(new_h)
+            actual_w = _align_to_stride(new_w)
+            # Guard: at least one stride cell.
+            actual_h = max(actual_h, 32)
+            actual_w = max(actual_w, 32)
+        else:
+            actual_h, actual_w = target_h, target_w
+
         # Ensure C-contiguous input before cv2.resize. Guard the fast path:
         # cv2.VideoCapture and cv2.imdecode always return contiguous arrays, so
         # the check is a no-op overhead on the common case.
@@ -177,10 +199,10 @@ def preprocess(
         )
         resized = cv2.resize(pixels, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-        pad_y = (target_h - new_h) // 2
-        pad_x = (target_w - new_w) // 2
-        pad_bottom = target_h - new_h - pad_y
-        pad_right = target_w - new_w - pad_x
+        pad_y = (actual_h - new_h) // 2
+        pad_x = (actual_w - new_w) // 2
+        pad_bottom = actual_h - new_h - pad_y
+        pad_right = actual_w - new_w - pad_x
 
         padded = cv2.copyMakeBorder(
             resized,
@@ -311,6 +333,7 @@ __all__ = [
     "PreprocessBuffer",
     "PreprocessBufferPool",
     "TensorMeta",
+    "_align_to_stride",
     "make_tensor_meta",
     "preprocess",
     "preprocess_into",

@@ -138,6 +138,7 @@ class BaseEngine(StreamingMixin):
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
+        auto_letterbox: bool = False,
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
@@ -146,6 +147,7 @@ class BaseEngine(StreamingMixin):
         self._model_builder = model_builder
         self._batch_size = batch_size
         self._device = device
+        self._auto_letterbox = auto_letterbox
         self._feature_cache = None
         if cache or cache_dir is not None:
             from yowo.cache import FeatureCache
@@ -330,7 +332,8 @@ class BaseEngine(StreamingMixin):
     def _finalize_load(self) -> None:
         """Allocate reusable buffers and resolve pipeline workers."""
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
-        self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
+        if not self._auto_letterbox:
+            self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
         self._allocate_postprocess_buffer()
         if self._pipeline_workers == 0:
             self._pipeline_workers = 2 if is_free_threaded() else 1
@@ -470,10 +473,14 @@ class BaseEngine(StreamingMixin):
         """Preprocess frames and run _infer_from_tensor."""
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
         try:
-            if self._preprocess_buf is not None and len(frames) <= self._preprocess_buf.capacity:
+            if (
+                not self._auto_letterbox
+                and self._preprocess_buf is not None
+                and len(frames) <= self._preprocess_buf.capacity
+            ):
                 tensor = preprocess_into(frames, target_size, self._preprocess_buf)
             else:
-                tensor = preprocess(frames, target_size)
+                tensor = preprocess(frames, target_size, auto_letterbox=self._auto_letterbox)
             return self._infer_from_tensor(tensor, frames, scratch=self._postprocess_buf)
         except Exception:
             self._metrics.record_error()
@@ -535,6 +542,7 @@ class DetectionEngine(BaseEngine):
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
+        auto_letterbox: bool = False,
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
@@ -559,6 +567,7 @@ class DetectionEngine(BaseEngine):
                 frame_drop_policy=frame_drop_policy,
                 max_queue_size=max_queue_size,
                 prefetch=prefetch,
+                auto_letterbox=auto_letterbox,
                 pipeline_workers=pipeline_workers,
                 metrics_enabled=metrics_enabled,
                 error_threshold=error_threshold,
@@ -585,6 +594,7 @@ class DetectionEngine(BaseEngine):
             frame_drop_policy=cfg.frame_drop_policy,
             max_queue_size=cfg.max_queue_size,
             prefetch=cfg.prefetch,
+            auto_letterbox=cfg.auto_letterbox,
             pipeline_workers=cfg.pipeline_workers,
             metrics_enabled=cfg.metrics_enabled,
             error_threshold=cfg.error_threshold,
