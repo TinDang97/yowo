@@ -548,6 +548,12 @@ def count_command(
 @click.option("--device", default="auto")
 @click.option("--top-k", default=5, type=int, help="Number of top predictions to display.")
 @click.option("--batch-size", default=1, type=int)
+@click.option(
+    "--auto-letterbox/--no-auto-letterbox",
+    "auto_letterbox",
+    default=False,
+    help="Use stride-aligned non-square tensors (~1.4-1.6x faster on 16:9 input)",
+)
 def classify_command(
     source: str,
     model: str,
@@ -557,6 +563,7 @@ def classify_command(
     device: str,
     top_k: int,
     batch_size: int,
+    auto_letterbox: bool,
 ) -> None:
     """Run image classification on SOURCE (image/video/RTSP/directory)."""
     from yowo.classify_engine import ClassificationEngine
@@ -575,6 +582,7 @@ def classify_command(
             device=device,
             batch_size=batch_size,
             top_k=top_k,
+            auto_letterbox=auto_letterbox,
         ) as engine:
             src = open_source(source)
             for result in engine.stream(src):

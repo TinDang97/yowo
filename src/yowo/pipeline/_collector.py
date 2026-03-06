@@ -9,7 +9,6 @@ is protected by an explicit threading.Lock.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import queue
 import threading
@@ -100,8 +99,8 @@ def _run_bridge(
                 break
     finally:
         # Best-effort sentinel so __iter__ tracks active count.
-        with contextlib.suppress(queue.Full):
-            shared_q.put((stream_id, None), timeout=2.0)
+        if not _put_or_stop(shared_q, (stream_id, None), entry.stop_event):
+            logger.warning("Bridge %s: sentinel dropped (queue full on shutdown)", stream_id)
 
 
 class FrameCollector:
@@ -314,8 +313,10 @@ class FrameCollector:
             _stop_entry(entry)
 
         # Unblock __iter__ if it's waiting on shared_q.get()
-        with contextlib.suppress(queue.Full):
+        try:
             self._shared_q.put(None, timeout=2.0)
+        except queue.Full:
+            logger.warning("FrameCollector.close: close sentinel dropped (queue full)")
 
         logger.info("FrameCollector closed (%d streams)", len(entries))
 
@@ -344,7 +345,7 @@ def _stop_entry(entry: _StreamEntry) -> None:
     except Exception:
         logger.exception("Error stopping reader")
     if entry.bridge is not None:
-        entry.bridge.join(timeout=2.0)
+        entry.bridge.join(timeout=5.0)
     try:
         entry.source.close()
     except Exception:

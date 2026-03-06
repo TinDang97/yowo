@@ -6,6 +6,7 @@ These are private implementation details — not part of the public API.
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import time
@@ -58,8 +59,6 @@ class StreamingMixin:
 
     def _stream_live(self, source: FrameSource) -> Iterator[Any]:
         """Live source path: threaded reader, batch=1, 30 s idle timeout."""
-        import functools
-
         _MAX_IDLE_S = 30.0
         _POLL_TIMEOUT = 1.0
         if self._batch_size > 1:  # type: ignore[attr-defined]
@@ -152,42 +151,29 @@ class StreamingMixin:
             )
 
         def _infer_batch(frames: list[Frame]) -> list[Any]:
-            if concurrent:
-                if buffer_pool is not None:
-                    buf = buffer_pool.acquire()
-                    try:
-                        tensor = preprocess_into(frames, target, buf)
-                        # Lock covers GPU only — NMS runs outside for concurrency
-                        with infer_lock:  # type: ignore[union-attr]
-                            raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
-                        return self._postprocess_and_emit(  # type: ignore[attr-defined]
-                            raw_output,
-                            tensor,
-                            frames,
-                            elapsed_ms,
-                            scratch=None,
-                        )
-                    except Exception:
-                        self._metrics.record_error()  # type: ignore[attr-defined]
-                        raise
-                    finally:
-                        buffer_pool.release(buf)
-                # auto_letterbox: allocate per-call (dynamic dimensions)
-                try:
+            if not concurrent:
+                return self._run_batch(frames)  # type: ignore[attr-defined]
+            buf = buffer_pool.acquire() if buffer_pool is not None else None
+            try:
+                if buf is not None:
+                    tensor = preprocess_into(frames, target, buf)
+                else:
                     tensor = preprocess(frames, target, auto_letterbox=auto_lb)
-                    with infer_lock:  # type: ignore[union-attr]
-                        raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
-                    return self._postprocess_and_emit(  # type: ignore[attr-defined]
-                        raw_output,
-                        tensor,
-                        frames,
-                        elapsed_ms,
-                        scratch=None,
-                    )
-                except Exception:
-                    self._metrics.record_error()  # type: ignore[attr-defined]
-                    raise
-            return self._run_batch(frames)  # type: ignore[attr-defined]
+                with infer_lock:  # type: ignore[union-attr]
+                    raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
+                return self._postprocess_and_emit(  # type: ignore[attr-defined]
+                    raw_output,
+                    tensor,
+                    frames,
+                    elapsed_ms,
+                    scratch=None,
+                )
+            except Exception:
+                self._metrics.record_error()  # type: ignore[attr-defined]
+                raise
+            finally:
+                if buf is not None and buffer_pool is not None:
+                    buffer_pool.release(buf)
 
         pending: Deque[Future[list[Any]]] = Deque()
         try:

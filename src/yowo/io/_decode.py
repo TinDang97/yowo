@@ -333,7 +333,6 @@ __all__ = [
     "PreprocessBuffer",
     "PreprocessBufferPool",
     "TensorMeta",
-    "_align_to_stride",
     "make_tensor_meta",
     "preprocess",
     "preprocess_into",
