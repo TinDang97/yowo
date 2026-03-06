@@ -704,3 +704,49 @@ class TestClassificationConfig:
 
         cfg = ClassificationConfig(pipeline_workers=0)
         assert cfg.pipeline_workers == 0
+
+
+# ---------------------------------------------------------------------------
+# load_classification_config — env var overrides
+# ---------------------------------------------------------------------------
+
+
+class TestLoadClassificationConfig:
+    def test_defaults(self) -> None:
+        from yowo.config import ClassificationConfig, load_classification_config
+
+        cfg = load_classification_config()
+        assert isinstance(cfg, ClassificationConfig)
+        assert cfg.top_k == 5
+        assert cfg.model_family.value == "yolo11"
+
+    def test_top_k_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from yowo.config import load_classification_config
+
+        monkeypatch.setenv("YOWO_TOP_K", "10")
+        cfg = load_classification_config()
+        assert cfg.top_k == 10
+
+    def test_model_family_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from yowo.config import load_classification_config
+        from yowo.types import ModelFamily
+
+        monkeypatch.setenv("YOWO_MODEL_FAMILY", "yolo26")
+        cfg = load_classification_config()
+        assert cfg.model_family == ModelFamily.YOLO26
+
+    def test_invalid_env_var_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from yowo.config import load_classification_config
+        from yowo.errors import ConfigError
+
+        monkeypatch.setenv("YOWO_TOP_K", "not_a_number")
+        with pytest.raises(ConfigError, match="Invalid YOWO_ environment variable"):
+            load_classification_config()
+
+    def test_top_k_zero_via_env_raises_config_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from yowo.config import load_classification_config
+        from yowo.errors import ConfigError
+
+        monkeypatch.setenv("YOWO_TOP_K", "0")
+        with pytest.raises(ConfigError, match="top_k"):
+            load_classification_config()

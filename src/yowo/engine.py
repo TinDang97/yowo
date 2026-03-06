@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -42,6 +43,7 @@ from yowo.config import InferenceConfig
 from yowo.errors import (
     BackendError,
     BackendLoadError,
+    ConfigError,
     InferenceError,
     ModelNotFoundError,
     ShutdownError,
@@ -138,6 +140,7 @@ class BaseEngine(StreamingMixin):
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
+        auto_letterbox: bool = False,
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
@@ -146,6 +149,7 @@ class BaseEngine(StreamingMixin):
         self._model_builder = model_builder
         self._batch_size = batch_size
         self._device = device
+        self._auto_letterbox = auto_letterbox
         self._feature_cache = None
         if cache or cache_dir is not None:
             from yowo.cache import FeatureCache
@@ -329,8 +333,18 @@ class BaseEngine(StreamingMixin):
 
     def _finalize_load(self) -> None:
         """Allocate reusable buffers and resolve pipeline workers."""
+        if self._auto_letterbox and self._backend.backend_type != BackendType.PYTORCH:
+            with contextlib.suppress(Exception):
+                self._backend.unload()
+            raise ConfigError(
+                f"auto_letterbox requires a backend with dynamic spatial input shapes. "
+                f"Backend '{self._backend.backend_type.value}' has a fixed compiled input "
+                f"shape and will reject tensors with non-square dimensions at inference time. "
+                f"Use BackendType.PYTORCH or disable auto_letterbox."
+            )
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
-        self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
+        if not self._auto_letterbox:
+            self._preprocess_buf = PreprocessBuffer(self._batch_size, target_size)
         self._allocate_postprocess_buffer()
         if self._pipeline_workers == 0:
             self._pipeline_workers = 2 if is_free_threaded() else 1
@@ -413,12 +427,53 @@ class BaseEngine(StreamingMixin):
         from yowo._async import astream as _astream
 
         try:
-            async for result in _astream(self.stream, source, self._event_bus.emit, _stop):
+            async for result in _astream(
+                self.stream,
+                source,
+                self._event_bus.emit,
+                _stop,
+                self._metrics.record_frame_dropped,
+            ):
                 yield result
         finally:
             self._active_streams.discard(_stop)
             if not self._active_streams:
                 self._streams_drained.set()
+
+    def _run_gpu(
+        self,
+        tensor: PreprocessedTensor,
+        frames: list[Frame],
+    ) -> tuple[NDArray[np.float32], float]:
+        """GPU-only: set_source_id + backend.infer + record metrics.
+
+        Callers in concurrent paths should hold ``infer_lock`` for the
+        duration of this call.  Postprocessing (``_process_batch``) and
+        event emission must happen *outside* the lock so that NMS work
+        does not block the GPU for the next batch.
+        """
+        if self._feature_cache is not None and frames:
+            sid = frames[0].source_id
+            if sid:
+                self._backend.set_source_id(sid)
+        t0 = time.perf_counter()
+        raw_output = self._backend.infer(tensor)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
+        return raw_output, elapsed_ms
+
+    def _postprocess_and_emit(
+        self,
+        raw_output: NDArray[np.float32],
+        tensor: PreprocessedTensor,
+        frames: list[Frame],
+        elapsed_ms: float,
+        scratch: PostprocessBuffer | None,
+    ) -> list[Any]:
+        """Run task-specific postprocess and emit result event."""
+        results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
+        self._event_bus.emit(self._result_event_name, results)
+        return results
 
     def _infer_from_tensor(
         self,
@@ -428,26 +483,21 @@ class BaseEngine(StreamingMixin):
         scratch: PostprocessBuffer | None,
     ) -> list[Any]:
         """Run backend inference + task-specific postprocess."""
-        if self._feature_cache is not None and frames:
-            sid = frames[0].source_id
-            if sid:
-                self._backend.set_source_id(sid)
-        t0 = time.perf_counter()
-        raw_output = self._backend.infer(tensor)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
-        results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
-        self._event_bus.emit(self._result_event_name, results)
-        return results
+        raw_output, elapsed_ms = self._run_gpu(tensor, frames)
+        return self._postprocess_and_emit(raw_output, tensor, frames, elapsed_ms, scratch)
 
     def _run_batch(self, frames: list[Frame]) -> list[Any]:
         """Preprocess frames and run _infer_from_tensor."""
         target_size = (self._model_meta.input_height, self._model_meta.input_width)
         try:
-            if self._preprocess_buf is not None and len(frames) <= self._preprocess_buf.capacity:
+            if (
+                not self._auto_letterbox
+                and self._preprocess_buf is not None
+                and len(frames) <= self._preprocess_buf.capacity
+            ):
                 tensor = preprocess_into(frames, target_size, self._preprocess_buf)
             else:
-                tensor = preprocess(frames, target_size)
+                tensor = preprocess(frames, target_size, auto_letterbox=self._auto_letterbox)
             return self._infer_from_tensor(tensor, frames, scratch=self._postprocess_buf)
         except Exception:
             self._metrics.record_error()
@@ -509,6 +559,7 @@ class DetectionEngine(BaseEngine):
         frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST,
         max_queue_size: int = 2,
         prefetch: bool = True,
+        auto_letterbox: bool = False,
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
@@ -533,6 +584,7 @@ class DetectionEngine(BaseEngine):
                 frame_drop_policy=frame_drop_policy,
                 max_queue_size=max_queue_size,
                 prefetch=prefetch,
+                auto_letterbox=auto_letterbox,
                 pipeline_workers=pipeline_workers,
                 metrics_enabled=metrics_enabled,
                 error_threshold=error_threshold,
@@ -559,6 +611,7 @@ class DetectionEngine(BaseEngine):
             frame_drop_policy=cfg.frame_drop_policy,
             max_queue_size=cfg.max_queue_size,
             prefetch=cfg.prefetch,
+            auto_letterbox=cfg.auto_letterbox,
             pipeline_workers=cfg.pipeline_workers,
             metrics_enabled=cfg.metrics_enabled,
             error_threshold=cfg.error_threshold,

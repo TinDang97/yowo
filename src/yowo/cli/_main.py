@@ -74,6 +74,12 @@ def cli() -> None:
     default=False,
     help="Disable metrics collection (saves ~2µs/frame on critical paths)",
 )
+@click.option(
+    "--auto-letterbox/--no-auto-letterbox",
+    "auto_letterbox",
+    default=False,
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
+)
 @click.pass_context
 def detect_command(
     ctx: click.Context,
@@ -93,6 +99,7 @@ def detect_command(
     preset: bool,
     json_output: bool,
     no_metrics: bool,
+    auto_letterbox: bool,
 ) -> None:
     """Run object detection on SOURCE (image/video/RTSP/directory)."""
     from yowo.config import InferenceConfig
@@ -134,6 +141,8 @@ def detect_command(
         if _is_explicit("iou"):
             cli_overrides["iou_threshold"] = iou
 
+        if auto_letterbox:
+            cli_overrides["auto_letterbox"] = True
         config = preset_config(hw, source_cat, **cli_overrides)
         # Propagate metrics flag into preset-derived config
         if no_metrics:
@@ -153,6 +162,7 @@ def detect_command(
             device=device,
             precision=Precision(precision) if precision != "auto" else None,
             metrics_enabled=not no_metrics,
+            auto_letterbox=auto_letterbox,
         )
 
     detections = []
@@ -304,6 +314,12 @@ def export_command(
 @click.option("--max-age", default=30, type=int, help="Frames a lost track survives.")
 @click.option("--min-hits", default=3, type=int, help="Hits before a track is confirmed.")
 @click.option("--json", "json_output", is_flag=True, default=False, help="Stream JSONL to stdout.")
+@click.option(
+    "--auto-letterbox/--no-auto-letterbox",
+    "auto_letterbox",
+    default=False,
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
+)
 def track_command(
     source: str,
     model: str,
@@ -319,6 +335,7 @@ def track_command(
     max_age: int,
     min_hits: int,
     json_output: bool,
+    auto_letterbox: bool,
 ) -> None:
     """Run ByteTrack object tracking on SOURCE (image/video/RTSP/directory)."""
     from yowo.config import InferenceConfig
@@ -337,6 +354,7 @@ def track_command(
         backend=BackendType(backend) if backend != "auto" else None,
         device=device,
         precision=Precision(precision) if precision != "auto" else None,
+        auto_letterbox=auto_letterbox,
     )
     tracker = ByteTracker(
         track_high_thresh=high_thresh,
@@ -407,6 +425,12 @@ def track_command(
     help="Enable ByteTrack (required for --line).",
 )
 @click.option("--json", "json_output", is_flag=True, default=False, help="Stream JSONL to stdout.")
+@click.option(
+    "--auto-letterbox/--no-auto-letterbox",
+    "auto_letterbox",
+    default=False,
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
+)
 def count_command(
     source: str,
     model: str,
@@ -420,6 +444,7 @@ def count_command(
     line_file: str | None,
     use_tracking: bool,
     json_output: bool,
+    auto_letterbox: bool,
 ) -> None:
     """Count detections by class, zone, or line crossing on SOURCE."""
     import json as json_mod
@@ -447,6 +472,7 @@ def count_command(
         backend=BackendType(backend) if backend != "auto" else None,
         device=device,
         precision=Precision(precision) if precision != "auto" else None,
+        auto_letterbox=auto_letterbox,
     )
     counter = ObjectCounter(zones=zones, lines=lines)
 
@@ -522,6 +548,12 @@ def count_command(
 @click.option("--device", default="auto")
 @click.option("--top-k", default=5, type=int, help="Number of top predictions to display.")
 @click.option("--batch-size", default=1, type=int)
+@click.option(
+    "--auto-letterbox/--no-auto-letterbox",
+    "auto_letterbox",
+    default=False,
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
+)
 def classify_command(
     source: str,
     model: str,
@@ -531,6 +563,7 @@ def classify_command(
     device: str,
     top_k: int,
     batch_size: int,
+    auto_letterbox: bool,
 ) -> None:
     """Run image classification on SOURCE (image/video/RTSP/directory)."""
     from yowo.classify_engine import ClassificationEngine
@@ -549,6 +582,7 @@ def classify_command(
             device=device,
             batch_size=batch_size,
             top_k=top_k,
+            auto_letterbox=auto_letterbox,
         ) as engine:
             src = open_source(source)
             for result in engine.stream(src):

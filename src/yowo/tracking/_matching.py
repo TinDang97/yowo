@@ -139,12 +139,18 @@ def _hungarian(
             return np.array([], dtype=np.intp), np.array([], dtype=np.intp)
         return row_ind.astype(np.intp), col_ind.astype(np.intp)
 
+    # Replace inf with a large finite cost so Munkres row reduction
+    # doesn't produce NaN (inf - inf).  The threshold in linear_assignment()
+    # will reject these matches later.
+    safe_cost = cost.copy()
+    safe_cost[~np.isfinite(safe_cost)] = 1e9
+
     n_rows, n_cols = cost.shape
     n = max(n_rows, n_cols)
 
     # Pad to square with a large cost to prevent spurious assignments.
     padded = np.full((n, n), fill_value=1e9, dtype=np.float64)
-    padded[:n_rows, :n_cols] = cost
+    padded[:n_rows, :n_cols] = safe_cost
 
     # Run Munkres on the padded square matrix.
     row_ind, col_ind = _munkres(padded)

@@ -1,14 +1,16 @@
-"""Multi-stream frame collector with round-robin dispatch.
+"""Multi-stream frame collector with shared-queue dispatch.
 
 FrameCollector manages N concurrent video/RTSP streams, wrapping each in
-a ThreadedFrameReader and yielding TaggedFrame objects (frame + stream_id)
-via round-robin iteration. Streams can be added or removed while iteration
-is active; all shared state is protected by an explicit threading.Lock.
+a ThreadedFrameReader. Per-stream bridge threads drain readers into a single
+shared queue, giving O(1) dispatch in ``__iter__`` regardless of stream count.
+Streams can be added or removed while iteration is active; all shared state
+is protected by an explicit threading.Lock.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -23,28 +25,95 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FrameCollector"]
 
-# Short poll timeout so round-robin doesn't stall on one empty stream.
-_POLL_TIMEOUT: float = 0.05
-
 
 class _StreamEntry:
     """Internal bookkeeping for a single managed stream."""
 
-    __slots__ = ("error", "reader", "source", "state")
+    __slots__ = ("bridge", "error", "reader", "source", "state", "stop_event")
 
     def __init__(self, reader: ThreadedFrameReader, source: FrameSource) -> None:
         self.reader: ThreadedFrameReader = reader
         self.source: FrameSource = source
         self.state: StreamState = StreamState.RUNNING
         self.error: BaseException | None = None
+        self.bridge: threading.Thread | None = None
+        self.stop_event: threading.Event = threading.Event()
+
+
+def _put_or_stop(
+    shared_q: queue.Queue[tuple[str, Frame | None] | None],
+    item: tuple[str, Frame | None],
+    stop: threading.Event,
+) -> bool:
+    """Put *item* on the bounded queue, retrying until success or *stop* is set.
+
+    Returns ``True`` if the item was enqueued, ``False`` if *stop* fired first.
+    """
+    while not stop.is_set():
+        try:
+            shared_q.put(item, timeout=0.5)
+            return True
+        except queue.Full:
+            pass
+    return False
+
+
+def _run_bridge(
+    stream_id: str,
+    entry: _StreamEntry,
+    shared_q: queue.Queue[tuple[str, Frame | None] | None],
+) -> None:
+    """Bridge daemon: read from one ThreadedFrameReader, push to shared_q.
+
+    Posts ``(stream_id, None)`` as exhaustion sentinel before exiting.
+    """
+    try:
+        while not entry.stop_event.is_set():
+            try:
+                item = entry.reader.get(timeout=0.1)
+            except Exception as exc:
+                logger.exception("Stream %r bridge error", stream_id)
+                entry.state = StreamState.ERROR
+                entry.error = exc
+                break
+
+            if isinstance(item, Frame):
+                if not _put_or_stop(shared_q, (stream_id, item), entry.stop_event):
+                    break
+            elif item is None:
+                if entry.reader.is_exhausted:
+                    entry.state = StreamState.STOPPED
+                    logger.debug(
+                        "Stream %r exhausted (%d frames read)",
+                        stream_id,
+                        entry.reader.frames_read,
+                    )
+                    break
+                # Live stream momentary gap — keep polling.
+            else:
+                entry.state = StreamState.ERROR
+                entry.error = TypeError(
+                    f"FrameCollector expects Frame from reader, got {type(item).__name__}. "
+                    "Do not pass preprocess_fn to readers used by FrameCollector."
+                )
+                break
+    finally:
+        # Always deliver the exhaustion sentinel so __iter__ can decrement
+        # active-stream count. Do NOT use _put_or_stop here — stop_event is
+        # already set on normal shutdown, which would cause an immediate
+        # False return and drop the sentinel.
+        try:
+            shared_q.put((stream_id, None), timeout=5.0)
+        except queue.Full:
+            logger.warning("Bridge %s: sentinel dropped (queue full after 5 s)", stream_id)
 
 
 class FrameCollector:
-    """Manages N concurrent streams, yielding TaggedFrame via round-robin.
+    """Manages N concurrent streams, yielding TaggedFrame via shared queue.
 
-    Each stream is backed by a ThreadedFrameReader. The collector provides
-    thread-safe ``add_stream`` / ``remove_stream`` for dynamic membership
-    and tracks per-stream health via ``StreamState``.
+    Each stream is backed by a ThreadedFrameReader drained by a bridge
+    daemon thread. All bridges push to a single shared queue, so
+    ``__iter__`` is O(1) per frame regardless of stream count.
 
     Usage::
 
@@ -68,7 +137,7 @@ class FrameCollector:
         max_queue_size: Per-stream bounded queue depth. Defaults to 2.
     """
 
-    __slots__ = ("_closed", "_lock", "_max_queue_size", "_streams")
+    __slots__ = ("_closed", "_lock", "_max_queue_size", "_shared_q", "_streams")
 
     def __init__(self, max_queue_size: int = 2) -> None:
         if max_queue_size < 1:
@@ -77,6 +146,9 @@ class FrameCollector:
         self._streams: dict[str, _StreamEntry] = {}
         self._lock: threading.Lock = threading.Lock()
         self._closed: bool = False
+        self._shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue(
+            maxsize=max_queue_size * 8,
+        )
 
     # ------------------------------------------------------------------
     # Stream management
@@ -118,8 +190,17 @@ class FrameCollector:
                 raise RuntimeError("FrameCollector is closed")
             if stream_id in self._streams:
                 raise ValueError(f"Stream already registered: {stream_id!r}")
-            self._streams[stream_id] = _StreamEntry(reader=reader, source=source)
+            entry = _StreamEntry(reader=reader, source=source)
+            self._streams[stream_id] = entry
             reader.start()
+            bridge = threading.Thread(
+                target=_run_bridge,
+                args=(stream_id, entry, self._shared_q),
+                name=f"yowo-bridge-{stream_id}",
+                daemon=True,
+            )
+            entry.bridge = bridge
+            bridge.start()
 
         logger.info("Added stream %r (policy=%s)", stream_id, policy.value)
 
@@ -145,84 +226,53 @@ class FrameCollector:
     # ------------------------------------------------------------------
 
     def __iter__(self) -> Iterator[TaggedFrame]:
-        """Round-robin across active streams, yielding TaggedFrame objects.
+        """O(1) per-frame dispatch from shared queue across all streams.
 
-        Terminates when all streams reach a terminal state (STOPPED or ERROR)
-        and no frames remain in any queue. Also terminates immediately if
-        ``close()`` is called.
+        Terminates when all active streams post their exhaustion sentinel,
+        or when ``close()`` posts the closed sentinel.
 
         Yields:
             TaggedFrame for every frame from every active stream.
         """
-        while True:
-            snapshot = self._active_snapshot()
-            if not snapshot:
-                break
-
-            yielded_any = False
-            for stream_id, entry in snapshot:
-                frame = self._try_get(stream_id, entry)
-                if frame is not None:
-                    yielded_any = True
-                    yield frame
-
-            if not yielded_any and self._all_terminal():
-                break
-
-    def _active_snapshot(self) -> list[tuple[str, _StreamEntry]]:
-        """Return a snapshot of (stream_id, entry) pairs under the lock.
-
-        Used by ``__iter__`` to iterate without holding the lock.
-        """
         with self._lock:
             if self._closed:
-                return []
-            return list(self._streams.items())
+                return
+            active = set(self._streams.keys())
 
-    def _try_get(self, stream_id: str, entry: _StreamEntry) -> TaggedFrame | None:
-        """Attempt a non-blocking read from one stream.
+        if not active:
+            return
 
-        Handles exhaustion (marks STOPPED) and exceptions (marks ERROR).
+        while active:
+            try:
+                item = self._shared_q.get(timeout=5.0)
+            except queue.Empty:
+                # Timeout — check if we should still be waiting.
+                with self._lock:
+                    if self._closed:
+                        break
+                    # If a bridge thread has exited without delivering its
+                    # exhaustion sentinel (dropped due to a full queue), the
+                    # stream would never leave `active`.  Detect dead bridges
+                    # and retire them so __iter__ terminates naturally.
+                    dead = {
+                        sid
+                        for sid in active
+                        if sid in self._streams
+                        and self._streams[sid].bridge is not None
+                        and not self._streams[sid].bridge.is_alive()  # type: ignore[union-attr]
+                    }
+                active -= dead
+                continue
 
-        Returns:
-            A TaggedFrame on success, None otherwise.
-        """
-        if entry.state in (StreamState.STOPPED, StreamState.ERROR):
-            return None
+            if item is None:
+                break  # close() sentinel
 
-        try:
-            item = entry.reader.get(timeout=_POLL_TIMEOUT)
-        except Exception as exc:
-            logger.exception("Stream %r error during get()", stream_id)
-            entry.state = StreamState.ERROR
-            entry.error = exc
-            return None
-
-        if isinstance(item, Frame):
-            return TaggedFrame(stream_id=stream_id, frame=item)
-
-        if item is not None:
-            raise TypeError(
-                f"FrameCollector expects Frame from reader, got {type(item).__name__}. "
-                "Do not pass preprocess_fn to readers used by FrameCollector."
-            )
-
-        # No frame returned — check if exhausted.
-        if entry.reader.is_exhausted:
-            entry.state = StreamState.STOPPED
-            logger.debug(
-                "Stream %r exhausted (%d frames read)", stream_id, entry.reader.frames_read
-            )
-        return None
-
-    def _all_terminal(self) -> bool:
-        """True when every registered stream is STOPPED or ERROR."""
-        with self._lock:
-            if not self._streams:
-                return True
-            return all(
-                e.state in (StreamState.STOPPED, StreamState.ERROR) for e in self._streams.values()
-            )
+            stream_id, frame = item
+            if frame is None:
+                # Exhaustion sentinel from bridge thread
+                active.discard(stream_id)
+                continue
+            yield TaggedFrame(stream_id=stream_id, frame=frame)
 
     # ------------------------------------------------------------------
     # State inspection
@@ -279,6 +329,12 @@ class FrameCollector:
         for entry in entries:
             _stop_entry(entry)
 
+        # Unblock __iter__ if it's waiting on shared_q.get()
+        try:
+            self._shared_q.put(None, timeout=2.0)
+        except queue.Full:
+            logger.warning("FrameCollector.close: close sentinel dropped (queue full)")
+
         logger.info("FrameCollector closed (%d streams)", len(entries))
 
     def __enter__(self) -> FrameCollector:
@@ -299,11 +355,20 @@ class FrameCollector:
 
 
 def _stop_entry(entry: _StreamEntry) -> None:
-    """Stop a reader and close its source, suppressing cleanup errors."""
+    """Stop a reader, join bridge thread, and close source."""
+    entry.stop_event.set()
     try:
         entry.reader.stop()
     except Exception:
         logger.exception("Error stopping reader")
+    if entry.bridge is not None:
+        entry.bridge.join(timeout=5.0)
+        if entry.bridge.is_alive():
+            logger.warning(
+                "Bridge thread '%s' did not exit within 5 s after stop; "
+                "it may still be running and holding a reference to the shared queue.",
+                entry.bridge.name,
+            )
     try:
         entry.source.close()
     except Exception:
