@@ -171,23 +171,27 @@ def preprocess(
     pad_offsets: list[tuple[int, int]] = []
     original_shapes: list[tuple[int, int]] = []
 
+    # Compute batch output dimensions once so all frames pad to the same size.
+    # blobFromImages requires uniform spatial dimensions across the batch.
+    # For auto_letterbox, derive from the first frame's aspect ratio; mixed-
+    # aspect batches use first-frame dimensions as the common tensor size.
+    if auto_letterbox:
+        f0 = frames[0]
+        s0 = min(target_h / f0.height, target_w / f0.width)
+        actual_h = max(_align_to_stride(int(f0.height * s0)), 32)
+        actual_w = max(_align_to_stride(int(f0.width * s0)), 32)
+    else:
+        actual_h, actual_w = target_h, target_w
+
     for frame in frames:
         frame_h, frame_w = frame.height, frame.width
         original_shapes.append((frame_h, frame_w))
 
-        scale = min(target_h / frame_h, target_w / frame_w)
+        # Scale to fit within the batch tensor bounds (actual_h x actual_w).
+        # For the default path actual_* == target_*, so behaviour is unchanged.
+        scale = min(actual_h / frame_h, actual_w / frame_w)
         new_h = int(frame_h * scale)
         new_w = int(frame_w * scale)
-
-        if auto_letterbox:
-            # Stride-aligned dimensions: minimal padding, non-square tensor.
-            actual_h = _align_to_stride(new_h)
-            actual_w = _align_to_stride(new_w)
-            # Guard: at least one stride cell.
-            actual_h = max(actual_h, 32)
-            actual_w = max(actual_w, 32)
-        else:
-            actual_h, actual_w = target_h, target_w
 
         # Ensure C-contiguous input before cv2.resize. Guard the fast path:
         # cv2.VideoCapture and cv2.imdecode always return contiguous arrays, so

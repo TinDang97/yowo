@@ -416,7 +416,13 @@ class BaseEngine(StreamingMixin):
         from yowo._async import astream as _astream
 
         try:
-            async for result in _astream(self.stream, source, self._event_bus.emit, _stop):
+            async for result in _astream(
+                self.stream,
+                source,
+                self._event_bus.emit,
+                _stop,
+                self._metrics.record_frame_dropped,
+            ):
                 yield result
         finally:
             self._active_streams.discard(_stop)

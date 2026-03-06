@@ -96,8 +96,11 @@ class InferenceConfig:
         prefetch: Enable threaded frame prefetch in ``stream()``.
         auto_letterbox: Use stride-aligned non-square input tensors instead
             of always padding to square. Reduces pixel count by ~40% on 16:9
-            input, giving ~1.4-1.6x inference speedup. Disabled by default
-            for backward compatibility.
+            input, giving measurable inference speedup on pixel-count-dominated
+            backends (PyTorch CPU/GPU). Note: zero-copy ``PreprocessBuffer``
+            pre-allocation is disabled in this mode; per-call heap allocation
+            partially offsets the gain. Net speedup is backend and
+            hardware-dependent. Disabled by default for backward compatibility.
         pipeline_workers: Worker thread count for the pipeline. ``0`` means
             auto-detect (2 on free-threaded Python, 1 otherwise).
         metrics_enabled: Collect latency, throughput, and error metrics.
@@ -181,7 +184,8 @@ class ClassificationConfig:
         prefetch: Enable threaded frame prefetch in ``stream()``.
         auto_letterbox: Use stride-aligned non-square input tensors instead
             of always padding to square. Reduces pixel count by ~40% on 16:9
-            input, giving ~1.4-1.6x inference speedup.
+            input. Zero-copy buffer pre-allocation is disabled in this mode;
+            net speedup is backend and hardware-dependent.
         pipeline_workers: Worker thread count for the pipeline. ``0`` means
             auto-detect (2 on free-threaded Python, 1 otherwise).
         metrics_enabled: Collect latency, throughput, and error metrics.

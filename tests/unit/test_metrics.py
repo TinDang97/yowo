@@ -138,6 +138,23 @@ class TestMetricsCollector:
         c.record_error()
         assert c.errors_total == 2
 
+    def test_record_frame_dropped_increments_counter(self) -> None:
+        c = MetricsCollector()
+        c.record_frame_dropped()
+        c.record_frame_dropped()
+        assert c.snapshot().frames_dropped == 2
+
+    def test_record_frame_dropped_noop_when_disabled(self) -> None:
+        c = MetricsCollector(enabled=False)
+        c.record_frame_dropped()
+        assert c.snapshot().frames_dropped == 0
+
+    def test_reset_zeroes_frames_dropped(self) -> None:
+        c = MetricsCollector()
+        c.record_frame_dropped()
+        c.reset()
+        assert c.snapshot().frames_dropped == 0
+
     def test_snapshot_returns_frozen_dataclass(self) -> None:
         c = MetricsCollector()
         c.record_inference(10.0)
@@ -193,9 +210,11 @@ class TestMetricsCollector:
         c = MetricsCollector(enabled=False)
         c.record_inference(5.0, batch_size=10)
         c.record_error()
+        c.record_frame_dropped()
         assert c.frames_total == 0
         assert c.errors_total == 0
         assert c.last_frame_time == 0.0
+        assert c.snapshot().frames_dropped == 0
 
     def test_disabled_snapshot_still_works(self) -> None:
         c = MetricsCollector(enabled=False)

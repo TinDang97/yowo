@@ -32,6 +32,7 @@ class EngineMetrics:
         inference_p99_ms: Rolling p99 backend.infer() latency.
         fps: Frames per second (frames_total / uptime_s).
         uptime_s: Seconds since collector creation or last reset.
+        frames_dropped: Frames silently dropped due to a full async queue.
     """
 
     frames_total: int
@@ -42,6 +43,7 @@ class EngineMetrics:
     inference_p99_ms: float
     fps: float
     uptime_s: float
+    frames_dropped: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +111,7 @@ class MetricsCollector:
     __slots__ = (
         "_enabled",
         "_errors_total",
+        "_frames_dropped",
         "_frames_total",
         "_inference_hist",
         "_last_frame_time",
@@ -119,6 +122,7 @@ class MetricsCollector:
         self._enabled = enabled
         self._frames_total: int = 0
         self._errors_total: int = 0
+        self._frames_dropped: int = 0
         self._inference_hist = _RollingHistogram(window=1000)
         self._start_time: float = time.monotonic()
         self._last_frame_time: float = 0.0
@@ -182,6 +186,12 @@ class MetricsCollector:
             return
         self._errors_total += 1
 
+    def record_frame_dropped(self) -> None:
+        """Record a frame dropped due to a full async queue."""
+        if not self._enabled:
+            return
+        self._frames_dropped += 1
+
     # ------------------------------------------------------------------
     # Snapshot + reset (called by operators, not on hot path)
     # ------------------------------------------------------------------
@@ -194,6 +204,7 @@ class MetricsCollector:
         return EngineMetrics(
             frames_total=self._frames_total,
             errors_total=self._errors_total,
+            frames_dropped=self._frames_dropped,
             inference_mean_ms=mean,
             inference_p50_ms=p50,
             inference_p95_ms=p95,
@@ -206,6 +217,7 @@ class MetricsCollector:
         """Zero all counters and the latency histogram."""
         self._frames_total = 0
         self._errors_total = 0
+        self._frames_dropped = 0
         self._inference_hist.clear()
         self._start_time = time.monotonic()
         self._last_frame_time = 0.0

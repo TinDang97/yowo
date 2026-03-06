@@ -54,7 +54,7 @@ def _put_or_stop(
             shared_q.put(item, timeout=0.5)
             return True
         except queue.Full:
-            continue
+            pass
     return False
 
 
@@ -250,6 +250,18 @@ class FrameCollector:
                 with self._lock:
                     if self._closed:
                         break
+                    # If a bridge thread has exited without delivering its
+                    # exhaustion sentinel (dropped due to a full queue), the
+                    # stream would never leave `active`.  Detect dead bridges
+                    # and retire them so __iter__ terminates naturally.
+                    dead = {
+                        sid
+                        for sid in active
+                        if sid in self._streams
+                        and self._streams[sid].bridge is not None
+                        and not self._streams[sid].bridge.is_alive()  # type: ignore[union-attr]
+                    }
+                active -= dead
                 continue
 
             if item is None:

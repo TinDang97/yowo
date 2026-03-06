@@ -78,7 +78,7 @@ def cli() -> None:
     "--auto-letterbox/--no-auto-letterbox",
     "auto_letterbox",
     default=False,
-    help="Use stride-aligned non-square tensors (~1.4-1.6x faster on 16:9 input)",
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
 )
 @click.pass_context
 def detect_command(
@@ -318,7 +318,7 @@ def export_command(
     "--auto-letterbox/--no-auto-letterbox",
     "auto_letterbox",
     default=False,
-    help="Use stride-aligned non-square tensors (~1.4-1.6x faster on 16:9 input)",
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
 )
 def track_command(
     source: str,
@@ -429,7 +429,7 @@ def track_command(
     "--auto-letterbox/--no-auto-letterbox",
     "auto_letterbox",
     default=False,
-    help="Use stride-aligned non-square tensors (~1.4-1.6x faster on 16:9 input)",
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
 )
 def count_command(
     source: str,
@@ -552,7 +552,7 @@ def count_command(
     "--auto-letterbox/--no-auto-letterbox",
     "auto_letterbox",
     default=False,
-    help="Use stride-aligned non-square tensors (~1.4-1.6x faster on 16:9 input)",
+    help="Stride-aligned non-square tensors (reduces pixel count on 16:9 input)",
 )
 def classify_command(
     source: str,

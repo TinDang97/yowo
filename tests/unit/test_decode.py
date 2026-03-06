@@ -534,3 +534,18 @@ class TestAutoLetterbox:
         assert tensor.data.shape[0] == 2
         assert tensor.data.shape[2] == 384
         assert tensor.data.shape[3] == 640
+
+    def test_mixed_aspect_ratio_batch_does_not_crash(self) -> None:
+        """Mixed-aspect frames must produce a uniform tensor (first-frame dims)."""
+        # 16:9 → actual 384x640; 4:3 would be 480x640 alone — batch must be uniform.
+        f1 = _make_frame(720, 1280)  # 16:9
+        f2 = _make_frame(480, 640)  # 4:3
+        tensor = preprocess([f1, f2], (640, 640), auto_letterbox=True)
+        # Batch shape must be uniform — no crash from blobFromImages.
+        assert tensor.data.shape[0] == 2
+        # All frames share the first frame's aligned dims (384x640).
+        assert tensor.data.shape[2] == 384
+        assert tensor.data.shape[3] == 640
+        # Each frame has its own correctly computed scale/pad metadata.
+        assert len(tensor.scale_factors) == 2
+        assert len(tensor.pad_offsets) == 2
