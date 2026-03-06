@@ -1,6 +1,6 @@
 [project]
 name = "yowo"
-version = "2.2.1"
+version = "2.3.0"
 description = "Production YOLO inference and export library for edge and cloud deployment"
 readme = "README.md"
 license = "Apache-2.0"
