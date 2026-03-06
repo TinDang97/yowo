@@ -50,11 +50,12 @@ async def astream(
                     break
                 if stop_event is not None and stop_event.is_set():
                     break
-                future = asyncio.run_coroutine_threadsafe(q.put(detection), loop)
                 try:
-                    future.result(timeout=1.0)
-                except Exception:
-                    break
+                    # Fire-and-forget: O(1) cross-thread overhead instead of
+                    # one event-loop round-trip per frame.
+                    loop.call_soon_threadsafe(q.put_nowait, detection)
+                except RuntimeError:
+                    break  # event loop is closed
         except Exception as exc:
             emit_fn("error", exc)
         finally:

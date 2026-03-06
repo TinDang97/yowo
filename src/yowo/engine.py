@@ -420,14 +420,18 @@ class BaseEngine(StreamingMixin):
             if not self._active_streams:
                 self._streams_drained.set()
 
-    def _infer_from_tensor(
+    def _run_gpu(
         self,
         tensor: PreprocessedTensor,
         frames: list[Frame],
-        *,
-        scratch: PostprocessBuffer | None,
-    ) -> list[Any]:
-        """Run backend inference + task-specific postprocess."""
+    ) -> tuple[NDArray[np.float32], float]:
+        """GPU-only: set_source_id + backend.infer + record metrics.
+
+        Callers in concurrent paths should hold ``infer_lock`` for the
+        duration of this call.  Postprocessing (``_process_batch``) and
+        event emission must happen *outside* the lock so that NMS work
+        does not block the GPU for the next batch.
+        """
         if self._feature_cache is not None and frames:
             sid = frames[0].source_id
             if sid:
@@ -436,6 +440,17 @@ class BaseEngine(StreamingMixin):
         raw_output = self._backend.infer(tensor)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
+        return raw_output, elapsed_ms
+
+    def _infer_from_tensor(
+        self,
+        tensor: PreprocessedTensor,
+        frames: list[Frame],
+        *,
+        scratch: PostprocessBuffer | None,
+    ) -> list[Any]:
+        """Run backend inference + task-specific postprocess."""
+        raw_output, elapsed_ms = self._run_gpu(tensor, frames)
         results = self._process_batch(raw_output, tensor, frames, elapsed_ms, scratch)
         self._event_bus.emit(self._result_event_name, results)
         return results

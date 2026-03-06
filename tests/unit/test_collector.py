@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import queue
+import threading
 import time
 from collections.abc import Iterator
 
@@ -201,8 +203,9 @@ class TestStreamStates:
         collector.close()
 
     def test_stream_count_and_active_count(self) -> None:
-        src_a = _MockSource(2)
-        src_b = _MockSource(2)
+        # Use delay so bridges don't exhaust sources before we check active_count
+        src_a = _MockSource(2, delay=0.1)
+        src_b = _MockSource(2, delay=0.1)
         collector = FrameCollector(max_queue_size=10)
         collector.add_stream("a", src_a)
         collector.add_stream("b", src_b)
@@ -296,29 +299,98 @@ class TestEdgeCases:
         collector.close()
 
 
+class TestSharedQueueDispatch:
+    """Tests for the shared-queue based dispatch (Phase 3a optimisation)."""
+
+    def test_shared_queue_dispatch_multiple_streams(self) -> None:
+        """5 streams x 1 frame each dispatched via shared queue."""
+        collector = FrameCollector(max_queue_size=10)
+        for i in range(5):
+            collector.add_stream(f"s{i}", _MockSource(1))
+
+        tagged = list(collector)
+        collector.close()
+
+        assert len(tagged) == 5
+        ids = {t.stream_id for t in tagged}
+        assert ids == {f"s{i}" for i in range(5)}
+
+    def test_bridge_error_marks_stream_error_state(self) -> None:
+        """Source raising an error causes the bridge to mark ERROR state."""
+        source = _MockSource(5, error_at=2)
+        collector = FrameCollector(max_queue_size=10)
+        collector.add_stream("err", source)
+
+        _ = list(collector)
+
+        states = collector.stream_states
+        assert states["err"] == StreamState.ERROR
+        errors = collector.stream_errors
+        assert "err" in errors
+        assert "source error at frame 2" in str(errors["err"])
+        collector.close()
+
+    def test_close_unblocks_iter(self) -> None:
+        """close() from another thread unblocks a waiting __iter__."""
+        # Use a slow source so __iter__ is likely waiting on shared_q.get()
+        source = _MockSource(100, delay=0.5)
+        collector = FrameCollector(max_queue_size=2)
+        collector.add_stream("slow", source)
+
+        collected: list[TaggedFrame] = []
+        done = threading.Event()
+
+        def _drain() -> None:
+            for tagged in collector:
+                collected.append(tagged)
+            done.set()
+
+        t = threading.Thread(target=_drain, daemon=True)
+        t.start()
+        time.sleep(0.05)  # let iter start
+
+        collector.close()
+        assert done.wait(timeout=3.0), "close() did not unblock __iter__"
+
+    def test_bridge_thread_named(self) -> None:
+        """Bridge threads are named yowo-bridge-<stream_id>."""
+        source = _MockSource(1, delay=0.1)
+        collector = FrameCollector(max_queue_size=10)
+        collector.add_stream("cam-7", source)
+
+        entry = collector._streams["cam-7"]
+        assert entry.bridge is not None
+        assert entry.bridge.name == "yowo-bridge-cam-7"
+        assert entry.bridge.daemon is True
+
+        _ = list(collector)
+        collector.close()
+
+
 class TestCollectorTypeGuard:
-    def test_non_frame_item_raises_type_error(self) -> None:
-        """FrameCollector raises TypeError if reader yields a non-Frame item."""
+    def test_non_frame_item_marks_error_state(self) -> None:
+        """Bridge thread marks ERROR state when reader yields a non-Frame item."""
         from unittest.mock import MagicMock
 
         from yowo.io._reader import PreparedItem
+        from yowo.pipeline._collector import _run_bridge, _StreamEntry
 
         fake_tensor = MagicMock()
         fake_frame = _make_frame(0)
         prepared = PreparedItem(tensor=fake_tensor, frame=fake_frame)
 
-        source = _MockSource(1)
-        collector = FrameCollector(max_queue_size=4)
-        collector.add_stream("s0", source)
-
-        # Replace the reader with a mock that returns a PreparedItem.
-        entry = collector._streams["s0"]
+        # Create a mock reader that returns PreparedItem
         mock_reader = MagicMock()
         mock_reader.get.return_value = prepared
         mock_reader.is_exhausted = False
-        entry.reader = mock_reader
 
-        with pytest.raises(TypeError, match="expects Frame"):
-            next(iter(collector))
+        source = _MockSource(1)
+        entry = _StreamEntry(reader=mock_reader, source=source)
+        shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue()
 
-        collector.close()
+        # Run bridge directly (synchronously in this thread)
+        _run_bridge("s0", entry, shared_q)
+
+        assert entry.state == StreamState.ERROR
+        assert entry.error is not None
+        assert "expects Frame" in str(entry.error)

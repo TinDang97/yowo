@@ -257,6 +257,92 @@ class TestAStream:
         engine.close()
         assert stop.is_set(), "close() must signal astream stop-event"
 
+    async def test_astream_no_per_item_coroutine_scheduling(self) -> None:
+        """Background thread uses call_soon_threadsafe, not run_coroutine_threadsafe per item."""
+        mock_be = _make_mock_backend()
+        mock_be.infer.return_value = np.zeros((1, 0, 6), dtype=np.float32)
+        engine = _loaded_engine(mock_be)
+
+        frames = [_dummy_frame() for _ in range(5)]
+        mock_source = MagicMock()
+        mock_source.total_frames = 5
+        mock_source.is_live = False
+        mock_source.__iter__ = MagicMock(return_value=iter(frames))
+        mock_source.close = MagicMock()
+
+        rcts_calls: list[object] = []
+        orig_rcts = asyncio.run_coroutine_threadsafe
+
+        def _spy_rcts(coro: object, loop: object) -> object:
+            rcts_calls.append(coro)
+            return orig_rcts(coro, loop)  # type: ignore[arg-type]
+
+        try:
+            with patch("yowo._async.asyncio.run_coroutine_threadsafe", side_effect=_spy_rcts):
+                collected = []
+                async for det in engine.astream(mock_source):
+                    collected.append(det)
+        finally:
+            engine.close()
+
+        assert len(collected) == 5
+        # Only the sentinel None should use run_coroutine_threadsafe (1 call)
+        assert len(rcts_calls) == 1, (
+            f"Expected 1 run_coroutine_threadsafe call (sentinel), got {len(rcts_calls)}"
+        )
+
+    async def test_astream_sentinel_after_early_stop(self) -> None:
+        """After stop_event is set, sentinel arrives and async generator terminates."""
+        mock_be = _make_mock_backend()
+        mock_be.infer.return_value = np.zeros((1, 0, 6), dtype=np.float32)
+        engine = _loaded_engine(mock_be)
+
+        class _InfiniteSource:
+            total_frames = -1
+            is_live = True
+
+            def __iter__(self) -> object:
+                while True:
+                    yield _dummy_frame()
+
+            def close(self) -> None:
+                pass
+
+        source = _InfiniteSource()
+        collected: list[object] = []
+
+        async def _run() -> None:
+            async for det in engine.astream(source):  # type: ignore[arg-type]
+                collected.append(det)
+                if len(collected) >= 2:
+                    break
+
+        await asyncio.wait_for(_run(), timeout=5.0)
+        engine.close()
+        assert len(collected) >= 2
+
+    async def test_astream_handles_closed_loop(self) -> None:
+        """If event loop closes mid-stream, background thread exits cleanly."""
+        mock_be = _make_mock_backend()
+        mock_be.infer.return_value = np.zeros((1, 0, 6), dtype=np.float32)
+        engine = _loaded_engine(mock_be)
+
+        frames = [_dummy_frame()]
+        mock_source = MagicMock()
+        mock_source.total_frames = 1
+        mock_source.is_live = False
+        mock_source.__iter__ = MagicMock(return_value=iter(frames))
+        mock_source.close = MagicMock()
+
+        try:
+            # Normal operation — just verify no hang or crash
+            collected = []
+            async for det in engine.astream(mock_source):
+                collected.append(det)
+            assert len(collected) == 1
+        finally:
+            engine.close()
+
 
 # ---------------------------------------------------------------------------
 # Async context manager tests

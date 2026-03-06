@@ -152,8 +152,21 @@ class StreamingMixin:
                 buf = buffer_pool.acquire()
                 try:
                     tensor = preprocess_into(frames, target, buf)
+                    # Lock covers GPU only — NMS runs outside for concurrency
                     with infer_lock:  # type: ignore[union-attr]
-                        return self._infer_from_tensor(tensor, frames, scratch=None)  # type: ignore[attr-defined]
+                        raw_output, elapsed_ms = self._run_gpu(tensor, frames)  # type: ignore[attr-defined]
+                    results = self._process_batch(  # type: ignore[attr-defined]
+                        raw_output,
+                        tensor,
+                        frames,
+                        elapsed_ms,
+                        scratch=None,
+                    )
+                    self._event_bus.emit(  # type: ignore[attr-defined]
+                        self._result_event_name,  # type: ignore[attr-defined]
+                        results,
+                    )
+                    return results
                 except Exception:
                     self._metrics.record_error()  # type: ignore[attr-defined]
                     raise

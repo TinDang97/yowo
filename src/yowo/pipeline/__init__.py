@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 from yowo.pipeline._collector import FrameCollector
 from yowo.pipeline._router import DetectionRouter
 from yowo.pipeline._scheduler import BatchScheduler
+from yowo.types import StreamState
 
 if TYPE_CHECKING:
     from yowo.engine import InferenceEngine
@@ -110,6 +111,8 @@ def run_pipeline(
     else:
         _run_synchronous(engine, collector, scheduler, router)
 
+    _check_stream_errors(collector)
+
 
 def _run_synchronous(
     engine: InferenceEngine,
@@ -166,6 +169,26 @@ def _run_overlapped(
                 with contextlib.suppress(Exception):
                     fut.result(timeout=10.0)
         collector.close()
+
+
+def _check_stream_errors(collector: FrameCollector) -> None:
+    """Log or raise if stream errors occurred during the pipeline run.
+
+    Raises ``RuntimeError`` when ALL streams failed (total pipeline failure).
+    Logs a warning per failed stream for partial failures.
+    """
+    errors = collector.stream_errors
+    if not errors:
+        return
+
+    states = collector.stream_states
+    all_failed = states and all(s == StreamState.ERROR for s in states.values())
+    if all_failed:
+        msg = "; ".join(f"{sid}: {exc}" for sid, exc in errors.items())
+        raise RuntimeError(f"All pipeline streams failed: {msg}")
+
+    for sid, exc in errors.items():
+        logger.warning("Stream %r failed during pipeline run: %s", sid, exc)
 
 
 def _disable_feature_cache(engine: InferenceEngine) -> None:

@@ -35,9 +35,10 @@ _SPEC = ModelSpec(ModelFamily.YOLO26, ModelSize.NANO)
 class _MockSource:
     """Minimal FrameSource implementation for testing."""
 
-    def __init__(self, source_id: str, n: int) -> None:
+    def __init__(self, source_id: str, n: int, *, error_at: int | None = None) -> None:
         self._source_id = source_id
         self._n = n
+        self._error_at = error_at
         self.closed = False
 
     @property
@@ -50,6 +51,8 @@ class _MockSource:
 
     def __iter__(self) -> Iterator[Frame]:
         for i in range(self._n):
+            if self._error_at == i:
+                raise RuntimeError(f"source {self._source_id} error at frame {i}")
             yield Frame(
                 pixels=np.zeros((4, 4, 3), dtype=np.uint8),
                 source_id=self._source_id,
@@ -353,3 +356,86 @@ class TestRunPipelineOverlap:
         assert engine.detect.call_count <= 1
         assert elapsed < 5.0
         assert source.closed
+
+
+# ---------------------------------------------------------------------------
+# TestPipelineStreamErrors (Phase 3b)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineStreamErrors:
+    """Tests for _check_stream_errors surfacing stream failures."""
+
+    def test_all_streams_error_raises(self) -> None:
+        """All streams erroring raises RuntimeError from run_pipeline."""
+        source_a = _MockSource("cam-A", n=3, error_at=0)
+        source_b = _MockSource("cam-B", n=3, error_at=0)
+        engine = _make_engine()
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-A", source_a)
+        collector.add_stream("cam-B", source_b)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-A", lambda sid, dets: None)
+        router.register("cam-B", lambda sid, dets: None)
+
+        with pytest.raises(RuntimeError, match="All pipeline streams failed"):
+            run_pipeline(engine, collector, scheduler, router, overlap=False)
+
+    def test_partial_error_no_raise(self) -> None:
+        """One stream ok + one erroring: run_pipeline completes without raising."""
+        source_ok = _MockSource("cam-A", n=3)
+        source_err = _MockSource("cam-B", n=3, error_at=0)
+        engine = _make_engine()
+        received: list[tuple[str, list[Detection]]] = []
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-A", source_ok)
+        collector.add_stream("cam-B", source_err)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-A", lambda sid, dets: received.append((sid, dets)))
+        router.register("cam-B", lambda sid, dets: received.append((sid, dets)))
+
+        # Should not raise — partial failure is logged, not raised
+        run_pipeline(engine, collector, scheduler, router, overlap=False)
+
+        # cam-A should have delivered its 3 frames
+        a_count = sum(1 for sid, _ in received if sid == "cam-A")
+        assert a_count == 3
+
+    def test_no_errors_no_raise(self) -> None:
+        """Normal run with no errors completes cleanly."""
+        source = _MockSource("cam-0", n=3)
+        engine = _make_engine()
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-0", source)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-0", lambda sid, dets: None)
+
+        # Must not raise
+        run_pipeline(engine, collector, scheduler, router, overlap=False)
+
+    def test_overlap_surfaces_all_stream_errors(self) -> None:
+        """overlap=True: all streams erroring also raises RuntimeError."""
+        source_a = _MockSource("cam-A", n=3, error_at=0)
+        source_b = _MockSource("cam-B", n=3, error_at=0)
+        engine = _make_engine()
+
+        collector = FrameCollector(max_queue_size=4)
+        collector.add_stream("cam-A", source_a)
+        collector.add_stream("cam-B", source_b)
+
+        scheduler = BatchScheduler(collector, max_batch_size=1, timeout_ms=500.0)
+        router = DetectionRouter()
+        router.register("cam-A", lambda sid, dets: None)
+        router.register("cam-B", lambda sid, dets: None)
+
+        with pytest.raises(RuntimeError, match="All pipeline streams failed"):
+            run_pipeline(engine, collector, scheduler, router, overlap=True)
