@@ -51,6 +51,98 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [2.3.0-dev] — 2026-03-07 (merged to main, not yet released)
+
+### Performance
+
+- **engine**: `auto_letterbox` — stride-aligned non-square input tensors instead
+  of always padding to square. For 16:9 input (1280×720), produces a 384×640
+  tensor (~40% fewer pixels), yielding **1.4–1.6× inference speedup** on
+  PyTorch CPU/GPU. Benchmark: yolo26n 25.6 ms → 17.3 ms, yolo11n 23.8 ms →
+  17.1 ms. E2E streaming now matches or exceeds ultralytics by 1–7%.
+  Enabled via `InferenceConfig(auto_letterbox=True)`,
+  `ClassificationConfig(auto_letterbox=True)`, env var `YOWO_AUTO_LETTERBOX`,
+  and CLI `--auto-letterbox` on `detect` / `classify` / `track` / `count`.
+  `ConfigError` raised on `load()` for non-PyTorch backends (fixed input shapes
+  are incompatible with dynamic spatial dimensions).
+
+- **engine**: `infer_lock` in `_stream_pipeline` now covers GPU inference only
+  (`backend.infer`). NMS postprocessing runs outside the lock, allowing pipeline
+  workers to postprocess concurrently while the next worker uses the GPU.
+
+- **async**: Fire-and-forget async enqueue — replaced per-frame
+  `asyncio.run_coroutine_threadsafe` with `loop.call_soon_threadsafe` +
+  `_enqueue_or_drop`, eliminating one event-loop round-trip per frame.
+  `QueueFull` is handled explicitly (no unhandled callback exception); silently
+  dropped frames are recorded in `EngineMetrics`.
+
+- **pipeline**: `FrameCollector` O(N) round-robin polling (50 ms per-stream
+  timeout) replaced with a shared `queue.Queue` and per-stream bridge daemon
+  threads. O(1) per-frame dispatch regardless of stream count.
+
+### Added
+
+- **metrics**: `EngineMetrics.frames_dropped` — counter for frames silently
+  dropped when the async queue is full. `MetricsCollector.record_frame_dropped()`
+  increments it; `reset()` zeroes it. `astream()` passes the callback into
+  `_enqueue_or_drop`.
+
+- **engine**: `BaseEngine._postprocess_and_emit()` — extracted shared helper
+  that runs `_process_batch` then emits the result event. Eliminates duplication
+  between `_infer_from_tensor` and `_stream_pipeline._infer_batch`.
+
+### Fixed
+
+- **pipeline**: `_run_bridge` exhaustion sentinel now uses a plain
+  `queue.put(timeout=5.0)` instead of `_put_or_stop`. Previously,
+  `_stop_entry` set `stop_event` before `bridge.join()`, causing
+  `_put_or_stop` to return `False` immediately and drop the sentinel,
+  stalling `__iter__` indefinitely.
+
+- **pipeline**: `_stop_entry` now joins the bridge thread (`timeout=5.0`)
+  before returning, ensuring clean shutdown ordering.
+
+- **pipeline**: Bounded `shared_q` (`maxsize = max_queue_size × 8`) prevents
+  unbounded memory growth under sustained consumer lag.
+
+- **pipeline**: `_put_or_stop` helper — per-frame puts on the shared queue
+  respect `stop_event`, exiting the bridge early on shutdown without blocking
+  indefinitely on a full queue (0.5 s retry timeout).
+
+- **pipeline**: Dead-bridge detection in `__iter__` — if a bridge thread exits
+  without delivering its exhaustion sentinel (dropped after 5 s queue-full),
+  the stream is retired automatically so iteration terminates naturally.
+
+- **tracking**: `_munkres` infinite loop on partial-inf cost matrices — `inf −
+  inf = NaN` during row reduction caused the algorithm to loop forever. Inf
+  values are clamped to `1e9` before Munkres; the threshold gate rejects these
+  matches.
+
+- **pipeline**: `_check_stream_errors()` raises `RuntimeError` when all streams
+  fail; logs a warning for partial failures (previously errors were silently
+  swallowed).
+
+### Refactored
+
+- **pipeline**: `_StreamEntry.stop_flag: bool` replaced with
+  `stop_event: threading.Event` for correct cross-thread visibility in bridge
+  threads.
+
+- **streaming**: `functools.partial(preprocess, auto_letterbox=auto_lb)` used
+  unconditionally (removed asymmetric conditional branch).
+
+### Tests
+
+- 1615 unit tests (up from 1583). New tests: `TestAutoLetterbox` (12 cases
+  covering stride alignment, non-square shapes, pixel range, batch consistency,
+  mixed-aspect metadata, inverse transform), `TestAlignToStride` (3 cases),
+  `record_frame_dropped` metrics (3 cases), `TestAutoLetterboxValidation`
+  (ConfigError enforcement + double-unload guard), streaming concurrency (5
+  cases), async drop handling (3 cases), collector shared-queue (4 cases +
+  4 modified), pipeline error surfacing (4 cases).
+
+---
+
 ## [2.2.2] — 2026-03-04
 
 ### Added
