@@ -46,12 +46,12 @@ Plans:
   3. Running `yowo health` or calling the health check API returns engine status (ready, degraded, unhealthy) with structured JSON logging available at configurable log levels
   4. No memory leaks over 24-hour sustained operation with 50+ streams, and individual stream disconnection does not affect other streams
   5. Metrics (latency, throughput, memory, errors) are exportable in Prometheus-compatible or JSON format for production monitoring
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
-- [ ] 02-03: TBD
+- [ ] 02-01-PLAN.md — Multi-stream isolation: _StreamEntry per-stream stats, auto-remove on 3 consecutive errors, StreamConfig, memory-leak tests
+- [ ] 02-02-PLAN.md — OOM monitor daemon + GPU error retry: three-tier recovery ladder, _infer_with_retry, InferenceConfig log_level/structured_logging fields
+- [ ] 02-03-PLAN.md — Observability: HealthReport + health_report(), JsonFormatter, Prometheus/JSON metrics export, yowo health + yowo metrics CLI
 
 ### Phase 3: Adaptive Optimization and Batch Processing
 **Goal**: Users can auto-tune YOWO for their specific hardware without manual configuration and process large offline datasets at maximum throughput
