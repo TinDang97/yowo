@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: completed
-stopped_at: Phase 2 context gathered
-last_updated: "2026-03-07T13:38:44.409Z"
+stopped_at: Completed 02-01 FrameCollector per-stream isolation
+last_updated: "2026-03-07T14:14:01.280Z"
 last_activity: 2026-03-07 -- Completed 01-03 benchmark CLI subcommand + 3 bug fixes
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 6
+  completed_plans: 4
   percent: 25
 ---
 
@@ -50,6 +50,7 @@ Progress: [███░░░░░░░] 25%
 - Trend: steady
 
 *Updated after each plan completion*
+| Phase 02-reliability-and-multi-stream-scaling P01 | 45 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - 01-03: Missing optional deps raise click.UsageError with uv add yowo[benchmark] instruction
 - 01-03: CORR-04/05/06 deferred to real-device sessions; CLI tooling ships, hardware validation deferred
 - 01-03: pycocotools imgIds must be restricted to predicted images (not full val set) for correct mAP
+- [Phase 02-01]: Auto-remove sentinel pattern: bridge sets auto_remove flag, iterator calls remove_stream() to avoid self-join deadlock
+- [Phase 02-01]: _auto_removed_errors dict preserves error visibility after stream removal; stream_errors merges both dicts
+- [Phase 02-01]: StreamConfig reconnect fields stubbed for API stability; only max_consecutive_errors is active in this plan
 
 ### Pending Todos
 
@@ -83,6 +87,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-07T13:38:44.407Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-reliability-and-multi-stream-scaling/02-CONTEXT.md
+Last session: 2026-03-07T14:14:01.278Z
+Stopped at: Completed 02-01 FrameCollector per-stream isolation
+Resume file: None

@@ -27,11 +27,11 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Streaming
 
-- [ ] **STRM-01**: Multi-stream pipeline handles 100+ concurrent RTSP/video streams without crashing on CUDA server
-- [ ] **STRM-02**: Per-stream memory overhead is bounded and documented per device
-- [ ] **STRM-03**: No memory leaks over 24-hour sustained operation with 50+ streams
-- [ ] **STRM-04**: Frame drop rate stays below 5% at target stream count per device
-- [ ] **STRM-05**: Pipeline gracefully handles individual stream disconnection without affecting other streams
+- [x] **STRM-01**: Multi-stream pipeline handles 100+ concurrent RTSP/video streams without crashing on CUDA server
+- [x] **STRM-02**: Per-stream memory overhead is bounded and documented per device
+- [x] **STRM-03**: No memory leaks over 24-hour sustained operation with 50+ streams
+- [x] **STRM-04**: Frame drop rate stays below 5% at target stream count per device
+- [x] **STRM-05**: Pipeline gracefully handles individual stream disconnection without affecting other streams
 
 ### Reliability
 
@@ -122,11 +122,11 @@ Deferred to future release. Tracked but not in current roadmap.
 | BENCH-02 | Phase 1 | Complete |
 | BENCH-03 | Phase 1 | Complete |
 | BENCH-04 | Phase 1 | Complete |
-| STRM-01 | Phase 2 | Pending |
-| STRM-02 | Phase 2 | Pending |
-| STRM-03 | Phase 2 | Pending |
-| STRM-04 | Phase 2 | Pending |
-| STRM-05 | Phase 2 | Pending |
+| STRM-01 | Phase 2 | Complete |
+| STRM-02 | Phase 2 | Complete |
+| STRM-03 | Phase 2 | Complete |
+| STRM-04 | Phase 2 | Complete |
+| STRM-05 | Phase 2 | Complete |
 | RELY-01 | Phase 2 | Pending |
 | RELY-02 | Phase 2 | Pending |
 | RELY-03 | Phase 2 | Pending |
