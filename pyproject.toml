@@ -36,7 +36,8 @@ tracking = ["scipy>=1.11"]
 chromadb = [
     "chromadb>=0.5.0",
 ]
-all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml,tracking,chromadb]"]
+benchmark = ["pycocotools>=2.0.4", "rich>=13.0"]
+all = ["yowo[pytorch,export,onnx-gpu,openvino,coreml,tracking,chromadb,benchmark]"]
 # TensorRT requires manual installation on Linux+NVIDIA GPU:
 # pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 
@@ -60,6 +61,8 @@ dev = [
     "setuptools>=82.0.0",
     "onnxscript>=0.6.2",
     "ultralytics>=8.4.21",
+    "pycocotools>=2.0.4",
+    "rich>=13.0",
 ]
 
 [build-system]
