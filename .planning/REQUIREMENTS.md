@@ -9,13 +9,13 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Correctness
 
-- [ ] **CORR-01**: Inference mAP matches ultralytics within 0.5% on COCO val2017 for all 10 detection variants (yolo11/26 n/s/m/l/x)
-- [ ] **CORR-02**: Classification top-1 accuracy matches ultralytics within 0.5% on ImageNet val for all classification variants
-- [ ] **CORR-03**: Per-frame inference latency is within 10% of ultralytics on same hardware for all backends
+- [x] **CORR-01**: Inference mAP matches ultralytics within 0.5% on COCO val2017 for all 10 detection variants (yolo11/26 n/s/m/l/x)
+- [x] **CORR-02**: Classification top-1 accuracy matches ultralytics within 0.5% on ImageNet val for all classification variants
+- [x] **CORR-03**: Per-frame inference latency is within 10% of ultralytics on same hardware for all backends
 - [ ] **CORR-04**: ONNX exported models produce correct results on CUDA server (onnxruntime-gpu)
 - [ ] **CORR-05**: TensorRT exported engines produce correct results on NVIDIA Jetson Orin/Xavier
 - [ ] **CORR-06**: OpenVINO exported models produce correct results on Intel NUC with integrated GPU
-- [ ] **CORR-07**: Export accuracy delta vs PyTorch baseline is < 1% mAP for each format
+- [x] **CORR-07**: Export accuracy delta vs PyTorch baseline is < 1% mAP for each format
 - [ ] **CORR-08**: Model warmup during load() validates output shape and value range before accepting inference requests
 
 ### Benchmark
@@ -110,13 +110,13 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORR-01 | Phase 1 | Pending |
-| CORR-02 | Phase 1 | Pending |
-| CORR-03 | Phase 1 | Pending |
+| CORR-01 | Phase 1 | Complete |
+| CORR-02 | Phase 1 | Complete |
+| CORR-03 | Phase 1 | Complete |
 | CORR-04 | Phase 1 | Pending |
 | CORR-05 | Phase 1 | Pending |
 | CORR-06 | Phase 1 | Pending |
-| CORR-07 | Phase 1 | Pending |
+| CORR-07 | Phase 1 | Complete |
 | CORR-08 | Phase 1 | Pending |
 | BENCH-01 | Phase 1 | Pending |
 | BENCH-02 | Phase 1 | Pending |
