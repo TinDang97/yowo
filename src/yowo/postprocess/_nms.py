@@ -156,7 +156,8 @@ def _class_aware_nms(
         iou_threshold: IoU suppression threshold.
 
     Returns:
-        Sorted (ascending) indices of kept boxes.
+        Indices sorted by (confidence desc, class_id asc, x1 asc) for
+        deterministic ordering.
     """
     if len(boxes_xyxy) == 0:
         return np.array([], dtype=np.intp)
@@ -184,7 +185,17 @@ def _class_aware_nms(
     if isinstance(indices, tuple) or len(indices) == 0:
         return np.array([], dtype=np.intp)
 
-    return np.sort(np.asarray(indices, dtype=np.intp).ravel())
+    kept = np.asarray(indices, dtype=np.intp).ravel()
+    if len(kept) <= 1:
+        return kept
+    sort_key = np.lexsort(
+        (
+            boxes_xyxy[kept, 0],  # tertiary: x1 ascending
+            class_ids[kept],  # secondary: class_id ascending
+            -scores[kept],  # primary: confidence descending
+        )
+    )
+    return kept[sort_key]
 
 
 def _inverse_letterbox(

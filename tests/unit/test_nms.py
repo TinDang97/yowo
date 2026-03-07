@@ -111,7 +111,8 @@ class TestClassAwareNms:
         result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
         assert sorted(result.tolist()) == [0, 1]
 
-    def test_result_sorted_ascending(self) -> None:
+    def test_result_sorted_by_confidence_desc(self) -> None:
+        """Results are sorted by confidence descending, not index ascending."""
         boxes = np.array(
             [
                 [0.0, 0.0, 10.0, 10.0],
@@ -123,7 +124,8 @@ class TestClassAwareNms:
         scores = np.array([0.7, 0.9, 0.8], dtype=np.float32)
         class_ids = np.array([0, 1, 2], dtype=np.intp)
         result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
-        assert list(result) == sorted(result.tolist())
+        # Confidence order: 0.9 (idx 1), 0.8 (idx 2), 0.7 (idx 0)
+        assert list(result) == [1, 2, 0]
 
     def test_result_dtype_is_intp(self) -> None:
         boxes = np.array([[10.0, 10.0, 50.0, 50.0]], dtype=np.float32)
@@ -697,3 +699,43 @@ class TestNmsOptimizations:
         assert len(boxes) == 1
         assert boxes[0].class_id == 5
         assert boxes[0].class_name == "5"
+
+
+class TestNmsDeterministicOrdering:
+    """Verify that _class_aware_nms produces deterministic output ordering."""
+
+    def test_deterministic_ordering_across_runs(self) -> None:
+        """Identical inputs produce identical output ordering across 10 runs."""
+        boxes = np.array(
+            [
+                [0.0, 0.0, 10.0, 10.0],
+                [100.0, 100.0, 110.0, 110.0],
+                [200.0, 200.0, 210.0, 210.0],
+                [300.0, 300.0, 310.0, 310.0],
+            ],
+            dtype=np.float32,
+        )
+        scores = np.array([0.7, 0.9, 0.8, 0.6], dtype=np.float32)
+        class_ids = np.array([0, 1, 2, 0], dtype=np.intp)
+
+        first_result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        for _ in range(9):
+            result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+            assert list(result) == list(first_result)
+
+    def test_deterministic_with_equal_scores(self) -> None:
+        """Boxes with equal confidence use class_id then x1 as tiebreakers."""
+        boxes = np.array(
+            [
+                [200.0, 0.0, 210.0, 10.0],
+                [100.0, 100.0, 110.0, 110.0],
+                [50.0, 200.0, 60.0, 210.0],
+            ],
+            dtype=np.float32,
+        )
+        scores = np.array([0.9, 0.9, 0.9], dtype=np.float32)
+        class_ids = np.array([2, 0, 1], dtype=np.intp)
+
+        result = _class_aware_nms(boxes, scores, class_ids, iou_threshold=0.5)
+        # All same confidence -> sort by class_id asc: 0 (idx 1), 1 (idx 2), 2 (idx 0)
+        assert list(result) == [1, 2, 0]

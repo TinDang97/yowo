@@ -47,6 +47,7 @@ from yowo.errors import (
     InferenceError,
     ModelNotFoundError,
     ShutdownError,
+    WarmupValidationError,
 )
 from yowo.events import EventBus
 from yowo.hardware import get_hardware_profile
@@ -197,6 +198,7 @@ class BaseEngine(StreamingMixin):
         self._error_threshold = error_threshold
         self._health_state: HealthStatus = HealthStatus.STARTING
         self._event_bus = EventBus()
+        self._infer_lock = threading.Lock()
         self._shutting_down = threading.Event()
         self._shutdown_lock = threading.Lock()
         self._active_streams: set[threading.Event] = set()
@@ -287,6 +289,7 @@ class BaseEngine(StreamingMixin):
         if self._user_provided_backend:
             self._backend.load(weights_path, device=self._device)
             self._backend.warmup(batch_size=self._batch_size)
+            self._validate_warmup_output()
             self._finalize_load()
             return
         assert self._hw is not None
@@ -310,6 +313,7 @@ class BaseEngine(StreamingMixin):
                     )
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)
+                self._validate_warmup_output()
                 if bt != self._selection.backend:
                     logger.warning("Using fallback backend: %s", bt.value)
                     _fs = select_backend(
@@ -353,6 +357,36 @@ class BaseEngine(StreamingMixin):
 
     def _allocate_postprocess_buffer(self) -> None:
         """Hook: allocate task-specific postprocess buffer. Default: no-op."""
+
+    def _validate_warmup_output(self) -> None:
+        """Run a dummy inference and validate output shape and values.
+
+        Called during :meth:`load` after ``backend.warmup()`` to catch
+        corrupt or incompatible models before the engine enters READY state.
+
+        Raises:
+            WarmupValidationError: If output has unexpected shape or values.
+        """
+        h, w = self._model_meta.input_height, self._model_meta.input_width
+        dummy = PreprocessedTensor(
+            data=np.zeros((1, 3, h, w), dtype=np.float32),
+            original_shapes=((h, w),),
+            input_shape=(h, w),
+            scale_factors=((1.0, 1.0),),
+            pad_offsets=((0, 0),),
+        )
+        try:
+            output = self._backend.infer(dummy)
+        except Exception as exc:
+            raise WarmupValidationError(
+                f"backend.infer() raised {type(exc).__name__}: {exc}"
+            ) from exc
+        if output.ndim < 2:
+            raise WarmupValidationError(f"expected output ndim >= 2, got shape {output.shape}")
+        self._validate_output_values(output)
+
+    def _validate_output_values(self, output: NDArray[np.float32]) -> None:
+        """Validate output value ranges. Subclasses override for task-specific checks."""
 
     def close(self, timeout: float = 5.0) -> None:
         """Gracefully shut down: signal streams, drain event bus, release backend."""
@@ -447,19 +481,20 @@ class BaseEngine(StreamingMixin):
     ) -> tuple[NDArray[np.float32], float]:
         """GPU-only: set_source_id + backend.infer + record metrics.
 
-        Callers in concurrent paths should hold ``infer_lock`` for the
-        duration of this call.  Postprocessing (``_process_batch``) and
-        event emission must happen *outside* the lock so that NMS work
-        does not block the GPU for the next batch.
+        Acquires ``_infer_lock`` internally to serialise GPU access.
+        Postprocessing (``_process_batch``) and event emission happen
+        *outside* the lock so that NMS work does not block the GPU for
+        the next batch.
         """
-        if self._feature_cache is not None and frames:
-            sid = frames[0].source_id
-            if sid:
-                self._backend.set_source_id(sid)
-        t0 = time.perf_counter()
-        raw_output = self._backend.infer(tensor)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
+        with self._infer_lock:
+            if self._feature_cache is not None and frames:
+                sid = frames[0].source_id
+                if sid:
+                    self._backend.set_source_id(sid)
+            t0 = time.perf_counter()
+            raw_output = self._backend.infer(tensor)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
         return raw_output, elapsed_ms
 
     def _postprocess_and_emit(
@@ -619,6 +654,27 @@ class DetectionEngine(BaseEngine):
 
     def _allocate_postprocess_buffer(self) -> None:
         self._postprocess_buf = PostprocessBuffer()
+
+    def _validate_output_values(self, output: NDArray[np.float32]) -> None:
+        """Check detection class scores are in [0, 1] range."""
+        if output.ndim == 3:
+            # Standard: (B, 4+C, N) or (B, N, 4+C) — pick score slice
+            if output.shape[1] > output.shape[2]:
+                score_slice = output[:, 4:, :]
+            else:
+                score_slice = output[:, :, 4:]
+        elif output.ndim == 2:
+            score_slice = output[:, 4:]
+        else:
+            return  # ndim check already handled by base
+        if score_slice.size == 0:
+            return
+        if np.any(score_slice > 1.0 + 1e-3) or np.any(score_slice < -1e-3):
+            raise WarmupValidationError(
+                f"detection class scores outside [0, 1] range "
+                f"(min={float(score_slice.min()):.4f}, "
+                f"max={float(score_slice.max()):.4f})"
+            )
 
     def _dispatch_frames(self, frames: list[Frame]) -> list[Any]:
         """Route through detect() so tests can patch it."""

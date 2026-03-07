@@ -1260,6 +1260,8 @@ class TestCustomBackendInjection:
         with patch("yowo.engine.resolve_weights", return_value=Path("/fake/w.pt")):
             engine = InferenceEngine(backend_instance=mock_backend)
             engine.load()
+            # Reset mock so warmup validation's infer() call is not counted
+            mock_backend.infer.reset_mock()
             frames = [_make_frame(0)]
             result = engine.detect(frames)
             assert len(result) == 1

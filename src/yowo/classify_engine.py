@@ -27,7 +27,7 @@ from numpy.typing import NDArray
 from yowo.backends import InferenceBackend
 from yowo.config import ClassificationConfig
 from yowo.engine import BaseEngine
-from yowo.errors import InferenceError, ShutdownError
+from yowo.errors import InferenceError, ShutdownError, WarmupValidationError
 from yowo.io import FrameSource
 from yowo.postprocess import PostprocessBuffer
 from yowo.postprocess._classify import postprocess_classify
@@ -160,6 +160,21 @@ class ClassificationEngine(BaseEngine):
     @property
     def _result_event_name(self) -> str:
         return "classification"
+
+    def _validate_output_values(self, output: np.ndarray) -> None:
+        """Check classification softmax output sums to ~1.0 per sample."""
+        for i in range(output.shape[0]):
+            row = output[i].ravel() if output.ndim > 2 else output[i]
+            row_sum = float(row.sum())
+            if abs(row_sum - 1.0) > 0.01:
+                raise WarmupValidationError(
+                    f"classification output softmax sum={row_sum:.4f} "
+                    f"(expected ~1.0 for sample {i})"
+                )
+            if np.any(row > 1.0 + 1e-3) or np.any(row < -1e-3):
+                raise WarmupValidationError(
+                    f"classification output values outside [0, 1] range for sample {i}"
+                )
 
     def _process_batch(
         self,

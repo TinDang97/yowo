@@ -9,6 +9,7 @@ Hierarchy::
     ├── DependencyError         # Missing optional package
     ├── BackendError            # Backend init/inference failure
     │   ├── BackendLoadError    # Failed to load model into backend
+    │   ├── WarmupValidationError  # Warmup output shape/range check failed
     │   ├── InferenceError      # Runtime inference failure
     │   └── ShutdownError       # Engine is shutting down (subclass of InferenceError)
     ├── DeviceError             # Device not found / OOM
@@ -88,6 +89,22 @@ class BackendLoadError(BackendError):
     Raised when a serialised model (engine, onnx, …) cannot be deserialised
     into the backend runtime — e.g. version mismatch or corrupt file.
     """
+
+
+class WarmupValidationError(BackendError):
+    """Warmup validation detected corrupt or incompatible model output.
+
+    Raised during ``engine.load()`` when the first inference produces output
+    with an unexpected shape or value range — for example a 1-D tensor instead
+    of the expected (B, ...) batch output, or classification logits that do
+    not sum to ~1.0 after softmax.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            f"Warmup validation failed: {detail}. "
+            "The model may be corrupt or incompatible with this backend."
+        )
 
 
 class InferenceError(BackendError):
@@ -220,5 +237,6 @@ __all__ = [
     "SourceError",
     "SourceTimeoutError",
     "TrackingError",
+    "WarmupValidationError",
     "YowoError",
 ]

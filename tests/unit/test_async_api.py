@@ -91,8 +91,9 @@ class TestADetect:
     async def test_adetect_propagates_inference_error(self) -> None:
         """backend.infer raising RuntimeError is wrapped as InferenceError."""
         mock_be = _make_mock_backend()
-        mock_be.infer.side_effect = RuntimeError("backend failure")
         engine = _loaded_engine(mock_be)
+        # Set side_effect AFTER load() so warmup validation succeeds
+        mock_be.infer.side_effect = RuntimeError("backend failure")
         try:
             with pytest.raises((InferenceError, RuntimeError)):
                 await engine.adetect([_dummy_frame()])
