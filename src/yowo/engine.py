@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import threading
 import time
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
@@ -80,6 +82,42 @@ from yowo.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# HealthReport dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class HealthReport:
+    """Immutable snapshot of engine health at a point in time.
+
+    Attributes:
+        status: Current :class:`~yowo.types.HealthStatus` value.
+        uptime_s: Seconds since metrics collector was created or last reset.
+        errors_total: Total inference errors since last reset.
+        frames_total: Total frames processed since last reset.
+        memory_pct: GPU memory reserved / total (0.0-1.0).  ``None`` on CPU.
+        stream_count: Number of currently active streams.
+        batch_size_current: Active batch size (may have been reduced by OOM recovery).
+        precision_current: String representation of the current precision (e.g. ``"fp32"``).
+    """
+
+    status: HealthStatus
+    uptime_s: float
+    errors_total: int
+    frames_total: int
+    memory_pct: float | None
+    stream_count: int
+    batch_size_current: int
+    precision_current: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable dict with ``status`` as its string value."""
+        d = dataclasses.asdict(self)
+        d["status"] = self.status.value
+        return d
+
 
 # ---------------------------------------------------------------------------
 # OOM monitor thresholds
@@ -272,6 +310,53 @@ class BaseEngine(StreamingMixin):
         """Zero all metric counters and the latency histogram."""
         self._metrics.reset()
 
+    def health_report(self) -> HealthReport:
+        """Return a frozen :class:`HealthReport` snapshot of current engine state.
+
+        ``memory_pct`` is ``None`` unless the engine is running on a CUDA device.
+        GPU memory reads are best-effort; any failure returns ``None``.
+        """
+        snap = self._metrics.snapshot()
+
+        memory_pct: float | None = None
+        if self._is_cuda:
+            try:
+                import torch
+
+                device_index = self._selection.device_index
+                reserved = torch.cuda.memory_reserved(device_index)
+                total = torch.cuda.get_device_properties(device_index).total_memory
+                if total > 0:
+                    memory_pct = reserved / total
+            except Exception:
+                memory_pct = None
+
+        return HealthReport(
+            status=self.health,
+            uptime_s=snap.uptime_s,
+            errors_total=snap.errors_total,
+            frames_total=snap.frames_total,
+            memory_pct=memory_pct,
+            stream_count=len(self._active_streams),
+            batch_size_current=self._batch_size,
+            precision_current=self._selection.precision.value,
+        )
+
+    def export_metrics(self) -> dict[str, object]:
+        """Return a JSON-serialisable dict of current engine metrics.
+
+        Keys correspond to :class:`~yowo.metrics.EngineMetrics` field names.
+        """
+        return dataclasses.asdict(self._metrics.snapshot())
+
+    def export_metrics_prometheus(self) -> str:
+        """Return a Prometheus text exposition string for current metrics.
+
+        Delegates to :meth:`~yowo.metrics.MetricsCollector.export_prometheus`.
+        Always ends with a newline.
+        """
+        return self._metrics.export_prometheus()
+
     def on(self, event: str, callback: Callable[..., Any]) -> None:
         """Register a synchronous event callback."""
         self._event_bus.on(event, callback)
@@ -369,6 +454,16 @@ class BaseEngine(StreamingMixin):
         self._loaded = True
         self._health_state = HealthStatus.READY
         self._start_oom_monitor()
+        # Wire structured logging after load completes.
+        # Use best-effort config read — config may not always be accessible.
+        try:
+            from yowo.logging import configure_logging as _configure_logging
+
+            log_level: str = getattr(self, "_config_log_level", "WARNING")
+            structured: bool = getattr(self, "_config_structured_logging", False)
+            _configure_logging(level=log_level, structured=structured)
+        except Exception:
+            pass
 
     def _allocate_postprocess_buffer(self) -> None:
         """Hook: allocate task-specific postprocess buffer. Default: no-op."""
@@ -812,6 +907,8 @@ class DetectionEngine(BaseEngine):
             )
         self._confidence = cfg.confidence_threshold
         self._iou_threshold = cfg.iou_threshold
+        self._config_log_level: str = getattr(cfg, "log_level", "WARNING")
+        self._config_structured_logging: bool = getattr(cfg, "structured_logging", False)
         spec = ModelSpec(
             cfg.model_family,
             cfg.model_size,
@@ -900,4 +997,4 @@ class DetectionEngine(BaseEngine):
 #: Alias for :class:`DetectionEngine`.
 InferenceEngine = DetectionEngine
 
-__all__ = ["BaseEngine", "DetectionEngine", "InferenceEngine"]
+__all__ = ["BaseEngine", "DetectionEngine", "HealthReport", "InferenceEngine"]

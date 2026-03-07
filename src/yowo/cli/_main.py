@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -917,6 +918,59 @@ def _write_json(detections: list[object], path: Path) -> None:
     out = [det.to_dict() for det in detections if isinstance(det, Detection)]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+
+
+@cli.command("health")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    help="Output format: json (default) or human-readable text.",
+)
+def health_command(output_format: str) -> None:
+    """Report engine health status.
+
+    Without a running engine, reports closed status (exit code 2).
+    For programmatic use, call engine.health_report().as_dict() directly.
+    """
+    report = {
+        "status": "closed",
+        "message": "No running engine -- use engine.health_report() programmatically",
+    }
+    if output_format == "json":
+        click.echo(json.dumps(report, indent=2))
+    else:
+        for key, value in report.items():
+            click.echo(f"{key}: {value}")
+    sys.exit(2)
+
+
+@cli.command("metrics")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["json", "prometheus"]),
+    default="json",
+    help="Output format: json (default) or prometheus.",
+)
+def metrics_command(output_format: str) -> None:
+    """Export engine metrics in JSON or Prometheus format.
+
+    Without a running engine, emits a zero-value snapshot.
+    Exit code is always 0 (metrics endpoint should not fail).
+    """
+    from yowo.metrics._collector import MetricsCollector
+
+    collector = MetricsCollector(enabled=True)
+    if output_format == "prometheus":
+        click.echo(collector.export_prometheus(), nl=False)
+    else:
+        snap = collector.snapshot()
+        import dataclasses
+
+        click.echo(json.dumps(dataclasses.asdict(snap), indent=2))
+    sys.exit(0)
 
 
 __all__ = ["cli"]

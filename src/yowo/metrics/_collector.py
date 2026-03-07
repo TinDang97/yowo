@@ -213,6 +213,72 @@ class MetricsCollector:
             uptime_s=elapsed,
         )
 
+    def export_prometheus(self) -> str:
+        """Return a Prometheus text exposition string for current metrics.
+
+        Includes seven metrics: frames_total, errors_total, inference_mean_ms,
+        inference_p95_ms, fps, uptime_seconds, memory_utilization.
+
+        Always ends with a newline per Prometheus exposition format spec.
+        """
+        snap = self.snapshot()
+        lines: list[str] = []
+
+        def _metric(
+            name: str,
+            metric_type: str,
+            help_text: str,
+            value: float | int,
+        ) -> None:
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} {metric_type}")
+            lines.append(f"{name} {value}")
+
+        _metric(
+            "yowo_frames_total",
+            "counter",
+            "Total number of frames processed since last reset.",
+            snap.frames_total,
+        )
+        _metric(
+            "yowo_errors_total",
+            "counter",
+            "Total number of inference errors since last reset.",
+            snap.errors_total,
+        )
+        _metric(
+            "yowo_inference_mean_ms",
+            "gauge",
+            "Rolling mean backend inference latency in milliseconds.",
+            snap.inference_mean_ms,
+        )
+        _metric(
+            "yowo_inference_p95_ms",
+            "gauge",
+            "Rolling p95 backend inference latency in milliseconds.",
+            snap.inference_p95_ms,
+        )
+        _metric(
+            "yowo_fps",
+            "gauge",
+            "Frames per second (frames_total / uptime_s).",
+            snap.fps,
+        )
+        _metric(
+            "yowo_uptime_seconds",
+            "gauge",
+            "Seconds since collector creation or last reset.",
+            snap.uptime_s,
+        )
+        _metric(
+            "yowo_memory_utilization",
+            "gauge",
+            "GPU memory utilization fraction (0.0-1.0). 0.0 when not on CUDA.",
+            0.0,
+        )
+
+        return "\n".join(lines) + "\n"
+
     def reset(self) -> None:
         """Zero all counters and the latency histogram."""
         self._frames_total = 0
