@@ -62,11 +62,14 @@ Plans:
   2. Auto-tune results persist to a device-specific profile file and subsequent runs start instantly using the cached profile
   3. Running `yowo batch SOURCE_DIR --model yolo11n` processes a directory of images/videos at maximum GPU utilization with larger batch sizes than streaming mode
   4. Batch processing supports resume from checkpoint on interruption and reports progress (processed/total, ETA, throughput)
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — TuneProfile dataclass, YAML persistence, device fingerprint, test scaffolds for all plans
+- [ ] 03-02-PLAN.md — Calibration sweep: SweepResult, run_sweep(), OOM guard, backend × batch × precision enumeration
+- [ ] 03-03-PLAN.md — Batch runner: BatchConfig, run_batch(), atomic checkpoint, rich progress, JSONL output
+- [ ] 03-04-PLAN.md — Engine profile auto-load integration + yowo tune CLI subcommand
+- [ ] 03-05-PLAN.md — yowo batch CLI subcommand + human verification checkpoint
 
 ### Phase 4: OBB Detection
 **Goal**: Users can perform oriented bounding box detection with YOWO using the same workflow as standard detection
@@ -91,5 +94,5 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 |-------|----------------|--------|-----------|
 | 1. Correctness, Benchmarking, and Proactive Fixes | 2/3 | Executing | - |
 | 2. Reliability and Multi-Stream Scaling | 3/3 | Complete   | 2026-03-07 |
-| 3. Adaptive Optimization and Batch Processing | 0/2 | Not started | - |
+| 3. Adaptive Optimization and Batch Processing | 0/5 | Not started | - |
 | 4. OBB Detection | 0/2 | Not started | - |
