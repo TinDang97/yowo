@@ -73,12 +73,14 @@ class ThreadedFrameReader:
         "_exhausted",
         "_frames_dropped",
         "_frames_read",
+        "_last_reconnect",
         "_lock",
         "_max_size",
         "_not_empty",
         "_not_full",
         "_policy",
         "_preprocess_fn",
+        "_reconnect_interval",
         "_source",
         "_stop_event",
         "_target_size",
@@ -93,6 +95,7 @@ class ThreadedFrameReader:
         *,
         preprocess_fn: Callable[[list[Frame], tuple[int, int]], PreprocessedTensor] | None = None,
         target_size: tuple[int, int] | None = None,
+        reconnect_interval_sec: float = 300.0,
     ) -> None:
         if max_queue_size < 1:
             raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size}")
@@ -111,6 +114,8 @@ class ThreadedFrameReader:
         self._exhausted = False
         self._frames_read = 0
         self._frames_dropped = 0
+        self._reconnect_interval = reconnect_interval_sec
+        self._last_reconnect = time.monotonic()
         self._thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
@@ -165,6 +170,9 @@ class ThreadedFrameReader:
                         if not self._stop_event.is_set():
                             self._deque.append(item)
                             self._not_empty.notify()
+
+                # Periodic reconnect for live RTSP sources (prevents OpenCV memory leak).
+                self._maybe_reconnect()
         except Exception as exc:
             with self._not_empty:
                 self._error = exc
@@ -173,6 +181,30 @@ class ThreadedFrameReader:
             with self._not_empty:
                 self._exhausted = True
                 self._not_empty.notify_all()
+
+    def _maybe_reconnect(self) -> None:
+        """Periodically reconnect live sources to prevent OpenCV memory leaks.
+
+        Only triggers for live sources (``is_live == True``) that expose a
+        ``reconnect()`` method (duck-typing). Non-live sources and sources
+        without ``reconnect()`` are silently skipped.
+        """
+        if time.monotonic() - self._last_reconnect < self._reconnect_interval:
+            return
+        if not getattr(self._source, "is_live", False):
+            return
+        reconnect_fn = getattr(self._source, "reconnect", None)
+        if reconnect_fn is None or not callable(reconnect_fn):
+            return
+        try:
+            reconnect_fn()
+            self._last_reconnect = time.monotonic()
+            logger.info("RTSP reconnect: released and re-opened capture to prevent memory leak")
+        except Exception:
+            logger.warning(
+                "RTSP reconnect failed; continuing with existing connection",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Public interface

@@ -428,3 +428,94 @@ class TestPreprocessInReaderThread:
             while reader.get(timeout=2.0) is not None:
                 pass
         reader.stop()
+
+
+# ---------------------------------------------------------------------------
+# RTSP periodic reconnect
+# ---------------------------------------------------------------------------
+
+
+class _LiveSourceWithReconnect:
+    """Mock live source that supports reconnect()."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+        self.reconnect_count = 0
+
+    @property
+    def is_live(self) -> bool:
+        return True
+
+    @property
+    def total_frames(self) -> int | None:
+        return self._n
+
+    def __iter__(self) -> Iterator[Frame]:
+        for i in range(self._n):
+            yield _make_frame(i)
+
+    def reconnect(self) -> None:
+        self.reconnect_count += 1
+
+    def close(self) -> None:
+        pass
+
+
+class TestRtspReconnect:
+    """Tests for RTSP periodic reconnect in ThreadedFrameReader."""
+
+    def test_reconnect_triggers_after_interval(self) -> None:
+        """After reconnect_interval elapsed, reader calls source.reconnect()."""
+        source = _LiveSourceWithReconnect(5)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=5,
+            reconnect_interval_sec=0.0,  # trigger immediately
+        )
+        reader.start()
+        frames = []
+        while (item := reader.get(timeout=2.0)) is not None:
+            frames.append(item)
+        reader.stop()
+        assert len(frames) == 5
+        assert source.reconnect_count >= 1
+
+    def test_reconnect_skips_non_live_source(self) -> None:
+        """Non-live sources never trigger reconnect even with interval=0."""
+        source = _MockSource(3)
+        # Add a reconnect method to verify it's never called
+        source.reconnect_count = 0  # type: ignore[attr-defined]
+
+        def _reconnect() -> None:
+            source.reconnect_count += 1  # type: ignore[attr-defined]
+
+        source.reconnect = _reconnect  # type: ignore[attr-defined]
+
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=5,
+            reconnect_interval_sec=0.0,
+        )
+        reader.start()
+        while reader.get(timeout=2.0) is not None:
+            pass
+        reader.stop()
+        assert source.reconnect_count == 0  # type: ignore[attr-defined]
+
+    def test_reconnect_transparent_frames_continue(self) -> None:
+        """Frames continue flowing after reconnect without errors."""
+        source = _LiveSourceWithReconnect(10)
+        reader = ThreadedFrameReader(
+            source,
+            max_queue_size=10,
+            reconnect_interval_sec=0.0,
+        )
+        reader.start()
+        frames = []
+        while (item := reader.get(timeout=2.0)) is not None:
+            frames.append(item)
+        reader.stop()
+        assert len(frames) == 10
+        # All frame indices present
+        indices = [f.frame_index for f in frames]
+        assert indices == list(range(10))

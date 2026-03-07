@@ -599,7 +599,13 @@ def classify_command(
 
 
 @cli.command("info")
-def info_command() -> None:
+@click.option(
+    "--compat",
+    is_flag=True,
+    default=False,
+    help="Show export compatibility matrix for current system.",
+)
+def info_command(compat: bool) -> None:
     """Print hardware, backends, and installed library versions."""
     from yowo.hardware import get_hardware_profile
 
@@ -625,6 +631,9 @@ def info_command() -> None:
             ort_line += " (CPU)"
     click.echo(ort_line)
     click.echo(f"openvino:     {libs.openvino_version or 'not installed'}")
+
+    if compat:
+        _print_compat_matrix(hw)
 
 
 @cli.command("models")
@@ -727,6 +736,83 @@ def _parse_model_spec(model_name: str) -> ModelSpec:
         return parse_model_name(model_name)
     except ConfigError as exc:
         raise click.BadParameter(str(exc)) from exc
+
+
+def _print_compat_matrix(hw: object) -> None:
+    """Print an export compatibility matrix for the current system."""
+    import platform as _platform
+
+    from yowo.hardware import HardwareProfile
+
+    assert isinstance(hw, HardwareProfile)
+    libs = hw.libraries
+
+    rows: list[tuple[str, str, str]] = []
+
+    # Python
+    rows.append(("Python", _platform.python_version(), "OK"))
+
+    # PyTorch
+    if libs.torch_version:
+        rows.append(("PyTorch", libs.torch_version, "OK"))
+    else:
+        rows.append(("PyTorch", "not installed", "Missing"))
+
+    # CUDA
+    cuda_ver = getattr(libs, "cuda_version", None)
+    if cuda_ver:
+        rows.append(("CUDA", cuda_ver, "OK"))
+    elif libs.torch_cuda_available:
+        rows.append(("CUDA", "available (version unknown)", "OK"))
+    else:
+        rows.append(("CUDA", "not available", "N/A"))
+
+    # cuDNN
+    cudnn_ver = getattr(libs, "cudnn_version", None)
+    if cudnn_ver:
+        rows.append(("cuDNN", cudnn_ver, "OK"))
+    else:
+        rows.append(("cuDNN", "not detected", "N/A"))
+
+    # TensorRT
+    if libs.tensorrt_version:
+        rows.append(("TensorRT", libs.tensorrt_version, "OK"))
+    else:
+        rows.append(("TensorRT", "not installed", "Missing"))
+
+    # ONNX Runtime
+    if libs.onnxruntime_version:
+        ep = "CUDA" if libs.onnxruntime_has_cuda else "CPU"
+        if getattr(libs, "onnxruntime_has_coreml", False):
+            ep = "CoreML"
+        rows.append(("ONNX Runtime", f"{libs.onnxruntime_version} ({ep})", "OK"))
+    else:
+        rows.append(("ONNX Runtime", "not installed", "Missing"))
+
+    # OpenVINO
+    if libs.openvino_version:
+        rows.append(("OpenVINO", libs.openvino_version, "OK"))
+    else:
+        rows.append(("OpenVINO", "not installed", "Missing"))
+
+    # CoreML tools
+    coreml_ver = getattr(libs, "coremltools_version", None)
+    if coreml_ver:
+        rows.append(("CoreML Tools", coreml_ver, "OK"))
+    else:
+        status = "Missing" if _platform.system() == "Darwin" else "N/A"
+        rows.append(("CoreML Tools", "not installed", status))
+
+    # Print table
+    click.echo("")
+    click.echo("=== Export Compatibility ===")
+    col1 = max(len(r[0]) for r in rows) + 2
+    col2 = max(len(r[1]) for r in rows) + 2
+    header = f"{'Component':<{col1}} {'Version':<{col2}} Status"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for name, version, status in rows:
+        click.echo(f"{name:<{col1}} {version:<{col2}} {status}")
 
 
 def _write_json(detections: list[object], path: Path) -> None:

@@ -494,3 +494,42 @@ class TestMPSDeviceType:
         profile = make_profile(has_torch=True)
         result = select_backend(profile, "n", device_override="cpu")
         assert result.device_type == DeviceType.CPU
+
+
+# ---------------------------------------------------------------------------
+# Error message tests
+# ---------------------------------------------------------------------------
+
+
+class TestErrorMessages:
+    """Verify user-friendly error messages with uv add install commands."""
+
+    def test_error_message_no_backend_shows_install_hints(self) -> None:
+        """When no backend available, error shows all install options with uv add."""
+        profile = make_profile()
+        with pytest.raises(DependencyError, match="uv add") as exc_info:
+            select_backend(profile, "n")
+        msg = str(exc_info.value)
+        assert "uv add yowo[pytorch]" in msg
+        assert "uv add yowo[onnx]" in msg
+
+    def test_error_message_no_backend_shows_status(self) -> None:
+        """When no backend available, error includes backend status checklist."""
+        profile = make_profile()
+        with pytest.raises(DependencyError) as exc_info:
+            select_backend(profile, "n")
+        msg = str(exc_info.value)
+        assert "Backend status:" in msg
+        assert "not installed" in msg
+
+    def test_error_message_pytorch_override_missing(self) -> None:
+        """Override to pytorch when not installed shows uv add install command."""
+        profile = make_profile()
+        with pytest.raises(BackendError, match="uv add yowo\\[pytorch\\]"):
+            select_backend(profile, "n", backend_override="pytorch")
+
+    def test_error_message_onnx_override_missing(self) -> None:
+        """Override to onnx when not installed shows install command."""
+        profile = make_profile()
+        with pytest.raises(BackendError, match="uv add onnxruntime"):
+            select_backend(profile, "n", backend_override="onnx")

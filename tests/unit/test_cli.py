@@ -297,3 +297,49 @@ class TestModelsCommand:
         for line in result.output.strip().split("\n")[2:]:  # Skip header lines
             if line.strip():
                 assert "yolo26" in line.lower()
+
+
+# ---------------------------------------------------------------------------
+# info --compat
+# ---------------------------------------------------------------------------
+
+
+class TestInfoCompat:
+    """Tests for the `yowo info --compat` command."""
+
+    def test_info_compat_command(self) -> None:
+        """yowo info --compat outputs compatibility matrix."""
+        from click.testing import CliRunner
+
+        from yowo.cli._main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", "--compat"])
+        assert result.exit_code == 0
+        assert "Export Compatibility" in result.output
+        assert "Python" in result.output
+        assert "Component" in result.output
+        assert "Status" in result.output
+
+    def test_info_compat_shows_python_version(self) -> None:
+        """Compat matrix includes Python version."""
+        import platform as _platform
+
+        from click.testing import CliRunner
+
+        from yowo.cli._main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info", "--compat"])
+        assert _platform.python_version() in result.output
+
+    def test_info_without_compat_no_matrix(self) -> None:
+        """Plain `yowo info` does not show compatibility matrix."""
+        from click.testing import CliRunner
+
+        from yowo.cli._main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["info"])
+        assert result.exit_code == 0
+        assert "Export Compatibility" not in result.output

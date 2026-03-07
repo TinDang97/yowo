@@ -291,11 +291,23 @@ def _run_priority_chain(
             f"PyTorch {libs.torch_version} installed (fallback)",
         )
 
-    # Priority 8: nothing available
+    # Priority 8: nothing available — build a detailed status report
+    def _ver(v: str | None) -> str:
+        return f"v{v}" if v else "not installed"
+
+    checked: list[str] = [
+        f"  TensorRT:     {_ver(libs.tensorrt_version)}",
+        f"  ONNX Runtime: {_ver(libs.onnxruntime_version)}",
+        f"  OpenVINO:     {_ver(libs.openvino_version)}",
+        f"  PyTorch:      {_ver(libs.torch_version)}",
+        f"  CoreML:       {_ver(libs.coremltools_version)}",
+    ]
+    status_block = "\n".join(checked)
+
     raise DependencyError(
         package="inference backend",
         install_cmd=_INSTALL_HINTS,
-        message="No supported inference backend was found.",
+        message=f"No supported inference backend was found.\n\nBackend status:\n{status_block}",
     )
 
 
