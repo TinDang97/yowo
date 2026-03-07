@@ -16,7 +16,7 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 - [ ] **CORR-05**: TensorRT exported engines produce correct results on NVIDIA Jetson Orin/Xavier
 - [ ] **CORR-06**: OpenVINO exported models produce correct results on Intel NUC with integrated GPU
 - [x] **CORR-07**: Export accuracy delta vs PyTorch baseline is < 1% mAP for each format
-- [ ] **CORR-08**: Model warmup during load() validates output shape and value range before accepting inference requests
+- [x] **CORR-08**: Model warmup during load() validates output shape and value range before accepting inference requests
 
 ### Benchmark
 
@@ -66,11 +66,11 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Proactive Fixes (from ultralytics known issues)
 
-- [ ] **PFIX-01**: RTSP stream memory leak prevention -- OpenCV VideoCapture leaks ~1MB/2-3hrs per stream; implement bounded memory or alternative decode path
-- [ ] **PFIX-02**: Thread safety for concurrent engine access -- ultralytics model.predict() is not thread-safe; ensure YOWO engines are safe for multi-threaded use
-- [ ] **PFIX-03**: Deterministic NMS output ordering -- ultralytics NMS output order varies between runs; ensure consistent ordering for reproducible results
-- [ ] **PFIX-04**: Export format compatibility matrix -- document and test exact version compatibility (TensorRT version vs CUDA vs GPU arch) to prevent silent failures
-- [ ] **PFIX-05**: Graceful fallback when optional backend unavailable -- clear error messages with install instructions instead of cryptic import errors
+- [x] **PFIX-01**: RTSP stream memory leak prevention -- OpenCV VideoCapture leaks ~1MB/2-3hrs per stream; implement bounded memory or alternative decode path
+- [x] **PFIX-02**: Thread safety for concurrent engine access -- ultralytics model.predict() is not thread-safe; ensure YOWO engines are safe for multi-threaded use
+- [x] **PFIX-03**: Deterministic NMS output ordering -- ultralytics NMS output order varies between runs; ensure consistent ordering for reproducible results
+- [x] **PFIX-04**: Export format compatibility matrix -- document and test exact version compatibility (TensorRT version vs CUDA vs GPU arch) to prevent silent failures
+- [x] **PFIX-05**: Graceful fallback when optional backend unavailable -- clear error messages with install instructions instead of cryptic import errors
 
 ## v2 Requirements
 
@@ -117,7 +117,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | CORR-05 | Phase 1 | Pending |
 | CORR-06 | Phase 1 | Pending |
 | CORR-07 | Phase 1 | Complete |
-| CORR-08 | Phase 1 | Pending |
+| CORR-08 | Phase 1 | Complete |
 | BENCH-01 | Phase 1 | Pending |
 | BENCH-02 | Phase 1 | Pending |
 | BENCH-03 | Phase 1 | Pending |
@@ -146,11 +146,11 @@ Deferred to future release. Tracked but not in current roadmap.
 | BATC-02 | Phase 3 | Pending |
 | BATC-03 | Phase 3 | Pending |
 | BATC-04 | Phase 3 | Pending |
-| PFIX-01 | Phase 1 | Pending |
-| PFIX-02 | Phase 1 | Pending |
-| PFIX-03 | Phase 1 | Pending |
-| PFIX-04 | Phase 1 | Pending |
-| PFIX-05 | Phase 1 | Pending |
+| PFIX-01 | Phase 1 | Complete |
+| PFIX-02 | Phase 1 | Complete |
+| PFIX-03 | Phase 1 | Complete |
+| PFIX-04 | Phase 1 | Complete |
+| PFIX-05 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 41 total
