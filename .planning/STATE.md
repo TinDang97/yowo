@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-03-07T16:01:52.109Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-03-07T16:31:26.147Z"
 last_activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 37
 ---
 
@@ -60,6 +60,7 @@ Progress: [████░░░░░░] 37%
 | Phase 03-adaptive-optimization-and-batch-processing P02 | 11 | 2 tasks | 4 files |
 | Phase 03 P03 | 7 | 2 tasks | 3 files |
 | Phase 03-adaptive-optimization-and-batch-processing P04 | 30 | 2 tasks | 4 files |
+| Phase 03 P05 | 15 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,8 @@ Recent decisions affecting current work:
 - [Phase 03]: _hw_cache parameter on BaseEngine.__init__ avoids double get_hardware_profile() call when DetectionEngine pre-computes hw for tune profile lookup
 - [Phase 03]: Module-level imports in cli/_main.py for get_hardware_profile/run_sweep/load_profile/save_profile/compute_fingerprint for test patchability at yowo.cli._main.*
 - [Phase 03]: count_sweep_dimensions() added as public function to tune/_sweep.py to avoid pyright reportPrivateUsage errors when calling from _main.py
+- [Phase 03-05]: Module-level imports in cli/_main.py for run_batch/BatchConfig/DetectionEngine for test patchability
+- [Phase 03-05]: sys.exit(result) propagates integer exit codes 0/1/2 from run_batch through Click
 
 ### Pending Todos
 
@@ -113,6 +116,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-07T16:01:52.107Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-03-07T16:31:26.145Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
