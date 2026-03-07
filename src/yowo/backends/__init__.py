@@ -13,13 +13,18 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.backends._selector import get_fallback_backends, select_backend
+from yowo.backends._selector import (
+    check_backend_available,
+    get_fallback_backends,
+    select_backend,
+)
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
     "ModelBuilder",
+    "check_backend_available",
     "create_backend",
     "get_fallback_backends",
     "select_backend",

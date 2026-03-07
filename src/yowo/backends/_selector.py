@@ -23,6 +23,7 @@ from yowo.hardware import HardwareProfile
 from yowo.types import BackendSelection, BackendType, CPUArch, DeviceType, Precision
 
 __all__ = [
+    "check_backend_available",
     "get_fallback_backends",
     "select_backend",
     "select_precision",
@@ -328,7 +329,7 @@ def _resolve_override(
         ) from None
 
     libs = hw.libraries
-    _check_backend_available(backend, hw)
+    check_backend_available(backend, hw)
 
     # Determine device type
     gpu_backend = backend in (BackendType.TENSORRT, BackendType.ONNX) and hw.has_nvidia_gpu
@@ -357,7 +358,7 @@ def _resolve_override(
     )
 
 
-def _check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
+def check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
     """Raise BackendError if the specified backend is not usable on this hardware."""
     libs = hw.libraries
 
