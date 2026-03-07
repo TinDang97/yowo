@@ -79,11 +79,12 @@ Plans:
   1. OBB detection produces oriented bounding boxes with rotation angle, matching ultralytics OBB architecture for yolo11 family, and loads weights from ultralytics-trained checkpoints
   2. OBB postprocessing uses rotation-aware NMS that correctly handles overlapping rotated boxes
   3. Running `yowo detect-obb SOURCE --model yolo11n-obb` works end-to-end from CLI, and OBB models export to ONNX and TensorRT correctly
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+- [ ] 04-01-PLAN.md — OBBBox/OBBDetection types + OBBHead + dist2rbox + probiou NMS + OBBModel + OBB registry (OBB-01, OBB-02, OBB-03, OBB-04)
+- [ ] 04-02-PLAN.md — OBBEngine(BaseEngine) + OBBConfig + load_obb_weights engine task branch (OBB-03, OBB-04)
+- [ ] 04-03-PLAN.md — parse_model_name -obb extension + detect-obb CLI + export_model OBB branch + human verification (OBB-05, OBB-06)
 
 ## Progress
 
@@ -95,4 +96,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 1. Correctness, Benchmarking, and Proactive Fixes | 2/3 | Executing | - |
 | 2. Reliability and Multi-Stream Scaling | 3/3 | Complete   | 2026-03-07 |
 | 3. Adaptive Optimization and Batch Processing | 5/5 | Complete   | 2026-03-07 |
-| 4. OBB Detection | 0/2 | Not started | - |
+| 4. OBB Detection | 0/3 | Not started | - |
