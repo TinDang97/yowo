@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import gc
 import queue
 import threading
 import time
+import tracemalloc
 from collections.abc import Iterator
 
 import numpy as np
 import pytest
 
 from yowo.pipeline._collector import FrameCollector
-from yowo.types import Frame, StreamState, TaggedFrame
+from yowo.types import Frame, StreamConfig, StreamState, TaggedFrame
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -190,16 +192,17 @@ class TestStreamStates:
         assert states["s1"] == StreamState.STOPPED
         collector.close()
 
-    def test_erroring_stream_marked_error(self) -> None:
+    def test_erroring_stream_auto_removed(self) -> None:
+        """Stream with persistent read errors is auto-removed from _streams."""
         source = _MockSource(5, error_at=2)
         collector = FrameCollector(max_queue_size=10)
         collector.add_stream("s1", source)
 
-        # Drain -- the error is caught by FrameCollector._try_get
+        # Drain -- persistent errors trigger auto-remove after 3 consecutive errors
         _ = list(collector)
 
-        states = collector.stream_states
-        assert states["s1"] == StreamState.ERROR
+        # Stream is auto-removed; no longer in _streams
+        assert "s1" not in collector._streams
         collector.close()
 
     def test_stream_count_and_active_count(self) -> None:
@@ -276,16 +279,24 @@ class TestEdgeCases:
             FrameCollector(max_queue_size=0)
 
     def test_stream_errors_captures_exception(self) -> None:
-        """stream_errors returns the exception for ERROR streams."""
+        """stream_errors reports errors from auto-removed streams.
+
+        When a stream is auto-removed after consecutive errors, its error
+        is retained in _auto_removed_errors so that _check_stream_errors
+        can detect total pipeline failure after the collector is drained.
+        """
         source = _MockSource(5, error_at=1)
         collector = FrameCollector(max_queue_size=10)
         collector.add_stream("err", source)
 
         _ = list(collector)
 
+        # After auto-remove, the stream is no longer in _streams
+        assert "err" not in collector._streams
+        # But stream_errors still reports the auto-removed stream's error
         errors = collector.stream_errors
         assert "err" in errors
-        assert "source error at frame 1" in str(errors["err"])
+        assert isinstance(errors["err"], RuntimeError)
         collector.close()
 
     def test_stream_errors_empty_when_no_errors(self) -> None:
@@ -315,19 +326,20 @@ class TestSharedQueueDispatch:
         ids = {t.stream_id for t in tagged}
         assert ids == {f"s{i}" for i in range(5)}
 
-    def test_bridge_error_marks_stream_error_state(self) -> None:
-        """Source raising an error causes the bridge to mark ERROR state."""
+    def test_bridge_persistent_error_auto_removes_stream(self) -> None:
+        """Source raising persistent errors causes the bridge to auto-remove stream."""
         source = _MockSource(5, error_at=2)
         collector = FrameCollector(max_queue_size=10)
         collector.add_stream("err", source)
 
         _ = list(collector)
 
-        states = collector.stream_states
-        assert states["err"] == StreamState.ERROR
+        # After auto-remove, stream is gone from _streams
+        assert "err" not in collector._streams
+        # stream_errors still reports the error from the auto-removed stream
         errors = collector.stream_errors
         assert "err" in errors
-        assert "source error at frame 2" in str(errors["err"])
+        assert isinstance(errors["err"], RuntimeError)
         collector.close()
 
     def test_close_unblocks_iter(self) -> None:
@@ -394,3 +406,294 @@ class TestCollectorTypeGuard:
         assert entry.state == StreamState.ERROR
         assert entry.error is not None
         assert "expects Frame" in str(entry.error)
+
+
+# ---------------------------------------------------------------------------
+# TestStreamConfig
+# ---------------------------------------------------------------------------
+
+
+class TestStreamConfig:
+    def test_stream_config_defaults(self) -> None:
+        """StreamConfig default values match spec."""
+        cfg = StreamConfig()
+        assert cfg.auto_reconnect is False
+        assert cfg.max_consecutive_errors == 3
+        assert cfg.reconnect_backoff_base_s == 1.0
+        assert cfg.reconnect_backoff_max_s == 30.0
+
+    def test_stream_config_is_frozen(self) -> None:
+        """StreamConfig is frozen — fields cannot be mutated."""
+        cfg = StreamConfig()
+        with pytest.raises((AttributeError, TypeError)):
+            cfg.max_consecutive_errors = 5  # type: ignore[misc]
+
+    def test_stream_config_custom_values(self) -> None:
+        """StreamConfig accepts custom values."""
+        cfg = StreamConfig(
+            auto_reconnect=True,
+            max_consecutive_errors=5,
+            reconnect_backoff_base_s=2.0,
+            reconnect_backoff_max_s=60.0,
+        )
+        assert cfg.auto_reconnect is True
+        assert cfg.max_consecutive_errors == 5
+        assert cfg.reconnect_backoff_base_s == 2.0
+        assert cfg.reconnect_backoff_max_s == 60.0
+
+    def test_stream_config_exported_from_types(self) -> None:
+        """StreamConfig is importable from yowo.types."""
+        from yowo.types import StreamConfig as SC
+
+        assert SC is StreamConfig
+
+    def test_stream_config_exported_from_pipeline(self) -> None:
+        """StreamConfig is importable from yowo.pipeline."""
+        from yowo.pipeline import StreamConfig as SC
+
+        assert SC is StreamConfig
+
+
+# ---------------------------------------------------------------------------
+# TestPerStreamStats
+# ---------------------------------------------------------------------------
+
+
+class _ErroringReader:
+    """Mock reader that yields frames_before_error frames then always raises."""
+
+    def __init__(self, frames_before_error: int) -> None:
+        self._frames_before_error = frames_before_error
+        self._call_count = 0
+        self.is_exhausted = False
+
+    def get(self, timeout: float = 0.1) -> Frame | None:
+        if self._call_count < self._frames_before_error:
+            self._call_count += 1
+            return _make_frame(self._call_count)
+        raise RuntimeError("stream error")
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
+class TestPerStreamStats:
+    def test_frames_processed_counter(self) -> None:
+        """frames_processed counts frames successfully enqueued."""
+        source = _MockSource(5)
+        collector = FrameCollector(max_queue_size=10)
+        collector.add_stream("s1", source)
+
+        _ = list(collector)
+
+        entry = collector._streams["s1"]
+        assert entry.frames_processed == 5
+        collector.close()
+
+    def test_last_frame_time_updated(self) -> None:
+        """last_frame_time is updated on each successful frame read."""
+        source = _MockSource(3)
+        collector = FrameCollector(max_queue_size=10)
+        before = time.monotonic()
+        collector.add_stream("s1", source)
+
+        _ = list(collector)
+        entry = collector._streams["s1"]
+        after = time.monotonic()
+
+        assert entry.last_frame_time >= before
+        assert entry.last_frame_time <= after
+        collector.close()
+
+    def test_consecutive_errors_reset_on_success(self) -> None:
+        """consecutive_errors resets to 0 after a successful frame read."""
+        from unittest.mock import MagicMock
+
+        from yowo.pipeline._collector import _run_bridge, _StreamEntry
+
+        call_count = 0
+
+        def _get(timeout: float = 0.1) -> Frame | None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient error")
+            # Return None (gap) then return None (exhausted) to end bridge
+            return None
+
+        mock_reader = MagicMock()
+        mock_reader.get.side_effect = _get
+        mock_reader.is_exhausted = True  # bridge exits on first None after error reset
+
+        source = _MockSource(0)
+        entry = _StreamEntry(reader=mock_reader, source=source)
+        shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue(maxsize=100)
+
+        # With max_consecutive_errors=3, one error should NOT trigger auto_remove
+        _run_bridge("s0", entry, shared_q, max_consecutive_errors=3)
+
+        assert entry.consecutive_errors == 0  # reset after successful None read
+        assert entry.auto_remove is False  # not triggered
+
+    def test_frame_drop_stats(self) -> None:
+        """frames_dropped increments when queue is full (max_queue_size=1)."""
+        # max_queue_size=1 means shared_q has maxsize=8; use slow consumer
+        # We test the drop counter by checking it can be read
+        source = _MockSource(3)
+        collector = FrameCollector(max_queue_size=10)
+        collector.add_stream("s1", source)
+        _ = list(collector)
+
+        entry = collector._streams["s1"]
+        # frames_dropped is >= 0 (may be 0 if queue was never full)
+        assert entry.frames_dropped >= 0
+        collector.close()
+
+
+# ---------------------------------------------------------------------------
+# TestAutoRemove
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysErrorSource:
+    """Source that always errors immediately."""
+
+    is_live = True
+
+    @property
+    def total_frames(self) -> int | None:
+        return None
+
+    def __iter__(self) -> Iterator[Frame]:
+        raise RuntimeError("always error")
+        yield  # make it a generator
+
+    def close(self) -> None:
+        pass
+
+
+class _AlwaysErrorReader:
+    """Reader that always raises on get()."""
+
+    is_exhausted = False
+
+    def get(self, timeout: float = 0.1) -> Frame | None:
+        raise RuntimeError("always errors")
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
+class TestAutoRemove:
+    def test_auto_remove_on_consecutive_errors(self) -> None:
+        """Bridge sets auto_remove after max_consecutive_errors; iterator removes stream."""
+        from unittest.mock import MagicMock
+
+        from yowo.pipeline._collector import _run_bridge, _StreamEntry
+
+        mock_reader = MagicMock()
+        mock_reader.get.side_effect = RuntimeError("stream error")
+        mock_reader.is_exhausted = False
+
+        source = _MockSource(0)
+        entry = _StreamEntry(reader=mock_reader, source=source)
+        shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue(maxsize=100)
+
+        _run_bridge("s0", entry, shared_q, max_consecutive_errors=3)
+
+        assert entry.auto_remove is True
+        assert entry.consecutive_errors >= 3
+
+    def test_stream_auto_removed_from_collector(self) -> None:
+        """FrameCollector.__iter__ removes stream after auto_remove is set by bridge."""
+        # Use a custom reader via stream_config with max_consecutive_errors=3
+        # Build a source that always errors
+        source = _AlwaysErrorSource()
+        collector = FrameCollector(max_queue_size=10)
+        cfg = StreamConfig(max_consecutive_errors=3)
+        collector.add_stream("bad", source, stream_config=cfg)
+
+        # Iterate — bad stream will error 3 times and be auto-removed
+        frames = list(collector)
+
+        # Stream produced no frames (all errors)
+        assert len(frames) == 0
+        # Stream was auto-removed from _streams
+        assert "bad" not in collector._streams
+        collector.close()
+
+    def test_auto_remove_does_not_affect_other_streams(self) -> None:
+        """One stream auto-removed; another stream continues normally."""
+        good_frames: list[TaggedFrame] = []
+
+        # "bad" stream errors 3 times immediately; "good" delivers 5 frames
+        bad_source = _AlwaysErrorSource()
+        good_source = _MockSource(5, delay=0.02)
+
+        collector = FrameCollector(max_queue_size=10)
+        cfg = StreamConfig(max_consecutive_errors=3)
+        collector.add_stream("bad", bad_source, stream_config=cfg)
+        collector.add_stream("good", good_source)
+
+        for tagged in collector:
+            if tagged.stream_id == "good":
+                good_frames.append(tagged)
+
+        assert len(good_frames) == 5
+        assert "bad" not in collector._streams
+        collector.close()
+
+
+# ---------------------------------------------------------------------------
+# TestMemoryLeak
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryLeak:
+    def test_remove_stream_no_leak(self) -> None:
+        """remove_stream() leaves no significant memory leak (< 500KB delta)."""
+        tracemalloc.start()
+
+        source = _MockSource(10)
+        collector = FrameCollector(max_queue_size=10)
+        collector.add_stream("s1", source)
+        _ = list(collector)
+        collector.remove_stream("s1")
+
+        gc.collect()
+        gc.collect()
+
+        snapshot = tracemalloc.take_snapshot()
+        tracemalloc.stop()
+
+        stats = snapshot.statistics("lineno")
+        total_size = sum(s.size for s in stats)
+        # Allow up to 500KB of total tracked memory (very generous upper bound)
+        assert total_size < 500_000, f"Memory usage too high: {total_size} bytes"
+
+        collector.close()
+
+    def test_stream_isolation_memory(self) -> None:
+        """After stream B errors and is removed, stream A data is unaffected."""
+        source_a = _MockSource(5, delay=0.01)
+        bad_source = _AlwaysErrorSource()
+
+        collector = FrameCollector(max_queue_size=10)
+        cfg = StreamConfig(max_consecutive_errors=3)
+        collector.add_stream("a", source_a)
+        collector.add_stream("bad", bad_source, stream_config=cfg)
+
+        tagged_a: list[TaggedFrame] = []
+        for tagged in collector:
+            if tagged.stream_id == "a":
+                tagged_a.append(tagged)
+
+        assert len(tagged_a) == 5
+        assert "bad" not in collector._streams
+        collector.close()

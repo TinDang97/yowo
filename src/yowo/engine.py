@@ -81,6 +81,15 @@ from yowo.types import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# OOM monitor thresholds
+# ---------------------------------------------------------------------------
+
+_OOM_TIER1 = 0.80  # halve batch size
+_OOM_TIER2 = 0.90  # attempt precision fallback
+_OOM_TIER3 = 0.95  # evict lowest-activity streams
+_OOM_CLEAR = 0.75  # restore batch size when below this
+
 
 def _resolve_model_meta(spec: ModelSpec, model_builder: Any | None) -> ModelMeta:
     """Resolve model metadata from registry, with custom builder fallback."""
@@ -204,6 +213,11 @@ class BaseEngine(StreamingMixin):
         self._active_streams: set[threading.Event] = set()
         self._streams_drained = threading.Event()
         self._streams_drained.set()
+        # OOM monitor state (initialised here; monitor only starts on CUDA load)
+        self._oom_stop: threading.Event = threading.Event()
+        self._oom_thread: threading.Thread | None = None
+        self._oom_recovering: bool = False
+        self._original_batch_size: int = batch_size
 
     @abstractmethod
     def _process_batch(
@@ -354,6 +368,7 @@ class BaseEngine(StreamingMixin):
             self._pipeline_workers = 2 if is_free_threaded() else 1
         self._loaded = True
         self._health_state = HealthStatus.READY
+        self._start_oom_monitor()
 
     def _allocate_postprocess_buffer(self) -> None:
         """Hook: allocate task-specific postprocess buffer. Default: no-op."""
@@ -388,6 +403,132 @@ class BaseEngine(StreamingMixin):
     def _validate_output_values(self, output: NDArray[np.float32]) -> None:
         """Validate output value ranges. Subclasses override for task-specific checks."""
 
+    # ---------------------------------------------------------------------------
+    # OOM monitor daemon
+    # ---------------------------------------------------------------------------
+
+    @property
+    def _is_cuda(self) -> bool:
+        """True when the active backend is running on a CUDA device."""
+        return self._selection.device_type == DeviceType.CUDA
+
+    def _start_oom_monitor(self) -> None:
+        """Start the OOM monitor daemon thread (CUDA backends only).
+
+        No-op for CPU, ONNX-CPU, CoreML, and other non-CUDA backends.
+        """
+        if not self._is_cuda:
+            return
+        self._oom_stop.clear()
+        self._oom_thread = threading.Thread(
+            target=self._oom_monitor_loop,
+            name="yowo-oom-monitor",
+            daemon=True,
+        )
+        self._oom_thread.start()
+
+    def _oom_monitor_loop(self) -> None:
+        """Poll GPU memory utilisation every 5 s and apply recovery as needed.
+
+        Uses Event.wait() so the daemon exits quickly when _oom_stop is set.
+        GPU memory reads are thread-safe (no _infer_lock needed per RESEARCH.md).
+        """
+        try:
+            import torch
+        except ImportError:
+            logger.warning("OOM monitor: torch not available, exiting")
+            return
+
+        device_index = self._selection.device_index
+        while not self._oom_stop.wait(timeout=5.0):
+            try:
+                reserved = torch.cuda.memory_reserved(device_index)
+                total = torch.cuda.get_device_properties(device_index).total_memory
+                if total > 0:
+                    pct = reserved / total
+                    self._apply_oom_recovery(pct)
+            except Exception as exc:
+                logger.warning("OOM monitor error: %s", exc)
+
+    def _apply_oom_recovery(self, pct: float) -> None:
+        """Apply the three-tier recovery ladder based on *pct* GPU utilisation.
+
+        Tiers (applied top-down, only one action per call):
+          - >= _OOM_TIER3 (0.95): evict lowest-activity streams
+          - >= _OOM_TIER2 (0.90): attempt precision fallback
+          - >= _OOM_TIER1 (0.80): halve batch size
+          - <  _OOM_CLEAR (0.75): restore batch size if recovering
+        """
+        if pct < _OOM_CLEAR:
+            if self._oom_recovering:
+                # Recovery complete — restore original batch size
+                self._batch_size = self._original_batch_size
+                if self._preprocess_buf is not None:
+                    self._preprocess_buf = PreprocessBuffer(
+                        self._batch_size,
+                        (self._model_meta.input_height, self._model_meta.input_width),
+                    )
+                self._oom_recovering = False
+                self._health_state = HealthStatus.READY
+                self._event_bus.emit("health_change", HealthStatus.READY)
+                logger.info(
+                    "OOM monitor: utilisation %.1f%% — batch size restored to %d",
+                    pct * 100,
+                    self._batch_size,
+                )
+            return
+
+        if pct >= _OOM_TIER3:
+            self._evict_lowest_activity_streams()
+            return
+
+        if pct >= _OOM_TIER2:
+            self._try_precision_fallback()
+            return
+
+        if pct >= _OOM_TIER1:
+            self._halve_batch_size()
+
+    def _halve_batch_size(self) -> None:
+        """Tier-1 recovery: halve batch size and reallocate PreprocessBuffer."""
+        if not self._oom_recovering:
+            # Save original on the first reduction only
+            self._original_batch_size = self._batch_size
+        self._batch_size = max(1, self._batch_size // 2)
+        if self._preprocess_buf is not None:
+            self._preprocess_buf = PreprocessBuffer(
+                self._batch_size,
+                (self._model_meta.input_height, self._model_meta.input_width),
+            )
+        self._oom_recovering = True
+        self._health_state = HealthStatus.DEGRADED
+        self._event_bus.emit("health_change", HealthStatus.DEGRADED)
+        logger.warning(
+            "OOM monitor: GPU %.1f%% — batch size halved to %d",
+            0.0,
+            self._batch_size,
+        )
+
+    def _try_precision_fallback(self) -> None:
+        """Tier-2 recovery: attempt FP16 precision fallback if backend supports it."""
+        if hasattr(self._backend, "set_precision"):
+            try:
+                self._backend.set_precision("fp16")  # type: ignore[attr-defined]
+                logger.warning("OOM monitor: switched backend to FP16 precision")
+            except Exception as exc:
+                logger.warning("OOM monitor: precision fallback failed: %s", exc)
+        else:
+            logger.debug("OOM monitor: precision fallback not supported by this backend")
+        self._health_state = HealthStatus.DEGRADED
+
+    def _evict_lowest_activity_streams(self) -> None:
+        """Tier-3 recovery: evict lowest-activity FrameCollector streams.
+
+        BaseEngine stub — no FrameCollector reference held at this layer.
+        Subclasses that manage a pipeline with a FrameCollector should override.
+        """
+        logger.warning("OOM monitor: tier-3 eviction triggered but no stream collector attached")
+
     def close(self, timeout: float = 5.0) -> None:
         """Gracefully shut down: signal streams, drain event bus, release backend."""
         with self._shutdown_lock:
@@ -397,6 +538,9 @@ class BaseEngine(StreamingMixin):
             self._health_state = HealthStatus.SHUTTING_DOWN
             for stop_event in list(self._active_streams):
                 stop_event.set()
+        # Signal OOM monitor daemon to exit (no join needed — daemon=True)
+        if hasattr(self, "_oom_stop"):
+            self._oom_stop.set()
         deadline = time.monotonic() + timeout
         self._streams_drained.wait(timeout=max(0.0, deadline - time.monotonic()))
         self._event_bus.emit("health_change", HealthStatus.SHUTTING_DOWN)

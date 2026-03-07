@@ -132,6 +132,37 @@ class HealthStatus(enum.StrEnum):
     CLOSED = "closed"
 
 
+# ---------------------------------------------------------------------------
+# Stream configuration (defined here alongside HealthStatus for co-location)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StreamConfig:
+    """Per-stream configuration for FrameCollector.
+
+    Controls automatic failure handling and (future) reconnect behaviour.
+    All fields are optional and have production-safe defaults.
+
+    Attributes:
+        auto_reconnect: Whether to attempt reconnection after stream failure.
+            Currently stubbed — field is defined for API stability; reconnect
+            loop is not implemented in this release.
+        max_consecutive_errors: Number of consecutive read errors before the
+            stream is automatically removed from the collector. Default: 3.
+        reconnect_backoff_base_s: Initial backoff duration in seconds for
+            reconnect attempts. Doubles on each retry up to the max.
+            Stubbed for future use. Default: 1.0.
+        reconnect_backoff_max_s: Maximum backoff duration in seconds.
+            Stubbed for future use. Default: 30.0.
+    """
+
+    auto_reconnect: bool = False
+    max_consecutive_errors: int = 3
+    reconnect_backoff_base_s: float = 1.0
+    reconnect_backoff_max_s: float = 30.0
+
+
 class SourceCategory(enum.StrEnum):
     """Input source classification for preset selection."""
 
@@ -516,6 +547,7 @@ __all__ = [
     "Precision",
     "PreprocessedTensor",
     "SourceCategory",
+    "StreamConfig",
     "StreamState",
     "TaggedFrame",
     "is_free_threaded",
