@@ -29,7 +29,10 @@ from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
+
+if TYPE_CHECKING:
+    from yowo.hardware import HardwareProfile
 
 import numpy as np
 from numpy.typing import NDArray
@@ -129,6 +132,57 @@ _OOM_TIER3 = 0.95  # evict lowest-activity streams
 _OOM_CLEAR = 0.75  # restore batch size when below this
 
 
+def _load_tune_profile(
+    spec: ModelSpec,
+    config: InferenceConfig,
+    hw: HardwareProfile,
+) -> InferenceConfig:
+    """Apply saved tune profile to config when caller has not explicitly set values.
+
+    Profile values are applied ONLY when config fields are at their defaults:
+    - ``config.backend is None`` → apply ``profile.backend``
+    - ``config.batch_size == 1`` → apply ``profile.batch_size``
+    - ``config.precision is None`` → apply ``profile.precision``
+
+    Uses ``dataclasses.replace()`` — never mutates config in-place.
+
+    Args:
+        spec: Model spec (used to derive model name for profile lookup).
+        config: Resolved inference config (may be partially populated).
+        hw: Current hardware profile for fingerprint computation.
+
+    Returns:
+        Updated :class:`InferenceConfig` with profile values applied, or the
+        original config unchanged when no profile exists.
+    """
+    from yowo.tune._profile import load_profile
+
+    model_name = f"{spec.family.value}{spec.size.value}"
+    profile = load_profile(model_name, hw)
+    if profile is None:
+        return config
+
+    updates: dict[str, object] = {}
+    if config.backend is None:
+        updates["backend"] = BackendType(profile.backend)
+    if config.batch_size == 1:
+        updates["batch_size"] = profile.batch_size
+    if config.precision is None:
+        updates["precision"] = Precision(profile.precision)
+
+    if not updates:
+        return config
+
+    logger.debug(
+        "Loaded tune profile: backend=%s batch=%d precision=%s fps=%.1f",
+        profile.backend,
+        profile.batch_size,
+        profile.precision,
+        profile.fps_achieved,
+    )
+    return dataclasses.replace(config, **updates)
+
+
 def _resolve_model_meta(spec: ModelSpec, model_builder: Any | None) -> ModelMeta:
     """Resolve model metadata from registry, with custom builder fallback."""
     try:
@@ -192,6 +246,7 @@ class BaseEngine(StreamingMixin):
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
+        _hw_cache: HardwareProfile | None = None,
     ) -> None:
         self._spec = spec
         self._model_builder = model_builder
@@ -216,7 +271,7 @@ class BaseEngine(StreamingMixin):
             self._hw = None
             self._kv_cache = kv_cache
         else:
-            self._hw = get_hardware_profile()
+            self._hw = _hw_cache if _hw_cache is not None else get_hardware_profile()
             self._selection = select_backend(
                 self._hw,
                 model_size=spec.size.value,
@@ -915,6 +970,12 @@ class DetectionEngine(BaseEngine):
             weights_path=cfg.weights_path,
             num_classes=cfg.num_classes,
         )
+        # Apply tune profile (only when user has not explicitly overridden backend/batch/precision
+        # and no custom backend instance was provided)
+        _hw_cache: HardwareProfile | None = None
+        if backend_instance is None:
+            _hw_cache = get_hardware_profile()
+            cfg = _load_tune_profile(spec, cfg, _hw_cache)
         super().__init__(
             spec=spec,
             model_builder=model_builder,
@@ -933,6 +994,7 @@ class DetectionEngine(BaseEngine):
             pipeline_workers=cfg.pipeline_workers,
             metrics_enabled=cfg.metrics_enabled,
             error_threshold=cfg.error_threshold,
+            _hw_cache=_hw_cache,
         )
 
     def _allocate_postprocess_buffer(self) -> None:
