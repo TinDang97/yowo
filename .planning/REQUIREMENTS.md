@@ -60,9 +60,9 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 ### Batch Processing
 
 - [ ] **BATC-01**: User can run `yowo batch SOURCE_DIR --model MODEL` for offline high-throughput processing
-- [ ] **BATC-02**: Batch mode maximizes GPU utilization with larger batch sizes than streaming mode
-- [ ] **BATC-03**: Batch processing supports resume from checkpoint on interruption
-- [ ] **BATC-04**: Batch mode reports progress (processed/total, ETA, throughput)
+- [x] **BATC-02**: Batch mode maximizes GPU utilization with larger batch sizes than streaming mode
+- [x] **BATC-03**: Batch processing supports resume from checkpoint on interruption
+- [x] **BATC-04**: Batch mode reports progress (processed/total, ETA, throughput)
 
 ### Proactive Fixes (from ultralytics known issues)
 
@@ -143,9 +143,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | OBB-05 | Phase 4 | Pending |
 | OBB-06 | Phase 4 | Pending |
 | BATC-01 | Phase 3 | Pending |
-| BATC-02 | Phase 3 | Pending |
-| BATC-03 | Phase 3 | Pending |
-| BATC-04 | Phase 3 | Pending |
+| BATC-02 | Phase 3 | Complete |
+| BATC-03 | Phase 3 | Complete |
+| BATC-04 | Phase 3 | Complete |
 | PFIX-01 | Phase 1 | Complete |
 | PFIX-02 | Phase 1 | Complete |
 | PFIX-03 | Phase 1 | Complete |
