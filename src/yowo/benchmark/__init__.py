@@ -5,7 +5,7 @@ measurement, rich table rendering, and optional ultralytics comparison.
 
 Public API::
 
-    from yowo.benchmark import run_benchmark
+    from yowo.benchmark import run_benchmark, BenchmarkResult
 
     results = run_benchmark(
         model="yolo11n",
@@ -17,6 +17,10 @@ Public API::
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
+from yowo.benchmark._comparison import run_ultralytics_benchmark
 from yowo.benchmark._evaluator import (
     YOLO_TO_COCO,
     detections_to_coco_results,
@@ -25,6 +29,32 @@ from yowo.benchmark._evaluator import (
     load_coco_dataset,
     load_imagenet_dataset,
 )
+from yowo.benchmark._report import render_table, results_to_json
+from yowo.benchmark._runner import BenchmarkResult, run_all_backends
+from yowo.types import ModelFamily, ModelSize, ModelSpec
+
+# Model name pattern: family + size (+ optional task suffix)
+_MODEL_PATTERN = re.compile(r"^(yolo(?:11|26))([nsmxl])(?:-(cls))?$")
+
+
+def _parse_model_name(model: str) -> tuple[ModelSpec, str]:
+    """Parse a model name string into a ModelSpec and task.
+
+    Args:
+        model: e.g. ``"yolo11n"``, ``"yolo26x-cls"``
+
+    Returns:
+        Tuple of (ModelSpec, task_string).
+    """
+    m = _MODEL_PATTERN.match(model)
+    if not m:
+        msg = f"Invalid model name '{model}'. Expected format: yolo{{11,26}}{{n,s,m,l,x}}[-cls]"
+        raise ValueError(msg)
+    family_str, size_str, task_suffix = m.group(1), m.group(2), m.group(3)
+    family = ModelFamily(family_str)
+    size = ModelSize(size_str)
+    task = "classify" if task_suffix == "cls" else "detect"
+    return ModelSpec(family=family, size=size, task=task), task
 
 
 def run_benchmark(
@@ -33,11 +63,8 @@ def run_benchmark(
     formats: str | None = None,
     subset: int | None = None,
     json_output: bool = False,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Run benchmark evaluation across backends.
-
-    Stub -- full implementation added in Task 2 after runner and report
-    modules are created.
 
     Args:
         model: Model name (e.g. ``"yolo11n"`` or ``"yolo11n-cls"``).
@@ -48,14 +75,54 @@ def run_benchmark(
             printing a rich table.
 
     Returns:
-        Dict with benchmark results.
+        Dict with benchmark results and optional ultralytics comparison.
     """
-    # Implementation completed in Task 2 with runner + report modules
-    raise NotImplementedError("run_benchmark requires _runner and _report modules (Task 2)")
+    spec, task = _parse_model_name(model)
+
+    # Load dataset
+    image_ids: list[int] | None = None
+    gt_ann_path: str | None = None
+
+    if task == "classify":
+        images, labels = load_imagenet_dataset(data, subset=subset)
+        image_ids = labels
+    else:
+        images, image_ids, gt_ann_path = load_coco_dataset(data, subset=subset)
+
+    # Parse format filter
+    format_list = [f.strip() for f in formats.split(",")] if formats else None
+
+    # Run benchmarks
+    results = run_all_backends(
+        model_spec=spec,
+        images=images,
+        image_ids=image_ids,
+        gt_ann_path=gt_ann_path,
+        task=task,
+        formats=format_list,
+    )
+
+    # Optional ultralytics comparison
+    ultra_results = run_ultralytics_benchmark(
+        model_name=f"{model}.pt" if not model.endswith(".pt") else model,
+        data_path=data,
+        task=task,
+    )
+
+    if json_output:
+        return results_to_json(
+            results,
+            ultralytics_results=ultra_results,
+            model_name=model,
+        )
+
+    render_table(results, ultralytics_results=ultra_results, model_name=model)
+    return results_to_json(results, ultralytics_results=ultra_results, model_name=model)
 
 
 __all__ = [
     "YOLO_TO_COCO",
+    "BenchmarkResult",
     "detections_to_coco_results",
     "evaluate_coco_map",
     "evaluate_imagenet_accuracy",
