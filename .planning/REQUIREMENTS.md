@@ -43,7 +43,7 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Auto-Tuning
 
-- [ ] **TUNE-01**: User can run `yowo tune --model MODEL` to auto-detect optimal backend, batch size, and precision for current hardware
+- [x] **TUNE-01**: User can run `yowo tune --model MODEL` to auto-detect optimal backend, batch size, and precision for current hardware
 - [x] **TUNE-02**: Auto-tune runs calibration sweep across available backends and precision levels
 - [x] **TUNE-03**: Auto-tune results persist to device-specific profile file for instant startup on subsequent runs
 - [x] **TUNE-04**: Auto-tune respects device memory constraints (does not OOM during calibration)
@@ -132,7 +132,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | RELY-03 | Phase 2 | Complete |
 | RELY-04 | Phase 2 | Complete |
 | RELY-05 | Phase 2 | Complete |
-| TUNE-01 | Phase 3 | Pending |
+| TUNE-01 | Phase 3 | Complete |
 | TUNE-02 | Phase 3 | Complete |
 | TUNE-03 | Phase 3 | Complete |
 | TUNE-04 | Phase 3 | Complete |

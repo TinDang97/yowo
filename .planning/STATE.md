@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-03-07T15:49:38.964Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-03-07T16:01:52.109Z"
 last_activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 11
-  completed_plans: 9
+  completed_plans: 10
   percent: 37
 ---
 
@@ -59,6 +59,7 @@ Progress: [████░░░░░░] 37%
 | Phase 03 P01 | 12 | 2 tasks | 7 files |
 | Phase 03-adaptive-optimization-and-batch-processing P02 | 11 | 2 tasks | 4 files |
 | Phase 03 P03 | 7 | 2 tasks | 3 files |
+| Phase 03-adaptive-optimization-and-batch-processing P04 | 30 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase Phase 03-02]: except Exception + _is_oom() dispatch avoids B030 ruff error from tuple unpacking in except clauses
 - [Phase Phase 03-02]: _measure_config uses DetectionEngine(config) via InferenceConfig(model_family=spec.family,...) — plan interface comment was incorrect about DetectionEngine(spec, config)
 - [Phase 03]: cv2 imported at module level for test patchability; VideoFileSource used for video iteration instead of ThreadedFrameReader (simpler offline API); atomic checkpoint write pattern reused from tune profile
+- [Phase 03]: _hw_cache parameter on BaseEngine.__init__ avoids double get_hardware_profile() call when DetectionEngine pre-computes hw for tune profile lookup
+- [Phase 03]: Module-level imports in cli/_main.py for get_hardware_profile/run_sweep/load_profile/save_profile/compute_fingerprint for test patchability at yowo.cli._main.*
+- [Phase 03]: count_sweep_dimensions() added as public function to tune/_sweep.py to avoid pyright reportPrivateUsage errors when calling from _main.py
 
 ### Pending Todos
 
@@ -109,6 +113,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-07T15:49:38.962Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-03-07T16:01:52.107Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
