@@ -29,12 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Engine warmup during load() validates output shape and value range, rejecting bad models before accepting inference requests
   4. RTSP streaming does not leak memory over sustained operation, concurrent engine access from multiple threads is safe, and NMS output ordering is deterministic across runs
   5. Backend unavailability produces clear error messages with install instructions instead of cryptic import errors, and export compatibility constraints are documented and tested
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
-- [ ] 01-03: TBD
+- [ ] 01-01-PLAN.md — Proactive fixes: warmup validation, thread safety, deterministic NMS, RTSP reconnect, graceful errors, export compat CLI
+- [ ] 01-02-PLAN.md — Benchmark evaluation module: mAP via pycocotools, FPS measurement, rich table rendering, JSON output
+- [ ] 01-03-PLAN.md — Benchmark CLI subcommand: wire module into `yowo benchmark` with all flags + human verification
 
 ### Phase 2: Reliability and Multi-Stream Scaling
 **Goal**: Users can deploy YOWO in sustained production environments with 100+ concurrent streams, automatic failure recovery, and full operational visibility
@@ -89,7 +89,7 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Correctness, Benchmarking, and Proactive Fixes | 0/3 | Not started | - |
+| 1. Correctness, Benchmarking, and Proactive Fixes | 0/3 | Planning complete | - |
 | 2. Reliability and Multi-Stream Scaling | 0/3 | Not started | - |
 | 3. Adaptive Optimization and Batch Processing | 0/2 | Not started | - |
 | 4. OBB Detection | 0/2 | Not started | - |
