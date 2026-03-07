@@ -1,7 +1,7 @@
 # Requirements: YOWO Production-Grade Inference Platform
 
 **Defined:** 2026-03-07
-**Core Value:** Inference that is production-ready out of the box — deploy to any supported device and it works correctly, fast, and reliably under sustained real-world load without manual tuning.
+**Core Value:** Inference that is production-ready out of the box -- deploy to any supported device and it works correctly, fast, and reliably under sustained real-world load without manual tuning.
 
 ## v1 Requirements
 
@@ -66,11 +66,11 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Proactive Fixes (from ultralytics known issues)
 
-- [ ] **PFIX-01**: RTSP stream memory leak prevention — OpenCV VideoCapture leaks ~1MB/2-3hrs per stream; implement bounded memory or alternative decode path
-- [ ] **PFIX-02**: Thread safety for concurrent engine access — ultralytics model.predict() is not thread-safe; ensure YOWO engines are safe for multi-threaded use
-- [ ] **PFIX-03**: Deterministic NMS output ordering — ultralytics NMS output order varies between runs; ensure consistent ordering for reproducible results
-- [ ] **PFIX-04**: Export format compatibility matrix — document and test exact version compatibility (TensorRT version vs CUDA vs GPU arch) to prevent silent failures
-- [ ] **PFIX-05**: Graceful fallback when optional backend unavailable — clear error messages with install instructions instead of cryptic import errors
+- [ ] **PFIX-01**: RTSP stream memory leak prevention -- OpenCV VideoCapture leaks ~1MB/2-3hrs per stream; implement bounded memory or alternative decode path
+- [ ] **PFIX-02**: Thread safety for concurrent engine access -- ultralytics model.predict() is not thread-safe; ensure YOWO engines are safe for multi-threaded use
+- [ ] **PFIX-03**: Deterministic NMS output ordering -- ultralytics NMS output order varies between runs; ensure consistent ordering for reproducible results
+- [ ] **PFIX-04**: Export format compatibility matrix -- document and test exact version compatibility (TensorRT version vs CUDA vs GPU arch) to prevent silent failures
+- [ ] **PFIX-05**: Graceful fallback when optional backend unavailable -- clear error messages with install instructions instead of cryptic import errors
 
 ## v2 Requirements
 
@@ -110,53 +110,53 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORR-01 | TBD | Pending |
-| CORR-02 | TBD | Pending |
-| CORR-03 | TBD | Pending |
-| CORR-04 | TBD | Pending |
-| CORR-05 | TBD | Pending |
-| CORR-06 | TBD | Pending |
-| CORR-07 | TBD | Pending |
-| CORR-08 | TBD | Pending |
-| BENCH-01 | TBD | Pending |
-| BENCH-02 | TBD | Pending |
-| BENCH-03 | TBD | Pending |
-| BENCH-04 | TBD | Pending |
-| STRM-01 | TBD | Pending |
-| STRM-02 | TBD | Pending |
-| STRM-03 | TBD | Pending |
-| STRM-04 | TBD | Pending |
-| STRM-05 | TBD | Pending |
-| RELY-01 | TBD | Pending |
-| RELY-02 | TBD | Pending |
-| RELY-03 | TBD | Pending |
-| RELY-04 | TBD | Pending |
-| RELY-05 | TBD | Pending |
-| TUNE-01 | TBD | Pending |
-| TUNE-02 | TBD | Pending |
-| TUNE-03 | TBD | Pending |
-| TUNE-04 | TBD | Pending |
-| OBB-01 | TBD | Pending |
-| OBB-02 | TBD | Pending |
-| OBB-03 | TBD | Pending |
-| OBB-04 | TBD | Pending |
-| OBB-05 | TBD | Pending |
-| OBB-06 | TBD | Pending |
-| BATC-01 | TBD | Pending |
-| BATC-02 | TBD | Pending |
-| BATC-03 | TBD | Pending |
-| BATC-04 | TBD | Pending |
-| PFIX-01 | TBD | Pending |
-| PFIX-02 | TBD | Pending |
-| PFIX-03 | TBD | Pending |
-| PFIX-04 | TBD | Pending |
-| PFIX-05 | TBD | Pending |
+| CORR-01 | Phase 1 | Pending |
+| CORR-02 | Phase 1 | Pending |
+| CORR-03 | Phase 1 | Pending |
+| CORR-04 | Phase 1 | Pending |
+| CORR-05 | Phase 1 | Pending |
+| CORR-06 | Phase 1 | Pending |
+| CORR-07 | Phase 1 | Pending |
+| CORR-08 | Phase 1 | Pending |
+| BENCH-01 | Phase 1 | Pending |
+| BENCH-02 | Phase 1 | Pending |
+| BENCH-03 | Phase 1 | Pending |
+| BENCH-04 | Phase 1 | Pending |
+| STRM-01 | Phase 2 | Pending |
+| STRM-02 | Phase 2 | Pending |
+| STRM-03 | Phase 2 | Pending |
+| STRM-04 | Phase 2 | Pending |
+| STRM-05 | Phase 2 | Pending |
+| RELY-01 | Phase 2 | Pending |
+| RELY-02 | Phase 2 | Pending |
+| RELY-03 | Phase 2 | Pending |
+| RELY-04 | Phase 2 | Pending |
+| RELY-05 | Phase 2 | Pending |
+| TUNE-01 | Phase 3 | Pending |
+| TUNE-02 | Phase 3 | Pending |
+| TUNE-03 | Phase 3 | Pending |
+| TUNE-04 | Phase 3 | Pending |
+| OBB-01 | Phase 4 | Pending |
+| OBB-02 | Phase 4 | Pending |
+| OBB-03 | Phase 4 | Pending |
+| OBB-04 | Phase 4 | Pending |
+| OBB-05 | Phase 4 | Pending |
+| OBB-06 | Phase 4 | Pending |
+| BATC-01 | Phase 3 | Pending |
+| BATC-02 | Phase 3 | Pending |
+| BATC-03 | Phase 3 | Pending |
+| BATC-04 | Phase 3 | Pending |
+| PFIX-01 | Phase 1 | Pending |
+| PFIX-02 | Phase 1 | Pending |
+| PFIX-03 | Phase 1 | Pending |
+| PFIX-04 | Phase 1 | Pending |
+| PFIX-05 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35
+- v1 requirements: 41 total
+- Mapped to phases: 41
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-07 after initial definition*
+*Last updated: 2026-03-07 after roadmap creation*
