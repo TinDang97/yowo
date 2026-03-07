@@ -35,8 +35,8 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Reliability
 
-- [ ] **RELY-01**: Engine detects approaching OOM condition and reduces batch size or drops precision before crash
-- [ ] **RELY-02**: Engine recovers from transient GPU errors without full restart
+- [x] **RELY-01**: Engine detects approaching OOM condition and reduces batch size or drops precision before crash
+- [x] **RELY-02**: Engine recovers from transient GPU errors without full restart
 - [ ] **RELY-03**: Health check API reports engine status (ready, degraded, unhealthy) queryable via CLI or programmatic API
 - [ ] **RELY-04**: Structured JSON logging with configurable log levels for all engine operations
 - [ ] **RELY-05**: Metrics export (latency, throughput, memory, errors) in Prometheus-compatible format or JSON
@@ -127,8 +127,8 @@ Deferred to future release. Tracked but not in current roadmap.
 | STRM-03 | Phase 2 | Complete |
 | STRM-04 | Phase 2 | Complete |
 | STRM-05 | Phase 2 | Complete |
-| RELY-01 | Phase 2 | Pending |
-| RELY-02 | Phase 2 | Pending |
+| RELY-01 | Phase 2 | Complete |
+| RELY-02 | Phase 2 | Complete |
 | RELY-03 | Phase 2 | Pending |
 | RELY-04 | Phase 2 | Pending |
 | RELY-05 | Phase 2 | Pending |

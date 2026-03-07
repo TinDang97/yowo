@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: completed
-stopped_at: Completed 02-01 FrameCollector per-stream isolation
-last_updated: "2026-03-07T14:14:01.280Z"
-last_activity: 2026-03-07 -- Completed 01-03 benchmark CLI subcommand + 3 bug fixes
+stopped_at: Completed 02-02 OOM monitor and GPU retry wrapper
+last_updated: "2026-03-07T14:26:00.000Z"
+last_activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 25
+  completed_plans: 5
+  percent: 37
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-07)
 
 ## Current Position
 
-Phase: 1 of 4 (Correctness, Benchmarking, and Proactive Fixes) -- COMPLETE
-Plan: 3 of 3 in phase (all complete)
-Status: Phase complete, ready for Phase 2
-Last activity: 2026-03-07 -- Completed 01-03 benchmark CLI subcommand + 3 bug fixes
+Phase: 2 of 4 (Reliability and Multi-Stream Scaling)
+Plan: 2 of 3 in phase
+Status: In progress
+Last activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
 
-Progress: [███░░░░░░░] 25%
+Progress: [████░░░░░░] 37%
 
 ## Performance Metrics
 
@@ -46,11 +46,15 @@ Progress: [███░░░░░░░] 25%
 | 01    | 3     | ~80min | ~27min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (25min), 01-02 (20min), 01-03 (35min)
+- Last 5 plans: 01-01 (25min), 01-02 (20min), 01-03 (35min), 02-01 (45min), 02-02 (24min)
 - Trend: steady
 
 *Updated after each plan completion*
-| Phase 02-reliability-and-multi-stream-scaling P01 | 45 | 2 tasks | 4 files |
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 01    | 3     | ~80min | ~27min  |
+| 02    | 2     | ~69min | ~35min  |
 
 ## Accumulated Context
 
@@ -75,6 +79,10 @@ Recent decisions affecting current work:
 - [Phase 02-01]: Auto-remove sentinel pattern: bridge sets auto_remove flag, iterator calls remove_stream() to avoid self-join deadlock
 - [Phase 02-01]: _auto_removed_errors dict preserves error visibility after stream removal; stream_errors merges both dicts
 - [Phase 02-01]: StreamConfig reconnect fields stubbed for API stability; only max_consecutive_errors is active in this plan
+- [Phase 02-02]: OOM monitor uses Event.wait(5.0) not time.sleep(5.0) for fast shutdown
+- [Phase 02-02]: _halve_batch_size reallocates PreprocessBuffer to prevent oversized batch corruption
+- [Phase 02-02]: _infer_with_retry returns zeros on exhaustion (no raise) — engine stays alive per RELY-02
+- [Phase 02-02]: log_level validated with frozenset class variable in InferenceConfig/ClassificationConfig
 
 ### Pending Todos
 
@@ -87,6 +95,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-07T14:14:01.278Z
-Stopped at: Completed 02-01 FrameCollector per-stream isolation
+Last session: 2026-03-07T14:26:00.000Z
+Stopped at: Completed 02-02 OOM monitor and GPU retry wrapper
 Resume file: None
