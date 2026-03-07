@@ -10,10 +10,103 @@ import click
 from yowo.types import BackendType, ExportFormat, ModelSpec, Precision
 
 
+def run_benchmark(
+    model: str,
+    data: str,
+    formats: str | None = None,
+    subset: int | None = None,
+    json_output: bool = False,
+) -> dict:
+    """Lazy wrapper around :func:`yowo.benchmark.run_benchmark`.
+
+    Defers import so the CLI module loads without optional benchmark
+    dependencies (pycocotools, rich).
+    """
+    from yowo.benchmark import run_benchmark as _impl
+
+    return _impl(
+        model=model,
+        data=data,
+        formats=formats,
+        subset=subset,
+        json_output=json_output,
+    )
+
+
 @click.group()
 @click.version_option(package_name="yowo")
 def cli() -> None:
     """yowo - Production YOLO inference and export."""
+
+
+@cli.command("benchmark")
+@click.option("--model", "-m", required=True, help="Model name, e.g. yolo11n or yolo11n-cls")
+@click.option(
+    "--data",
+    required=True,
+    type=click.Path(),
+    help="Path to dataset root (COCO or ImageNet)",
+)
+@click.option(
+    "--format",
+    "formats",
+    default=None,
+    help="Comma-separated formats: pytorch,onnx,trt,openvino",
+)
+@click.option("--subset", default=None, type=int, help="Evaluate on first N images only")
+@click.option("--json", "json_output", is_flag=True, help="Output results as JSON")
+@click.option("--output", "-o", default=None, type=click.Path(), help="Write JSON results to file")
+def benchmark_command(
+    model: str,
+    data: str,
+    formats: str | None,
+    subset: int | None,
+    json_output: bool,
+    output: str | None,
+) -> None:
+    """Run benchmark evaluation across backends (mAP, FPS, latency)."""
+    import json as json_mod
+
+    data_path = Path(data)
+    is_cls = "-cls" in model
+
+    # Validate data path exists with expected structure
+    if not data_path.is_dir():
+        if is_cls:
+            click.echo(
+                f"Error: Dataset path does not exist: {data}\n\n"
+                f"Expected: {data}/val/n01440764/*.JPEG (torchvision ImageFolder layout)\n"
+                "Download from: https://image-net.org/download.php",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Error: Dataset path does not exist: {data}\n\n"
+                f"Expected: {data}/val2017/ and {data}/annotations/instances_val2017.json\n"
+                "Download from: https://cocodataset.org/#download",
+                err=True,
+            )
+        sys.exit(1)
+
+    try:
+        result_dict = run_benchmark(
+            model=model,
+            data=data,
+            formats=formats,
+            subset=subset,
+            json_output=json_output or output is not None,
+        )
+    except Exception as exc:
+        click.echo(f"Benchmark failed: {exc}", err=True)
+        sys.exit(1)
+
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json_mod.dumps(result_dict, indent=2), encoding="utf-8")
+        click.echo(f"Results written to {output}")
+    elif json_output:
+        click.echo(json_mod.dumps(result_dict, indent=2))
 
 
 @cli.command("detect")
