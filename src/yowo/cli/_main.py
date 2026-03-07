@@ -8,6 +8,8 @@ from pathlib import Path
 
 import click
 
+from yowo.batch._runner import BatchConfig, run_batch
+from yowo.engine import DetectionEngine
 from yowo.hardware import get_hardware_profile
 from yowo.tune._profile import TuneProfile, compute_fingerprint, load_profile, save_profile
 from yowo.tune._sweep import run_sweep
@@ -1124,6 +1126,105 @@ def tune_command(
     )
     save_profile(profile, path=output)
     click.echo("Profile saved.")
+
+
+@cli.command("batch")
+@click.argument("source_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--model", "-m", required=True, help="Model name (e.g. yolo11n)")
+@click.option(
+    "--weights",
+    "-w",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to custom weights file",
+)
+@click.option(
+    "--output",
+    "-o",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Output directory (created if missing)",
+)
+@click.option(
+    "--no-annotate",
+    "no_annotate",
+    is_flag=True,
+    default=False,
+    help="Skip annotated frame writing (results.jsonl only)",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["jsonl", "json"]),
+    default="jsonl",
+    help="Output format for results",
+)
+@click.option(
+    "--recursive",
+    is_flag=True,
+    default=False,
+    help="Descend into subdirectories",
+)
+@click.option(
+    "--no-resume",
+    "no_resume",
+    is_flag=True,
+    default=False,
+    help="Ignore checkpoint and reprocess all files",
+)
+@click.option(
+    "--workers",
+    default=0,
+    type=int,
+    help="Preprocessing worker threads (0=auto)",
+)
+def batch_command(
+    source_dir: Path,
+    model: str,
+    weights: Path | None,
+    output: Path,
+    no_annotate: bool,
+    output_format: str,
+    recursive: bool,
+    no_resume: bool,
+    workers: int,
+) -> None:
+    """Run offline batch inference over all images/videos in SOURCE_DIR."""
+    from yowo.config import InferenceConfig
+
+    if workers < 0:
+        raise click.UsageError("--workers must be >= 0")
+
+    spec = _parse_model_spec(model)
+    config = InferenceConfig(
+        model_family=spec.family,
+        model_size=spec.size,
+        weights_path=weights if weights else spec.weights_path,
+        pipeline_workers=workers,
+    )
+    engine = DetectionEngine(config)
+    try:
+        engine.load()
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    bconfig = BatchConfig(
+        source_dir=source_dir,
+        output_dir=output,
+        model_name=model,
+        weights_path=weights,
+        no_annotate=no_annotate,
+        output_format=output_format,
+        recursive=recursive,
+        no_resume=no_resume,
+        workers=workers,
+    )
+    try:
+        result = run_batch(bconfig, engine)
+    finally:
+        engine.close()
+
+    sys.exit(result)
 
 
 __all__ = ["cli"]
