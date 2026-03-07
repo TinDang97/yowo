@@ -92,28 +92,26 @@ class TestDetectionWarmupValidation:
             engine.load()
 
     def test_bad_confidence_range_above_one(self) -> None:
-        """Engine rejects detection output with scores > 1."""
-        bad_output = np.zeros((1, 84, 10), dtype=np.float32)
-        bad_output[:, 4:, :] = 2.0  # scores way above 1
-        mock_be = _make_mock_backend(infer_output=bad_output)
+        """Engine accepts detection output with raw logits > 1 (valid YOLO output)."""
+        logit_output = np.zeros((1, 84, 10), dtype=np.float32)
+        logit_output[:, 4:, :] = 636.0  # raw logits before sigmoid
+        mock_be = _make_mock_backend(infer_output=logit_output)
         engine = DetectionEngine(backend_instance=mock_be)
-        with (
-            pytest.raises(WarmupValidationError, match="outside.*0.*1"),
-            patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")),
-        ):
+        with patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")):
             engine.load()
+        assert engine.is_loaded
+        engine.close()
 
     def test_bad_confidence_range_negative(self) -> None:
-        """Engine rejects detection output with negative scores."""
-        bad_output = np.zeros((1, 84, 10), dtype=np.float32)
-        bad_output[:, 4:, :] = -1.0
-        mock_be = _make_mock_backend(infer_output=bad_output)
+        """Engine accepts detection output with negative raw logits (valid YOLO output)."""
+        logit_output = np.zeros((1, 84, 10), dtype=np.float32)
+        logit_output[:, 4:, :] = -15.0  # negative logits map to near-zero after sigmoid
+        mock_be = _make_mock_backend(infer_output=logit_output)
         engine = DetectionEngine(backend_instance=mock_be)
-        with (
-            pytest.raises(WarmupValidationError, match="outside.*0.*1"),
-            patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")),
-        ):
+        with patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")):
             engine.load()
+        assert engine.is_loaded
+        engine.close()
 
     def test_good_output_passes(self) -> None:
         """Valid output shape and range allows engine to load normally."""
@@ -143,6 +141,30 @@ class TestDetectionWarmupValidation:
         engine = DetectionEngine(backend_instance=mock_be)
         with (
             pytest.raises(WarmupValidationError, match="GPU OOM"),
+            patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")),
+        ):
+            engine.load()
+
+    def test_nan_in_output_raises(self) -> None:
+        """Engine rejects detection output containing NaN."""
+        bad_output = np.zeros((1, 84, 10), dtype=np.float32)
+        bad_output[0, 0, 0] = float("nan")
+        mock_be = _make_mock_backend(infer_output=bad_output)
+        engine = DetectionEngine(backend_instance=mock_be)
+        with (
+            pytest.raises(WarmupValidationError, match="NaN"),
+            patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")),
+        ):
+            engine.load()
+
+    def test_inf_in_output_raises(self) -> None:
+        """Engine rejects detection output containing Inf."""
+        bad_output = np.zeros((1, 84, 10), dtype=np.float32)
+        bad_output[0, 0, 0] = float("inf")
+        mock_be = _make_mock_backend(infer_output=bad_output)
+        engine = DetectionEngine(backend_instance=mock_be)
+        with (
+            pytest.raises(WarmupValidationError, match="Inf"),
             patch(_RESOLVE_PATCH, return_value=Path("/fake/w.pt")),
         ):
             engine.load()

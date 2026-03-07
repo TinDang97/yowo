@@ -64,14 +64,19 @@ def _check_backend_available(backend_type: BackendType) -> bool:
 
 
 def _get_model_size_mb(spec: ModelSpec) -> float:
-    """Get model file size in MB from weights path."""
-    if spec.weights_path is not None:
+    """Get model file size in MB, resolving from cache if weights_path is unset."""
+    path = spec.weights_path
+    if path is None:
         try:
-            size_bytes = Path(spec.weights_path).stat().st_size
-            return size_bytes / (1024 * 1024)
-        except OSError:
-            pass
-    return 0.0
+            from yowo.models import resolve_weights
+
+            path = resolve_weights(spec)
+        except Exception:
+            return 0.0
+    try:
+        return Path(path).stat().st_size / (1024 * 1024)
+    except OSError:
+        return 0.0
 
 
 def _load_image_as_frame(image_path: Path, index: int) -> Frame:

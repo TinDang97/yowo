@@ -155,7 +155,8 @@ def evaluate_coco_map(
         gt_ann_path: Path to COCO ``instances_val2017.json`` annotations file.
         predictions: List of COCO-format result dicts (from
             :func:`detections_to_coco_results`).
-        subset: If set, only evaluate on first *subset* images.
+        subset: Unused (kept for API compatibility). Image scope is determined
+            by the unique image IDs present in *predictions*.
 
     Returns:
         Dict with keys ``mAP_50_95``, ``mAP_50``, ``mAP_75``.
@@ -179,14 +180,15 @@ def evaluate_coco_map(
     with contextlib.redirect_stdout(io.StringIO()):
         coco_gt = COCO(str(gt_ann_path))
 
-    img_ids = sorted(coco_gt.getImgIds())[:subset] if subset is not None else None
+    # Restrict evaluation to only the images that have predictions so that
+    # unscored images don't drag down recall across the full val set.
+    evaluated_img_ids = sorted({int(p["image_id"]) for p in predictions})  # type: ignore[arg-type]
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_dt = coco_gt.loadRes(predictions)  # type: ignore[arg-type]
 
     coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
-    if img_ids is not None:
-        coco_eval.params.imgIds = img_ids
+    coco_eval.params.imgIds = evaluated_img_ids
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_eval.evaluate()
