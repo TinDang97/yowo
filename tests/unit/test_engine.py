@@ -1043,8 +1043,13 @@ class TestConcurrentPipeline:
         assert indices == list(range(6))
         source.close.assert_called_once()
 
-    def test_pipeline_worker_exception_propagates(self) -> None:
-        """If a worker raises during inference, the exception propagates to the caller."""
+    def test_pipeline_worker_persistent_error_returns_empty(self) -> None:
+        """If backend.infer raises on every retry, worker returns empty detection.
+
+        Since v2.3.0 (RELY-02), _infer_with_retry exhausts retries and returns
+        empty result instead of raising — the engine degrades gracefully.
+        errors_total is incremented and source.close() is still called.
+        """
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
         mock_backend.infer.side_effect = RuntimeError("GPU OOM")
@@ -1069,10 +1074,14 @@ class TestConcurrentPipeline:
         with (
             patch("yowo.engine.preprocess", return_value=dummy_tensor),
             patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
-            pytest.raises(RuntimeError, match="GPU OOM"),
+            patch("yowo.engine.time.sleep"),
         ):
-            list(engine.stream(source))
+            results = list(engine.stream(source))
 
+        # Empty detection returned (no raise), error counter incremented
+        assert len(results) == 1
+        assert results[0].boxes == ()
+        assert engine.metrics.errors_total == 1
         source.close.assert_called_once()
 
 
@@ -1127,10 +1136,13 @@ class TestSourceCloseOnExceptions:
         source.close.assert_called_once()
 
     def test_stream_pipeline_closes_on_detect_error(self) -> None:
-        """_stream_pipeline calls source.close() even when detect() raises in worker."""
+        """_stream_pipeline calls source.close() even when inference raises in worker.
+
+        Patches _run_batch to raise directly (bypasses the retry wrapper in
+        _infer_with_retry) so we can test source.close() teardown behavior.
+        """
         hw = _make_cpu_only_profile(torch=True)
         mock_backend = _make_mock_backend()
-        mock_backend.infer.side_effect = InferenceError("worker crash")
 
         with (
             patch("yowo.engine.get_hardware_profile", return_value=hw),
@@ -1141,16 +1153,8 @@ class TestSourceCloseOnExceptions:
         frames = [_make_frame(i) for i in range(2)]
         source = _make_mock_source(frames=frames, is_live=False, total_frames=2)
 
-        dummy_tensor = MagicMock(spec=PreprocessedTensor)
-        dummy_tensor.original_shapes = ((480, 640),)
-        dummy_tensor.scale_factors = ((1.0, 1.0),)
-        dummy_tensor.pad_offsets = ((0, 0),)
-        dummy_tensor.input_shape = (640, 640)
-        dummy_tensor.batch_size = 1
-        dummy_tensor.data = np.zeros((1, 3, 640, 640), dtype=np.float32)
-
         with (
-            patch("yowo.engine.preprocess_into", return_value=dummy_tensor),
+            patch.object(engine, "_run_batch", side_effect=InferenceError("worker crash")),
             pytest.raises(InferenceError, match="worker crash"),
         ):
             list(engine.stream(source))

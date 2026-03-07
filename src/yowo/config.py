@@ -23,6 +23,8 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_PIPELINE_WORKERS    -> InferenceConfig.pipeline_workers
     YOWO_METRICS_ENABLED     -> InferenceConfig.metrics_enabled
     YOWO_ERROR_THRESHOLD     -> InferenceConfig.error_threshold
+    YOWO_LOG_LEVEL           -> InferenceConfig.log_level
+    YOWO_STRUCTURED_LOGGING  -> InferenceConfig.structured_logging (1/true/yes)
 """
 
 from __future__ import annotations
@@ -107,6 +109,11 @@ class InferenceConfig:
             Disable to save ~2µs per frame on extremely latency-sensitive paths.
         error_threshold: Number of cumulative errors before ``engine.health``
             transitions to ``DEGRADED``. Must be >= 1.
+        log_level: Minimum logging level for the yowo logger. Must be one of
+            ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or ``CRITICAL``.
+            Maps to ``YOWO_LOG_LEVEL`` env var. Default: ``"WARNING"``.
+        structured_logging: Emit structured (JSON) log records when ``True``.
+            Maps to ``YOWO_STRUCTURED_LOGGING=1`` env var. Default: ``False``.
     """
 
     model_family: ModelFamily = ModelFamily.YOLO26
@@ -129,6 +136,12 @@ class InferenceConfig:
     pipeline_workers: int = 0
     metrics_enabled: bool = True
     error_threshold: int = 10
+    log_level: str = "WARNING"
+    """Logging level for yowo. Maps to YOWO_LOG_LEVEL env var."""
+    structured_logging: bool = False
+    """Emit structured (JSON) log records. Maps to YOWO_STRUCTURED_LOGGING=1."""
+
+    _VALID_LOG_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
     def __post_init__(self) -> None:
         if self.num_classes is not None and self.num_classes < 1:
@@ -147,6 +160,10 @@ class InferenceConfig:
             raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
         if self.error_threshold < 1:
             raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
+        if self.log_level not in self._VALID_LOG_LEVELS:
+            raise ConfigError(
+                f"log_level must be one of {sorted(self._VALID_LOG_LEVELS)}, got {self.log_level!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +226,12 @@ class ClassificationConfig:
     pipeline_workers: int = 0
     metrics_enabled: bool = True
     error_threshold: int = 10
+    log_level: str = "WARNING"
+    """Logging level for yowo. Maps to YOWO_LOG_LEVEL env var."""
+    structured_logging: bool = False
+    """Emit structured (JSON) log records. Maps to YOWO_STRUCTURED_LOGGING=1."""
+
+    _VALID_LOG_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
     def __post_init__(self) -> None:
         if self.num_classes is not None and self.num_classes < 1:
@@ -223,6 +246,10 @@ class ClassificationConfig:
             raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
         if self.error_threshold < 1:
             raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
+        if self.log_level not in self._VALID_LOG_LEVELS:
+            raise ConfigError(
+                f"log_level must be one of {sorted(self._VALID_LOG_LEVELS)}, got {self.log_level!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +358,10 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.metrics_enabled = v.lower() in ("true", "1", "yes")
     if (v := env.get("YOWO_ERROR_THRESHOLD")) is not None:
         cfg.error_threshold = int(v)
+    if (v := env.get("YOWO_LOG_LEVEL")) is not None:
+        cfg.log_level = v.upper()
+    if (v := env.get("YOWO_STRUCTURED_LOGGING")) is not None:
+        cfg.structured_logging = v in ("1", "true", "yes")
 
 
 def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
@@ -462,6 +493,10 @@ def _apply_classification_env_overrides(cfg: ClassificationConfig) -> None:
         cfg.metrics_enabled = v.lower() in ("true", "1", "yes")
     if (v := env.get("YOWO_ERROR_THRESHOLD")) is not None:
         cfg.error_threshold = int(v)
+    if (v := env.get("YOWO_LOG_LEVEL")) is not None:
+        cfg.log_level = v.upper()
+    if (v := env.get("YOWO_STRUCTURED_LOGGING")) is not None:
+        cfg.structured_logging = v in ("1", "true", "yes")
 
 
 def load_classification_config() -> ClassificationConfig:

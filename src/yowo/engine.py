@@ -618,6 +618,48 @@ class BaseEngine(StreamingMixin):
             if not self._active_streams:
                 self._streams_drained.set()
 
+    # Retry delays for _infer_with_retry: 100ms, 200ms, 400ms
+    _RETRY_DELAYS = (0.1, 0.2, 0.4)
+
+    def _infer_with_retry(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """Call backend.infer() with exponential backoff retry.
+
+        Retries up to 3 times on any exception (100ms, 200ms, 400ms backoff).
+        On exhaustion: records error, emits "error" event, returns an empty
+        result array so the engine does not crash.
+
+        Must be called with ``_infer_lock`` already held (called from _run_gpu).
+
+        Returns:
+            Raw model output or zeros on exhaustion.
+        """
+        delays = self._RETRY_DELAYS
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate(delays):
+            try:
+                return self._backend.infer(tensor)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < len(delays) - 1:
+                    logger.warning(
+                        "backend.infer() attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt + 1,
+                        len(delays),
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    # All attempts exhausted
+                    logger.warning(
+                        "backend.infer() failed after %d attempts: %s — returning empty result",
+                        len(delays),
+                        exc,
+                    )
+                    self._metrics.record_error()
+                    self._event_bus.emit("error", last_exc)
+        return np.zeros((1, 0, 6), dtype=np.float32)
+
     def _run_gpu(
         self,
         tensor: PreprocessedTensor,
@@ -636,7 +678,7 @@ class BaseEngine(StreamingMixin):
                 if sid:
                     self._backend.set_source_id(sid)
             t0 = time.perf_counter()
-            raw_output = self._backend.infer(tensor)
+            raw_output = self._infer_with_retry(tensor)
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
         return raw_output, elapsed_ms
