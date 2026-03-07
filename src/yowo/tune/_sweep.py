@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from yowo.hardware import HardwareProfile
     from yowo.types import ModelSpec
 
-__all__ = ["SweepResult", "run_sweep"]
+__all__ = ["SweepResult", "count_sweep_dimensions", "run_sweep"]
 
 _log = logging.getLogger(__name__)
 
@@ -355,3 +355,20 @@ def run_sweep(
 
     non_skipped = [r for r in results if not r.skipped]
     return sorted(non_skipped, key=lambda r: (-r.fps, r.batch_size))
+
+
+def count_sweep_dimensions(hw: HardwareProfile) -> int:  # type: ignore[name-defined]
+    """Return total number of (backend, precision, batch_size) combinations for *hw*.
+
+    Used by ``yowo tune --dry-run`` to report the sweep size without running it.
+
+    Args:
+        hw: Current hardware profile.
+
+    Returns:
+        Total number of configurations that :func:`run_sweep` would attempt.
+    """
+    total = 0
+    for backend in _enumerate_backends(hw):
+        total += len(_precisions_for_backend(backend, hw)) * len(_BATCH_SIZES)
+    return total

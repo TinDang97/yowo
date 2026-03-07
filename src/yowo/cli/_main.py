@@ -8,6 +8,9 @@ from pathlib import Path
 
 import click
 
+from yowo.hardware import get_hardware_profile
+from yowo.tune._profile import TuneProfile, compute_fingerprint, load_profile, save_profile
+from yowo.tune._sweep import run_sweep
 from yowo.types import BackendType, ExportFormat, ModelSpec, Precision
 
 
@@ -971,6 +974,156 @@ def metrics_command(output_format: str) -> None:
 
         click.echo(json.dumps(dataclasses.asdict(snap), indent=2))
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Tune helpers (importable for test patching)
+# ---------------------------------------------------------------------------
+
+
+def _enumerate_sweep_dimensions(hw: object) -> int:
+    """Count backend x precision x batch_size configurations available on *hw*.
+
+    Used by ``tune_command`` dry-run output.  Delegates to
+    :func:`~yowo.tune._sweep.count_sweep_dimensions`.
+
+    Args:
+        hw: :class:`~yowo.hardware.HardwareProfile` instance.
+
+    Returns:
+        Total number of (backend, precision, batch_size) combinations that
+        would be attempted by :func:`~yowo.tune._sweep.run_sweep`.
+    """
+    from yowo.tune._sweep import count_sweep_dimensions
+
+    return count_sweep_dimensions(hw)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Tune CLI subcommand
+# ---------------------------------------------------------------------------
+
+
+@cli.command("tune")
+@click.option("--model", "-m", required=True, help="Model name (e.g. yolo11n)")
+@click.option(
+    "--weights",
+    "-w",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to local weights file",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Profile output path override",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Re-tune even if a valid profile exists",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Show sweep plan without running calibration",
+)
+@click.option(
+    "--json",
+    "json_out",
+    is_flag=True,
+    default=False,
+    help="Output machine-readable JSON array to stdout",
+)
+def tune_command(
+    model: str,
+    weights: Path | None,
+    output: Path | None,
+    force: bool,
+    dry_run: bool,
+    json_out: bool,
+) -> None:
+    """Calibrate inference settings for MODEL on the current device."""
+    import dataclasses
+    import datetime
+
+    spec = _parse_model_spec(model)
+    if weights:
+        spec = ModelSpec(spec.family, spec.size, spec.task, weights)
+
+    hw = get_hardware_profile()
+
+    if not force:
+        existing = load_profile(model, hw)
+        if existing is not None:
+            click.echo("Profile exists. Use --force to re-tune.")
+            return
+
+    if dry_run:
+        n = _enumerate_sweep_dimensions(hw)
+        click.echo(f"Dry run: would sweep {n} configurations")
+        return
+
+    results = run_sweep(spec, hw, dry_run=False)
+
+    if json_out:
+        click.echo(json.dumps([dataclasses.asdict(r) for r in results]))
+        return
+
+    if not results:
+        click.echo("No results — all configurations were skipped.")
+        return
+
+    # Render rich table
+    try:
+        from rich.console import Console
+        from rich.table import Table
+    except ImportError:
+        raise click.UsageError(
+            "rich is required for tune output. Run: uv add yowo[benchmark]"
+        ) from None
+
+    console = Console()
+    table = Table(title=f"Calibration Results: {model}")
+    table.add_column("Backend", style="cyan")
+    table.add_column("Batch Size", justify="right")
+    table.add_column("Precision")
+    table.add_column("FPS", justify="right", style="green")
+
+    best = results[0]  # sorted by run_sweep: highest FPS first
+    for r in results:
+        is_best = r is best
+        row_style = "bold green" if is_best else None
+        table.add_row(
+            r.backend,
+            str(r.batch_size),
+            r.precision,
+            f"{r.fps:.1f}",
+            style=row_style,
+        )
+
+    console.print(table)
+    click.echo(
+        f"Best config: backend={best.backend} batch={best.batch_size} "
+        f"precision={best.precision} ({best.fps:.1f} FPS)"
+    )
+
+    fingerprint = compute_fingerprint(hw)
+    profile = TuneProfile(
+        model=model,
+        backend=best.backend,
+        batch_size=best.batch_size,
+        precision=best.precision,
+        fps_achieved=best.fps,
+        tuned_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        fingerprint=fingerprint,
+    )
+    save_profile(profile, path=output)
+    click.echo("Profile saved.")
 
 
 __all__ = ["cli"]
