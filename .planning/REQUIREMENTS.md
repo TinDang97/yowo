@@ -20,10 +20,10 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### Benchmark
 
-- [ ] **BENCH-01**: User can run `yowo benchmark --model MODEL` to get mAP + FPS + model size per export format on current hardware
-- [ ] **BENCH-02**: Benchmark results include comparison table: format, mAP, FPS, model size, device name
-- [ ] **BENCH-03**: Benchmark mode supports all backends (PyTorch, ONNX, TensorRT, OpenVINO)
-- [ ] **BENCH-04**: Benchmark results are persistable to JSON for cross-run comparison
+- [x] **BENCH-01**: User can run `yowo benchmark --model MODEL` to get mAP + FPS + model size per export format on current hardware
+- [x] **BENCH-02**: Benchmark results include comparison table: format, mAP, FPS, model size, device name
+- [x] **BENCH-03**: Benchmark mode supports all backends (PyTorch, ONNX, TensorRT, OpenVINO)
+- [x] **BENCH-04**: Benchmark results are persistable to JSON for cross-run comparison
 
 ### Streaming
 
@@ -118,10 +118,10 @@ Deferred to future release. Tracked but not in current roadmap.
 | CORR-06 | Phase 1 | Pending |
 | CORR-07 | Phase 1 | Complete |
 | CORR-08 | Phase 1 | Complete |
-| BENCH-01 | Phase 1 | Pending |
-| BENCH-02 | Phase 1 | Pending |
-| BENCH-03 | Phase 1 | Pending |
-| BENCH-04 | Phase 1 | Pending |
+| BENCH-01 | Phase 1 | Complete |
+| BENCH-02 | Phase 1 | Complete |
+| BENCH-03 | Phase 1 | Complete |
+| BENCH-04 | Phase 1 | Complete |
 | STRM-01 | Phase 2 | Pending |
 | STRM-02 | Phase 2 | Pending |
 | STRM-03 | Phase 2 | Pending |

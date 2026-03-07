@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-07T12:00:00Z"
-last_activity: 2026-03-07 -- Completed 01-01 proactive fixes (warmup validation, thread safety, NMS, RTSP reconnect, CLI compat)
+status: phase-complete
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-03-07T13:10:00Z"
+last_activity: 2026-03-07 -- Completed Phase 1 (all 3 plans): correctness fixes, benchmark module, benchmark CLI
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 12
   completed_plans: 3
   percent: 25
@@ -21,33 +21,33 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-07)
 
 **Core value:** Inference that is production-ready out of the box -- deploy to any supported device and it works correctly, fast, and reliably under sustained real-world load without manual tuning.
-**Current focus:** Phase 1: Correctness, Benchmarking, and Proactive Fixes
+**Current focus:** Phase 1 COMPLETE. Next: Phase 2 (OBB / Scale)
 
 ## Current Position
 
-Phase: 1 of 4 (Correctness, Benchmarking, and Proactive Fixes)
-Plan: 3 of 3 in current phase
-Status: Executing
-Last activity: 2026-03-07 -- Completed 01-01 proactive fixes
+Phase: 1 of 4 (Correctness, Benchmarking, and Proactive Fixes) -- COMPLETE
+Plan: 3 of 3 in phase (all complete)
+Status: Phase complete, ready for Phase 2
+Last activity: 2026-03-07 -- Completed 01-03 benchmark CLI subcommand + 3 bug fixes
 
-Progress: [██▌░░░░░░░] 25%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 25min
-- Total execution time: 0.4 hours
+- Total plans completed: 3
+- Average duration: ~27min
+- Total execution time: ~1.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01    | 1     | 25min | 25min    |
+| 01    | 3     | ~80min | ~27min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (25min)
-- Trend: baseline
+- Last 5 plans: 01-01 (25min), 01-02 (20min), 01-03 (35min)
+- Trend: steady
 
 *Updated after each plan completion*
 
@@ -67,18 +67,22 @@ Recent decisions affecting current work:
 - 01-02: Module-level imports in _runner.py for test mockability over local imports
 - 01-02: YOLO_TO_COCO as immutable tuple, pycocotools stdout suppressed during eval
 - 01-02: pycocotools + rich as optional [benchmark] dependency group in pyproject.toml
+- 01-03: CLI validates --data path existence; shows dataset-type-specific download instructions based on -cls suffix
+- 01-03: Missing optional deps raise click.UsageError with uv add yowo[benchmark] instruction
+- 01-03: CORR-04/05/06 deferred to real-device sessions; CLI tooling ships, hardware validation deferred
+- 01-03: pycocotools imgIds must be restricted to predicted images (not full val set) for correct mAP
 
 ### Pending Todos
 
-None yet.
+- CORR-04/05/06: Run `yowo benchmark --format onnx/trt/openvino` on CUDA server / Jetson / Intel NUC when device access available
+- Establish COCO val-set ultralytics baseline mAP before Phase 2 defines pass/fail thresholds
 
 ### Blockers/Concerns
 
-- COCO val-set baseline mAP numbers need to be established by running ultralytics before Phase 1 can define pass/fail thresholds
-- Real-device access (Jetson, NUC, GPU server) needed for CORR-04/05/06 validation
+- Real-device access (Jetson, NUC, GPU server) needed for CORR-04/05/06 validation (deferred, not blocking)
 
 ## Session Continuity
 
-Last session: 2026-03-07T12:00:00Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: .planning/phases/01-correctness-benchmarking-and-proactive-fixes/01-01-SUMMARY.md
+Last session: 2026-03-07T13:10:00Z
+Stopped at: Completed 01-03-PLAN.md
+Resume file: .planning/phases/01-correctness-benchmarking-and-proactive-fixes/01-03-SUMMARY.md
