@@ -25,7 +25,7 @@ from yowo.arch._config import (
     scale_channels,
     scale_repeats,
 )
-from yowo.arch._heads import Classify
+from yowo.arch._heads import Classify, OBBHead, dist2rbox
 from yowo.arch._weights import load_weights
 from yowo.arch._yolo import ClassifyModel, YOLOModel
 from yowo.types import ModelFamily, ModelSize
@@ -98,9 +98,11 @@ __all__ = [
     "ClassifyConfig",
     "ClassifyModel",
     "ModelConfig",
+    "OBBHead",
     "YOLOModel",
     "build_classify_model",
     "build_model",
+    "dist2rbox",
     "get_classify_config",
     "get_config",
     "load_weights",

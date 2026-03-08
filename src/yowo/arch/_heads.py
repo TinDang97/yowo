@@ -3,10 +3,15 @@
 Implements the decoupled Detect head used by both YOLO11 and YOLO26.
 YOLO11: ``reg_max=16``, ``end2end=False`` → requires NMS post-processing.
 YOLO26: ``reg_max=1``, ``end2end=True``  → NMS-free top-k selection.
+
+OBBHead extends Detect with an angle branch (cv4) for oriented bounding box
+detection on DOTA datasets. dist2rbox decodes DFL distances + angle into
+(cx, cy, w, h) in rotated-box space.
 """
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 
 import torch
@@ -19,6 +24,8 @@ __all__ = [
     "DFL",
     "Classify",
     "Detect",
+    "OBBHead",
+    "dist2rbox",
 ]
 
 
@@ -108,6 +115,42 @@ def dist2bbox(
         wh = x2y2 - x1y1
         return torch.cat([c_xy, wh], dim=1)
     return torch.cat([x1y1, x2y2], dim=1)
+
+
+def dist2rbox(
+    pred_dist: Tensor,
+    pred_angle: Tensor,
+    anchor_points: Tensor,
+    *,
+    anchors_t: Tensor | None = None,
+) -> Tensor:
+    """Decode DFL distances + rotation angle to (cx, cy, w, h) rotated box.
+
+    Matches ultralytics OBB dist2rbox exactly for weight compatibility.
+
+    Args:
+        pred_dist: ``(B, 4, A)`` — left, top, right, bottom DFL distances.
+        pred_angle: ``(B, 1, A)`` — rotation angle in radians [-pi/4, 3pi/4].
+        anchor_points: ``(A, 2)`` — anchor centre coordinates (x, y).
+        anchors_t: Optional pre-transposed anchors ``(1, 2, A)`` to skip
+            per-frame transpose+unsqueeze.
+
+    Returns:
+        ``(B, 4, A)`` — rotated box centre and dimensions (cx, cy, w, h).
+    """
+    lt, rb = pred_dist.chunk(2, dim=1)  # each (B, 2, A)
+    cos = torch.cos(pred_angle)  # (B, 1, A)
+    sin = torch.sin(pred_angle)
+    # Half-offset vectors from anchor to box centre
+    xf = (rb[:, 0:1] - lt[:, 0:1]) * 0.5
+    yf = (rb[:, 1:2] - lt[:, 1:2]) * 0.5
+    if anchors_t is None:
+        anchors_t = anchor_points.T.unsqueeze(0)  # (1, 2, A)
+    cx = xf * cos - yf * sin + anchors_t[:, 0:1]
+    cy = xf * sin + yf * cos + anchors_t[:, 1:2]
+    w = lt[:, 0:1] + rb[:, 0:1]
+    h = lt[:, 1:2] + rb[:, 1:2]
+    return torch.cat([cx, cy, w, h], dim=1)  # (B, 4, A)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +362,92 @@ class Detect(nn.Module):
         self._anchor_cache_key = None
         self._cached_anchors_t = None
         self._cached_strides_t = None
+
+
+# ---------------------------------------------------------------------------
+# OBBHead — Oriented Bounding Box detection head
+# ---------------------------------------------------------------------------
+
+
+class OBBHead(Detect):
+    """OBB detection head: adds angle branch (cv4) alongside cv2 (box) and cv3 (cls).
+
+    Extends ``Detect`` with a third convolutional branch that predicts rotation
+    angle per anchor. Angle encoding: ``(sigmoid(raw) - 0.25) * pi`` maps
+    sigmoid output [0, 1] → radians [-pi/4, 3pi/4] (ultralytics convention).
+
+    Output at inference: ``(B, 4+nc+ne, total_anchors)``
+    Default nc=15 for DOTA v1 (15 aerial object categories).
+
+    Args:
+        nc: Number of classes (15 for DOTA v1).
+        ne: Number of angle predictions per anchor (1).
+        reg_max: DFL distribution bins per box side (16).
+        ch: Input channel widths per detection level.
+    """
+
+    def __init__(
+        self,
+        nc: int = 15,
+        ne: int = 1,
+        reg_max: int = 16,
+        ch: tuple[int, ...] = (),
+    ) -> None:
+        super().__init__(nc=nc, reg_max=reg_max, end2end=False, ch=ch)
+        self.ne = ne
+        c4 = max(ch[0] // 4, self.ne) if ch else self.ne
+        self.cv4 = nn.ModuleList(
+            nn.Sequential(Conv(c, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.ne, 1)) for c in ch
+        )
+
+    def forward(self, x: list[Tensor]) -> Tensor:
+        """Run OBB head on multi-scale feature maps.
+
+        Args:
+            x: List of 3 tensors [P3, P4, P5] feature maps.
+
+        Returns:
+            ``(B, 4+nc+ne, total_anchors)`` — decoded rotated boxes + class
+            scores + angles in (cx, cy, w, h, ..., angle) format.
+        """
+        box_feats = [self.cv2[i](x[i]) for i in range(self.nl)]
+        cls_feats = [self.cv3[i](x[i]) for i in range(self.nl)]
+        angle_feats = [self.cv4[i](x[i]) for i in range(self.nl)]
+
+        box_cat = torch.cat([b.flatten(2) for b in box_feats], dim=2)  # (B, 4*reg_max, A)
+        cls_cat = torch.cat([c.flatten(2) for c in cls_feats], dim=2)  # (B, nc, A)
+        ang_cat = torch.cat([a.flatten(2) for a in angle_feats], dim=2)  # (B, ne, A)
+
+        # DFL decode: (B, 4*reg_max, A) → (B, 4, A)
+        dfl_out = self.dfl(box_cat)
+
+        # Angle encoding applied EXACTLY ONCE: sigmoid maps to [0,1], shift to [-pi/4, 3pi/4]
+        ang_cat = (ang_cat.sigmoid() - 0.25) * math.pi
+
+        # Initialize stride + anchor cache on first forward (same mechanism as Detect._decode)
+        if not self._strides_initialized or self.stride.device != x[0].device:
+            self._init_strides(x)
+
+        # Regenerate anchor cache when feature map shapes change
+        shape_key = tuple(xi.shape[2:] for xi in x)
+        if self._anchor_cache_key != shape_key:
+            self._cached_anchors, self._cached_strides = make_anchors(x, self.stride)
+            self._cached_anchors_t = self._cached_anchors.transpose(0, 1).unsqueeze(0)
+            self._cached_strides_t = self._cached_strides.transpose(0, 1)
+            self._anchor_cache_key = shape_key
+
+        assert self._cached_anchors is not None
+        assert self._cached_anchors_t is not None
+        assert self._cached_strides_t is not None
+
+        # Decode DFL distances + angle to rotated box (cx, cy, w, h)
+        dbox = dist2rbox(dfl_out, ang_cat, self._cached_anchors, anchors_t=self._cached_anchors_t)
+        dbox = dbox * self._cached_strides_t
+
+        # In-place sigmoid for class scores
+        cls_cat.sigmoid_()
+
+        return torch.cat([dbox, cls_cat, ang_cat], dim=1)  # (B, 4+nc+ne, A)
 
 
 # ---------------------------------------------------------------------------

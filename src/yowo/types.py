@@ -323,6 +323,51 @@ class Detection:
 
 
 @dataclass(frozen=True, slots=True)
+class OBBBox:
+    """Oriented bounding box in (cx, cy, w, h, angle) format.
+
+    angle: rotation in radians, range [-pi/4, 3pi/4] (ultralytics convention).
+
+    Attributes:
+        cx: Centre x coordinate (pixels).
+        cy: Centre y coordinate (pixels).
+        w: Box width in pixels.
+        h: Box height in pixels.
+        angle: Rotation angle in radians, range [-pi/4, 3pi/4].
+        confidence: Detection confidence in [0, 1].
+        class_id: Integer class index.
+        class_name: Human-readable class label (empty string if unknown).
+    """
+
+    cx: float
+    cy: float
+    w: float
+    h: float
+    angle: float  # radians, [-pi/4, 3pi/4]
+    confidence: float
+    class_id: int
+    class_name: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class OBBDetection:
+    """Inference result for one frame with oriented bounding boxes.
+
+    Attributes:
+        frame_index: Zero-based sequential index of the frame in its source.
+        source_id: Opaque identifier of the input source; empty if unknown.
+        boxes: Tuple of oriented bounding boxes produced by the model.
+        inference_time_ms: Wall-clock time for the inference call only,
+            excluding preprocessing and postprocessing.
+    """
+
+    frame_index: int
+    source_id: str
+    boxes: tuple[OBBBox, ...]
+    inference_time_ms: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class ClassificationResult:
     """Inference result for a single frame from a classification model.
 
@@ -544,6 +589,8 @@ __all__ = [
     "ModelFamily",
     "ModelSize",
     "ModelSpec",
+    "OBBBox",
+    "OBBDetection",
     "Precision",
     "PreprocessedTensor",
     "SourceCategory",
