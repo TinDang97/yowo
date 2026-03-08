@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
 - [x] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports (completed 2026-03-08)
 - [x] **Phase 6: OBB Integration Fixes** - Close 2 functional integration gaps found by final audit: tune profile key collision (OBBEngine loads wrong profile), OBB models rejected by benchmark module (completed 2026-03-08)
+- [ ] **Phase 7: OBB Tune Sweep Dispatch Fix** - Close INT-C1: tune/_sweep.py._measure_config dispatches DetectionEngine for all tasks; OBB sweep fails at warmup and saves no profile
 
 ## Phase Details
 
@@ -117,6 +118,20 @@ Plans:
 Plans:
 - [ ] 06-01-PLAN.md — Fix tune profile key collision in engine.py:161 + extend _MODEL_PATTERN for OBB + add OBB benchmark evaluation path
 
+### Phase 7: OBB Tune Sweep Dispatch Fix
+**Goal**: OBB models can be auto-tuned via `yowo tune --model yolo11n-obb` — sweep produces results, profile is saved, and OBBEngine auto-loads it on subsequent runs
+**Depends on**: Phase 6
+**Requirements**: TUNE-01, TUNE-02, TUNE-03 (OBB path)
+**Gap Closure:** Closes INT-C1, FLOW-C1 from v2.3-MILESTONE-AUDIT.md
+**Success Criteria** (what must be TRUE):
+  1. `yowo tune --model yolo11n-obb` completes without warmup validation error and saves an OBB-keyed tune profile
+  2. OBBEngine auto-loads the saved OBB tune profile on next construction
+  3. Regression test confirms `_measure_config` dispatches OBBEngine for task=obb, DetectionEngine for task=detect
+**Plans**: 1 plan
+
+Plans:
+- [ ] 07-01-PLAN.md — Add OBB dispatch branch in tune/_sweep.py._measure_config + regression tests
+
 ## Progress
 
 **Execution Order:**
@@ -130,3 +145,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
 | 5. Integration Bug Fixes | 1/1 | Complete   | 2026-03-08 |
 | 6. OBB Integration Fixes | 1/1 | Complete   | 2026-03-08 |
+| 7. OBB Tune Sweep Dispatch Fix | 0/1 | Pending   | - |
