@@ -113,9 +113,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | CORR-01 | Phase 1 | Complete |
 | CORR-02 | Phase 1 | Complete |
 | CORR-03 | Phase 1 | Complete |
-| CORR-04 | Phase 1 | Pending |
-| CORR-05 | Phase 1 | Pending |
-| CORR-06 | Phase 1 | Pending |
+| CORR-04 | Deferred to v2.4 (hardware-gated: CUDA server with onnxruntime-gpu) | Deferred |
+| CORR-05 | Deferred to v2.4 (hardware-gated: Jetson Orin/Xavier) | Deferred |
+| CORR-06 | Deferred to v2.4 (hardware-gated: Intel NUC with iGPU + OpenVINO) | Deferred |
 | CORR-07 | Phase 1 / Phase 5 (gap closure: INT-P0) | Complete |
 | CORR-08 | Phase 1 / Phase 5 (gap closure: INT-P2) | Complete |
 | BENCH-01 | Phase 1 / Phase 6 (gap closure: INT-A2) | Complete |
@@ -159,4 +159,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-08 after gap closure phases added (Phase 7 — INT-C1 OBB tune sweep fix)*
+*Last updated: 2026-03-08 after gap closure phases added (Phase 8 — BENCH-01-cosmetic + tech debt; Phase 9 — Nyquist validation; CORR-04/05/06 formally deferred to v2.4)*
