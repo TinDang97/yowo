@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Adaptive Optimization and Batch Processing** - Auto-tune per device, add runtime adaptation, and enable high-throughput offline batch processing (completed 2026-03-07)
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
 - [x] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports (completed 2026-03-08)
+- [ ] **Phase 6: OBB Integration Fixes** - Close 2 functional integration gaps found by final audit: tune profile key collision (OBBEngine loads wrong profile), OBB models rejected by benchmark module
 
 ## Phase Details
 
@@ -102,6 +103,20 @@ Plans:
 Plans:
 - [ ] 05-01-PLAN.md — Fix OBB kv_cache guard, add OBBEngine tune profile load, add 5 missing `__init__` exports, add regression test
 
+### Phase 6: OBB Integration Fixes
+**Goal**: Close the two functional integration gaps discovered by the final v2.3 audit — tune profile key collision (OBBEngine silently loads a detection-calibrated profile) and OBB model variants being rejected by the benchmark module
+**Depends on**: Phase 4, Phase 5
+**Requirements**: TUNE-01, OBB-03, BENCH-01, OBB-01
+**Gap Closure:** Closes INT-A1, INT-A2, FLOW-A1 from v2.3-MILESTONE-AUDIT.md
+**Success Criteria** (what must be TRUE):
+  1. `yowo tune --model yolo11n-obb` saves a profile under key `"yolo11n-obb"` and OBBEngine auto-loads it on next construction (not the detection-calibrated `"yolo11n"` profile)
+  2. `yowo benchmark --model yolo11n-obb` runs without `ValueError` and produces mAP + FPS results for the OBB variant
+  3. Regression tests confirm the profile key includes the task suffix and the benchmark pattern accepts `-obb` suffix
+**Plans**: 1 plan
+
+Plans:
+- [ ] 06-01-PLAN.md — Fix tune profile key collision in engine.py:161 + extend _MODEL_PATTERN for OBB + add OBB benchmark evaluation path
+
 ## Progress
 
 **Execution Order:**
@@ -114,3 +129,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 3. Adaptive Optimization and Batch Processing | 5/5 | Complete   | 2026-03-07 |
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
 | 5. Integration Bug Fixes | 1/1 | Complete   | 2026-03-08 |
+| 6. OBB Integration Fixes | 0/1 | Pending    | - |
