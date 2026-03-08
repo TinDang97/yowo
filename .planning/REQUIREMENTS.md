@@ -132,9 +132,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | RELY-03 | Phase 2 | Complete |
 | RELY-04 | Phase 2 | Complete |
 | RELY-05 | Phase 2 / Phase 5 (gap closure: INT-P2) | Complete |
-| TUNE-01 | Phase 3 / Phase 5 (gap closure: INT-P1) / Phase 6 (gap closure: INT-A1) / Phase 7 (gap closure: INT-C1 OBB path) | Pending |
-| TUNE-02 | Phase 3 / Phase 7 (gap closure: INT-C1 OBB path) | Pending |
-| TUNE-03 | Phase 3 / Phase 7 (gap closure: INT-C1 OBB path) | Pending |
+| TUNE-01 | Phase 3 / Phase 5 (gap closure: INT-P1) / Phase 6 (gap closure: INT-A1) / Phase 7 (gap closure: INT-C1 OBB path) | Complete |
+| TUNE-02 | Phase 3 / Phase 7 (gap closure: INT-C1 OBB path) | Complete |
+| TUNE-03 | Phase 3 / Phase 7 (gap closure: INT-C1 OBB path) | Complete |
 | TUNE-04 | Phase 3 | Complete |
 | OBB-01 | Phase 4 / Phase 5 (gap closure: INT-P2) / Phase 6 (gap closure: INT-A2) | Complete |
 | OBB-02 | Phase 4 / Phase 5 (gap closure: INT-P2) | Complete |

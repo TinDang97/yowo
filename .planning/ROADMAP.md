@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
 - [x] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports (completed 2026-03-08)
 - [x] **Phase 6: OBB Integration Fixes** - Close 2 functional integration gaps found by final audit: tune profile key collision (OBBEngine loads wrong profile), OBB models rejected by benchmark module (completed 2026-03-08)
-- [ ] **Phase 7: OBB Tune Sweep Dispatch Fix** - Close INT-C1: tune/_sweep.py._measure_config dispatches DetectionEngine for all tasks; OBB sweep fails at warmup and saves no profile
+- [x] **Phase 7: OBB Tune Sweep Dispatch Fix** - Close INT-C1: tune/_sweep.py._measure_config dispatches DetectionEngine for all tasks; OBB sweep fails at warmup and saves no profile (completed 2026-03-08)
 
 ## Phase Details
 
@@ -145,4 +145,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
 | 5. Integration Bug Fixes | 1/1 | Complete   | 2026-03-08 |
 | 6. OBB Integration Fixes | 1/1 | Complete   | 2026-03-08 |
-| 7. OBB Tune Sweep Dispatch Fix | 0/1 | Pending   | - |
+| 7. OBB Tune Sweep Dispatch Fix | 1/1 | Complete   | 2026-03-08 |
