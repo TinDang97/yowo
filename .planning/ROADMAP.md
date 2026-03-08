@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Reliability and Multi-Stream Scaling** - Harden engine for sustained production load with 100+ streams, memory guards, health checks, and observability (completed 2026-03-07)
 - [x] **Phase 3: Adaptive Optimization and Batch Processing** - Auto-tune per device, add runtime adaptation, and enable high-throughput offline batch processing (completed 2026-03-07)
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
-- [ ] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports
+- [x] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports (completed 2026-03-08)
 
 ## Phase Details
 
@@ -113,4 +113,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 2. Reliability and Multi-Stream Scaling | 3/3 | Complete   | 2026-03-07 |
 | 3. Adaptive Optimization and Batch Processing | 5/5 | Complete   | 2026-03-07 |
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
-| 5. Integration Bug Fixes | 0/1 | Pending    | - |
+| 5. Integration Bug Fixes | 1/1 | Complete   | 2026-03-08 |
