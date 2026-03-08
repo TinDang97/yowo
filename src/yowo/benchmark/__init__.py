@@ -21,6 +21,7 @@ import re
 from typing import Any
 
 from yowo.benchmark._comparison import run_ultralytics_benchmark
+from yowo.benchmark._dota_evaluator import load_dota_dataset
 from yowo.benchmark._evaluator import (
     YOLO_TO_COCO,
     detections_to_coco_results,
@@ -34,7 +35,7 @@ from yowo.benchmark._runner import BenchmarkResult, run_all_backends
 from yowo.types import ModelFamily, ModelSize, ModelSpec
 
 # Model name pattern: family + size (+ optional task suffix)
-_MODEL_PATTERN = re.compile(r"^(yolo(?:11|26))([nsmxl])(?:-(cls))?$")
+_MODEL_PATTERN = re.compile(r"^(yolo(?:11|26))([nsmxl])(?:-(cls|obb))?$")
 
 
 def _parse_model_name(model: str) -> tuple[ModelSpec, str]:
@@ -53,7 +54,12 @@ def _parse_model_name(model: str) -> tuple[ModelSpec, str]:
     family_str, size_str, task_suffix = m.group(1), m.group(2), m.group(3)
     family = ModelFamily(family_str)
     size = ModelSize(size_str)
-    task = "classify" if task_suffix == "cls" else "detect"
+    if task_suffix == "cls":
+        task = "classify"
+    elif task_suffix == "obb":
+        task = "obb"
+    else:
+        task = "detect"
     return ModelSpec(family=family, size=size, task=task), task
 
 
@@ -82,10 +88,14 @@ def run_benchmark(
     # Load dataset
     image_ids: list[int] | None = None
     gt_ann_path: str | None = None
+    gt_boxes: list[list[list[float]]] | None = None
+    gt_classes: list[list[int]] | None = None
 
     if task == "classify":
         images, labels = load_imagenet_dataset(data, subset=subset)
         image_ids = labels
+    elif task == "obb":
+        images, gt_boxes, gt_classes = load_dota_dataset(data, subset=subset)
     else:
         images, image_ids, gt_ann_path = load_coco_dataset(data, subset=subset)
 
@@ -100,6 +110,8 @@ def run_benchmark(
         gt_ann_path=gt_ann_path,
         task=task,
         formats=format_list,
+        gt_boxes=gt_boxes,
+        gt_classes=gt_classes,
     )
 
     # Optional ultralytics comparison

@@ -11,6 +11,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -109,6 +110,8 @@ def run_single_backend(
     gt_ann_path: str | None,
     task: str,
     warmup_passes: int = 10,
+    gt_boxes: list[list[list[float]]] | None = None,
+    gt_classes: list[list[int]] | None = None,
 ) -> BenchmarkResult:
     """Run benchmark on a single backend.
 
@@ -118,8 +121,10 @@ def run_single_backend(
         images: List of image file paths.
         image_ids: COCO image IDs (for detection mAP). ``None`` to skip mAP.
         gt_ann_path: COCO annotation file path. ``None`` to skip mAP.
-        task: ``"detect"`` or ``"classify"``.
+        task: ``"detect"``, ``"classify"``, or ``"obb"``.
         warmup_passes: Number of warmup inferences to discard.
+        gt_boxes: DOTA ground truth quad boxes per image (for OBB mAP).
+        gt_classes: DOTA ground truth class indices per image (for OBB mAP).
 
     Returns:
         BenchmarkResult with timing and optional accuracy metrics.
@@ -131,6 +136,14 @@ def run_single_backend(
             weights_path=model_spec.weights_path,
             num_classes=model_spec.num_classes,
             backend=backend_type,
+        )
+    elif task == "obb":
+        from yowo.obb_engine import OBBEngine  # lazy import — patchable in tests
+
+        engine = OBBEngine(  # type: ignore[assignment]
+            model_family=model_spec.family,
+            model_size=model_spec.size,
+            weights_path=model_spec.weights_path,
         )
     else:
         engine = DetectionEngine(
@@ -152,12 +165,15 @@ def run_single_backend(
         for _ in range(warmup_passes):
             if task == "classify":
                 engine.classify([warmup_frame])  # type: ignore[union-attr]
+            elif task == "obb":
+                engine.detect_obb([warmup_frame])  # type: ignore[union-attr]
             else:
                 engine.detect([warmup_frame])  # type: ignore[union-attr]
 
         # Actual benchmark: time each image individually
         latencies: list[float] = []
         all_detections: list[Detection] = []
+        all_obb_detections: list[Any] = []  # OBBDetection, populated for task=="obb"
         cls_predictions: list[tuple[int, int]] = []
 
         for i, img_path in enumerate(images):
@@ -170,6 +186,11 @@ def run_single_backend(
                 # For accuracy: need ground truth from image_ids
                 if image_ids is not None and results:
                     cls_predictions.append((results[0].top1_class_id, image_ids[i]))
+            elif task == "obb":
+                results = engine.detect_obb([frame])  # type: ignore[union-attr]
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                latencies.append(elapsed_ms)
+                all_obb_detections.extend(results)
             else:
                 results = engine.detect([frame])  # type: ignore[union-attr]
                 elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -200,6 +221,13 @@ def run_single_backend(
         cls_metrics = evaluate_imagenet_accuracy(cls_predictions)
         map_50_95 = cls_metrics["top1_accuracy"]
 
+    if task == "obb" and gt_boxes is not None and gt_classes is not None:
+        from yowo.benchmark._dota_evaluator import evaluate_obb_map
+
+        obb_metrics = evaluate_obb_map(all_obb_detections, gt_boxes, gt_classes)
+        map_50_95 = obb_metrics["mAP_50_95"]
+        map_50 = obb_metrics["mAP_50"]
+
     model_size = _get_model_size_mb(model_spec)
 
     return BenchmarkResult(
@@ -224,6 +252,8 @@ def run_all_backends(
     task: str = "detect",
     formats: list[str] | None = None,
     warmup_passes: int = 10,
+    gt_boxes: list[list[list[float]]] | None = None,
+    gt_classes: list[list[int]] | None = None,
 ) -> list[BenchmarkResult]:
     """Run benchmarks across all available backends.
 
@@ -232,9 +262,11 @@ def run_all_backends(
         images: Image file paths.
         image_ids: Optional COCO image IDs for mAP evaluation.
         gt_ann_path: Optional COCO annotation file path.
-        task: ``"detect"`` or ``"classify"``.
+        task: ``"detect"``, ``"classify"``, or ``"obb"``.
         formats: Backend names to test. ``None`` tests all available.
         warmup_passes: Number of warmup passes per backend.
+        gt_boxes: DOTA ground truth quad boxes per image (for OBB mAP).
+        gt_classes: DOTA ground truth class indices per image (for OBB mAP).
 
     Returns:
         List of BenchmarkResult (one per successfully tested backend).
@@ -258,6 +290,8 @@ def run_all_backends(
                 gt_ann_path=gt_ann_path,
                 task=task,
                 warmup_passes=warmup_passes,
+                gt_boxes=gt_boxes,
+                gt_classes=gt_classes,
             )
             results.append(result)
         except Exception:

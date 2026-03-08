@@ -158,7 +158,8 @@ def _load_tune_profile(
     """
     from yowo.tune._profile import load_profile
 
-    model_name = f"{spec.family.value}{spec.size.value}"
+    task_suffix = spec.task if spec.task not in ("detect",) else ""
+    model_name = f"{spec.family.value}{spec.size.value}{'-' + task_suffix if task_suffix else ''}"
     profile = load_profile(model_name, hw)
     if profile is None:
         return config

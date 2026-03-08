@@ -1186,10 +1186,14 @@ def tune_command(
     if weights:
         spec = ModelSpec(spec.family, spec.size, spec.task, weights)
 
+    # Derive spec-consistent key for profile lookup/storage (e.g. "yolo11n-obb")
+    _task_suffix = spec.task if spec.task not in ("detect",) else ""
+    model_key = f"{spec.family.value}{spec.size.value}{'-' + _task_suffix if _task_suffix else ''}"
+
     hw = get_hardware_profile()
 
     if not force:
-        existing = load_profile(model, hw)
+        existing = load_profile(model_key, hw)
         if existing is not None:
             click.echo("Profile exists. Use --force to re-tune.")
             return
@@ -1245,7 +1249,7 @@ def tune_command(
 
     fingerprint = compute_fingerprint(hw)
     profile = TuneProfile(
-        model=model,
+        model=model_key,
         backend=best.backend,
         batch_size=best.batch_size,
         precision=best.precision,
