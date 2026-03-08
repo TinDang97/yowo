@@ -19,15 +19,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
 
 from yowo.backends import InferenceBackend
 from yowo.config import OBBConfig
-from yowo.engine import BaseEngine
+from yowo.engine import BaseEngine, _load_tune_profile  # type: ignore[reportPrivateUsage]
 from yowo.errors import InferenceError, ShutdownError, WarmupValidationError
+from yowo.hardware import HardwareProfile, get_hardware_profile
 from yowo.io import FrameSource
 from yowo.postprocess import PostprocessBuffer
 from yowo.postprocess._obb_nms import postprocess_obb
@@ -146,6 +147,13 @@ class OBBEngine(BaseEngine):
             weights_path=cfg.weights_path,
             num_classes=cfg.num_classes,
         )
+
+        # Apply tune profile (only when user has not explicitly overridden backend/batch/precision
+        # and no custom backend instance was provided)
+        _hw_cache: HardwareProfile | None = None
+        if backend_instance is None:
+            _hw_cache = get_hardware_profile()
+            cfg = cast(OBBConfig, _load_tune_profile(spec, cast(Any, cfg), _hw_cache))
 
         super().__init__(
             spec=spec,

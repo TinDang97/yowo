@@ -263,6 +263,50 @@ class TestOBBEngineLifecycle:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# OBBEngine tune profile tests (INT-P1 regression)
+# ---------------------------------------------------------------------------
+
+
+class TestOBBEngineTuneProfile:
+    def test_obb_engine_loads_tune_profile_when_no_backend_instance(self) -> None:
+        """OBBEngine calls _load_tune_profile when backend_instance is None."""
+        from yowo.obb_engine import OBBEngine
+
+        mock_hw = MagicMock()
+        mock_cfg_updated = MagicMock()
+
+        with (
+            patch("yowo.obb_engine._load_tune_profile", return_value=mock_cfg_updated) as mock_load,
+            patch("yowo.obb_engine.get_hardware_profile", return_value=mock_hw),
+            # Prevent BaseEngine.__init__ from doing real work
+            patch("yowo.engine.BaseEngine.__init__", return_value=None),
+        ):
+            engine = OBBEngine.__new__(OBBEngine)
+            # Manually run just __init__ logic up to super().__init__
+            # by calling the full __init__ but with a patched BaseEngine
+            OBBEngine.__init__(engine, backend_instance=None)
+
+        mock_load.assert_called_once()
+        call_args = mock_load.call_args
+        # First arg is spec, second is cfg, third is hw
+        assert call_args.args[2] is mock_hw
+
+    def test_obb_engine_skips_tune_profile_when_backend_instance_provided(self) -> None:
+        """OBBEngine does NOT call _load_tune_profile when backend_instance is given."""
+        from yowo.obb_engine import OBBEngine
+
+        backend = _make_mock_backend()
+
+        with (
+            patch("yowo.obb_engine._load_tune_profile") as mock_load,
+            patch("yowo.obb_engine.get_hardware_profile"),
+        ):
+            OBBEngine(backend_instance=backend)
+
+        mock_load.assert_not_called()
+
+
 class TestOBBEngineProcessBatch:
     def test_process_batch_zero_output_returns_empty_boxes(self) -> None:
         """_process_batch with all-zeros output returns OBBDetection with no boxes."""
