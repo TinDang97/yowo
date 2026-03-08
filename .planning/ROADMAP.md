@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Adaptive Optimization and Batch Processing** - Auto-tune per device, add runtime adaptation, and enable high-throughput offline batch processing (completed 2026-03-07)
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
 - [x] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports (completed 2026-03-08)
-- [ ] **Phase 6: OBB Integration Fixes** - Close 2 functional integration gaps found by final audit: tune profile key collision (OBBEngine loads wrong profile), OBB models rejected by benchmark module
+- [x] **Phase 6: OBB Integration Fixes** - Close 2 functional integration gaps found by final audit: tune profile key collision (OBBEngine loads wrong profile), OBB models rejected by benchmark module (completed 2026-03-08)
 
 ## Phase Details
 
@@ -129,4 +129,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 3. Adaptive Optimization and Batch Processing | 5/5 | Complete   | 2026-03-07 |
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
 | 5. Integration Bug Fixes | 1/1 | Complete   | 2026-03-08 |
-| 6. OBB Integration Fixes | 0/1 | Pending    | - |
+| 6. OBB Integration Fixes | 1/1 | Complete   | 2026-03-08 |

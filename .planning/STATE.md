@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: completed
-stopped_at: Phase 6 context gathered
-last_updated: "2026-03-08T07:45:32.216Z"
+stopped_at: Completed 06-01-PLAN.md (INT-A1 + INT-A2 OBB integration fixes)
+last_updated: "2026-03-08T08:21:25.999Z"
 last_activity: 2026-03-08 -- Completed 04-03 OBB CLI and export pipeline; human verify checkpoint approved
 progress:
   total_phases: 6
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  completed_phases: 6
+  total_plans: 16
+  completed_plans: 16
   percent: 100
 ---
 
@@ -64,6 +64,7 @@ Progress: [██████████] 100% (Phase 4 OBB Detection COMPLETE)
 | Phase 04-obb-detection P02 | 8 | 1 tasks | 8 files |
 | Phase 04-obb-detection P03 | 7 | 1 tasks | 5 files |
 | Phase 05-integration-bug-fixes P01 | 11 | 3 tasks | 6 files |
+| Phase 06-obb-integration-fixes P01 | 9 | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,8 @@ Recent decisions affecting current work:
 - [Phase 05-integration-bug-fixes]: INT-P0: tuple membership guard spec.task not in ('classify', 'obb') instead of chained != conditions
 - [Phase 05-integration-bug-fixes]: INT-P1: cast(Any, cfg) bridges OBBConfig/InferenceConfig type mismatch at _load_tune_profile; # type: ignore[reportPrivateUsage] for cross-module private import
 - [Phase 05-integration-bug-fixes]: INT-P2: HealthReport imported from yowo.engine (not types.py) to avoid circular import; 5 types added to __all__ in sorted order
+- [Phase 06-obb-integration-fixes]: module-level import of load_dota_dataset in benchmark/__init__.py for patch() patchability; lazy OBBEngine import in _runner.py for test isolation
+- [Phase 06-obb-integration-fixes]: model_key derived from spec in tune_command (task suffix appended) used for profile storage; raw model string kept only for display
 
 ### Pending Todos
 
@@ -132,6 +135,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-08T07:45:32.212Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-obb-integration-fixes/06-CONTEXT.md
+Last session: 2026-03-08T08:21:25.998Z
+Stopped at: Completed 06-01-PLAN.md (INT-A1 + INT-A2 OBB integration fixes)
+Resume file: None
