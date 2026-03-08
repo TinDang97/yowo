@@ -116,13 +116,13 @@ Deferred to future release. Tracked but not in current roadmap.
 | CORR-04 | Phase 1 | Pending |
 | CORR-05 | Phase 1 | Pending |
 | CORR-06 | Phase 1 | Pending |
-| CORR-07 | Phase 1 | Complete |
-| CORR-08 | Phase 1 | Complete |
+| CORR-07 | Phase 1 / Phase 5 (gap closure: INT-P0) | Complete |
+| CORR-08 | Phase 1 / Phase 5 (gap closure: INT-P2) | Complete |
 | BENCH-01 | Phase 1 | Complete |
 | BENCH-02 | Phase 1 | Complete |
 | BENCH-03 | Phase 1 | Complete |
 | BENCH-04 | Phase 1 | Complete |
-| STRM-01 | Phase 2 | Complete |
+| STRM-01 | Phase 2 / Phase 5 (gap closure: INT-P2) | Complete |
 | STRM-02 | Phase 2 | Complete |
 | STRM-03 | Phase 2 | Complete |
 | STRM-04 | Phase 2 | Complete |
@@ -131,17 +131,17 @@ Deferred to future release. Tracked but not in current roadmap.
 | RELY-02 | Phase 2 | Complete |
 | RELY-03 | Phase 2 | Complete |
 | RELY-04 | Phase 2 | Complete |
-| RELY-05 | Phase 2 | Complete |
-| TUNE-01 | Phase 3 | Complete |
+| RELY-05 | Phase 2 / Phase 5 (gap closure: INT-P2) | Complete |
+| TUNE-01 | Phase 3 / Phase 5 (gap closure: INT-P1) | Complete |
 | TUNE-02 | Phase 3 | Complete |
 | TUNE-03 | Phase 3 | Complete |
 | TUNE-04 | Phase 3 | Complete |
-| OBB-01 | Phase 4 | Complete |
-| OBB-02 | Phase 4 | Complete |
+| OBB-01 | Phase 4 / Phase 5 (gap closure: INT-P2) | Complete |
+| OBB-02 | Phase 4 / Phase 5 (gap closure: INT-P2) | Complete |
 | OBB-03 | Phase 4 | Complete |
 | OBB-04 | Phase 4 | Complete |
 | OBB-05 | Phase 4 | Complete |
-| OBB-06 | Phase 4 | Complete |
+| OBB-06 | Phase 4 / Phase 5 (gap closure: INT-P0) | Complete |
 | BATC-01 | Phase 3 | Complete |
 | BATC-02 | Phase 3 | Complete |
 | BATC-03 | Phase 3 | Complete |
@@ -159,4 +159,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-07 after roadmap creation*
+*Last updated: 2026-03-08 after gap closure phases added (Phase 5)*

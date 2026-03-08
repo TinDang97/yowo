@@ -16,6 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Reliability and Multi-Stream Scaling** - Harden engine for sustained production load with 100+ streams, memory guards, health checks, and observability (completed 2026-03-07)
 - [x] **Phase 3: Adaptive Optimization and Batch Processing** - Auto-tune per device, add runtime adaptation, and enable high-throughput offline batch processing (completed 2026-03-07)
 - [x] **Phase 4: OBB Detection** - Add oriented bounding box detection as a new inference task with export support (completed 2026-03-08)
+- [ ] **Phase 5: Integration Bug Fixes** - Close 3 integration gaps found by audit: P0 runtime crash (OBB+kv_cache), P1 OBBEngine tune profile auto-load, P2 missing public API exports
 
 ## Phase Details
 
@@ -86,6 +87,21 @@ Plans:
 - [ ] 04-02-PLAN.md — OBBEngine(BaseEngine) + OBBConfig + load_obb_weights engine task branch (OBB-03, OBB-04)
 - [ ] 04-03-PLAN.md — parse_model_name -obb extension + detect-obb CLI + export_model OBB branch + human verification (OBB-05, OBB-06)
 
+### Phase 5: Integration Bug Fixes
+**Goal**: Close all integration gaps identified by the v2.3 milestone audit — runtime crash, missing tune profile propagation to OBBEngine, and incomplete public API surface
+**Depends on**: Phase 4
+**Requirements**: OBB-01, OBB-02, OBB-06, CORR-07, CORR-08, RELY-05, STRM-01, TUNE-01
+**Gap Closure:** Closes INT-P0, INT-P1, INT-P2 from v2.3-MILESTONE-AUDIT.md
+**Success Criteria** (what must be TRUE):
+  1. `yowo export --model yolo11n-obb --kv-cache` does not crash (guard excludes task=obb)
+  2. OBBEngine auto-loads a saved tune profile on construction, same as DetectionEngine
+  3. Users can write `from yowo import OBBBox, OBBDetection, WarmupValidationError, HealthReport, StreamConfig` without submodule imports
+  4. Test coverage exists for OBB+kv_cache export path (regression test for INT-P0)
+**Plans**: 1 plan
+
+Plans:
+- [ ] 05-01-PLAN.md — Fix OBB kv_cache guard, add OBBEngine tune profile load, add 5 missing `__init__` exports, add regression test
+
 ## Progress
 
 **Execution Order:**
@@ -97,3 +113,4 @@ Phases execute in numeric order. Phase 4 (OBB) depends only on Phase 1 and can p
 | 2. Reliability and Multi-Stream Scaling | 3/3 | Complete   | 2026-03-07 |
 | 3. Adaptive Optimization and Batch Processing | 5/5 | Complete   | 2026-03-07 |
 | 4. OBB Detection | 3/3 | Complete   | 2026-03-08 |
+| 5. Integration Bug Fixes | 0/1 | Pending    | - |
