@@ -39,6 +39,7 @@ class ModelMeta:
 
 _REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
 _CLS_REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
+_OBB_REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
 
 
 def register(meta: ModelMeta) -> None:
@@ -80,6 +81,21 @@ def get_cls(family: ModelFamily, size: ModelSize) -> ModelMeta:
     return _CLS_REGISTRY[key]
 
 
+def get_obb(family: ModelFamily, size: ModelSize) -> ModelMeta:
+    """Return the OBB ModelMeta for the given family/size combination.
+
+    Raises:
+        ModelNotFoundError: When the combination is not registered.
+    """
+    key = (family, size)
+    if key not in _OBB_REGISTRY:
+        available = ", ".join(f"{f.value}/{s.value}" for f, s in sorted(_OBB_REGISTRY))
+        raise ModelNotFoundError(
+            f"OBB model {family.value}/{size.value} not found in registry. Available: {available}"
+        )
+    return _OBB_REGISTRY[key]
+
+
 def list_available() -> list[ModelMeta]:
     """Return all registered ModelMeta entries sorted by (family, size)."""
     return [_REGISTRY[k] for k in sorted(_REGISTRY)]
@@ -103,6 +119,24 @@ def _make_meta(family: ModelFamily, size: ModelSize) -> ModelMeta:
         num_classes=80,
         weight_stem=name,
         default_weights_url=f"{_ASSETS_BASE}{name}.pt",
+    )
+
+
+def _make_obb_meta(size: ModelSize) -> ModelMeta:
+    """Build ModelMeta for a YOLO11 OBB variant.
+
+    All OBB variants use ultralytics assets v8.3.0 and DOTA v1 (15 classes).
+    Input is 640x640 (same as detection).
+    """
+    name = f"yolo11{size.value}-obb"
+    return ModelMeta(
+        family=ModelFamily.YOLO11,
+        size=size,
+        input_height=640,
+        input_width=640,
+        num_classes=15,  # DOTA v1 — CRITICAL: not 80
+        weight_stem=name,
+        default_weights_url=f"{_ASSETS_V83}{name}.pt",
     )
 
 
@@ -138,15 +172,26 @@ def _register_builtins() -> None:
         ):
             register(_make_meta(family, size))
             _CLS_REGISTRY[(family, size)] = _make_cls_meta(family, size)
+    # OBB variants: YOLO11 only (5 sizes), DOTA v1, nc=15
+    for size in (
+        ModelSize.NANO,
+        ModelSize.SMALL,
+        ModelSize.MEDIUM,
+        ModelSize.LARGE,
+        ModelSize.XLARGE,
+    ):
+        _OBB_REGISTRY[(ModelFamily.YOLO11, size)] = _make_obb_meta(size)
 
 
 _register_builtins()
 
 __all__ = [
     "_CLS_REGISTRY",
+    "_OBB_REGISTRY",
     "ModelMeta",
     "get",
     "get_cls",
+    "get_obb",
     "list_available",
     "register",
 ]
