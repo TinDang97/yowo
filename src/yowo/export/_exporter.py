@@ -135,8 +135,8 @@ def export_model(
         # Step 1: Produce ONNX first
         onnx_path = output_dir / f"{model_stem}.onnx"
 
-        # KV-cache export is detection-only — not supported for classify task
-        if kv_cache and spec.task != "classify":
+        # KV-cache export is detection-only — not supported for classify or obb tasks
+        if kv_cache and spec.task not in ("classify", "obb"):
             from yowo.arch._yolo import YOLOModel
             from yowo.export._kv_wrapper import YOLOKVWrapper
 
