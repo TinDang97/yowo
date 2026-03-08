@@ -67,6 +67,7 @@ from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
 from yowo.models._registry import ModelMeta
 from yowo.models._registry import get_cls as _registry_get_cls
+from yowo.models._registry import get_obb as _registry_get_obb
 from yowo.postprocess import PostprocessBuffer, postprocess
 from yowo.types import (
     BackendSelection,
@@ -186,11 +187,12 @@ def _load_tune_profile(
 def _resolve_model_meta(spec: ModelSpec, model_builder: Any | None) -> ModelMeta:
     """Resolve model metadata from registry, with custom builder fallback."""
     try:
-        meta = (
-            _registry_get_cls(spec.family, spec.size)
-            if spec.task == "classify"
-            else _registry_get(spec.family, spec.size)
-        )
+        if spec.task == "classify":
+            meta = _registry_get_cls(spec.family, spec.size)
+        elif spec.task == "obb":
+            meta = _registry_get_obb(spec.family, spec.size)
+        else:
+            meta = _registry_get(spec.family, spec.size)
     except ModelNotFoundError:
         if model_builder is None:
             raise

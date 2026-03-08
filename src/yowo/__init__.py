@@ -14,6 +14,7 @@ from yowo.classify_engine import ClassificationEngine
 from yowo.config import (
     ClassificationConfig,
     InferenceConfig,
+    OBBConfig,
     load_config,
     preset_config,
 )
@@ -58,6 +59,7 @@ from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
 from yowo.metrics import EngineMetrics as EngineMetrics
 from yowo.metrics import MetricsCollector as MetricsCollector
+from yowo.obb_engine import OBBEngine
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.tracking import (
     ByteTracker,
@@ -157,6 +159,8 @@ __all__ = [
     "ModelNotFoundError",
     "ModelSize",
     "ModelSpec",
+    "OBBConfig",
+    "OBBEngine",
     "ObjectCounter",
     "Precision",
     "ShutdownError",

@@ -253,6 +253,84 @@ class ClassificationConfig:
 
 
 # ---------------------------------------------------------------------------
+# OBBConfig
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OBBConfig:
+    """Runtime configuration for the OBB detection inference engine.
+
+    Mirrors ClassificationConfig but replaces top_k with OBB-specific thresholds.
+    Default nc=15 matches DOTA v1 class count for yolo11-obb weights.
+
+    Attributes:
+        model_family: YOLO model family to use (YOLO11 only for OBB).
+        model_size: Size variant of the model.
+        weights_path: Optional path to a local ``-obb.pt`` weights file. When
+            ``None`` the registry resolves the path automatically.
+        num_classes: Override number of output classes. When ``None`` the
+            registry default is used (15 for DOTA v1 OBB detection).
+        backend: Inference backend. ``None`` triggers automatic selection.
+        device: Device string (``"auto"``, ``"cuda"``, ``"cpu"``, …).
+        precision: Numerical precision. ``None`` triggers automatic selection.
+        confidence_threshold: Minimum class confidence for a detection to keep.
+            Must be in (0.0, 1.0).
+        iou_threshold: probiou NMS threshold. Must be in (0.0, 1.0).
+        batch_size: Number of frames per inference batch. Must be >= 1.
+        frame_drop_policy: Backlog policy for ThreadedFrameReader.
+        max_queue_size: Bounded queue depth for ThreadedFrameReader.
+        prefetch: Enable threaded frame prefetch in ``stream()``.
+        auto_letterbox: Use stride-aligned non-square input tensors.
+        pipeline_workers: Worker thread count. ``0`` = auto-detect.
+        metrics_enabled: Collect latency, throughput, and error metrics.
+        error_threshold: Cumulative errors before health transitions to DEGRADED.
+        log_level: Minimum logging level. Default: ``"WARNING"``.
+        structured_logging: Emit structured (JSON) log records. Default: ``False``.
+    """
+
+    model_family: ModelFamily = ModelFamily.YOLO11
+    model_size: ModelSize = ModelSize.NANO
+    weights_path: Path | None = None
+    num_classes: int | None = None  # None = registry default (15 for DOTA v1)
+    backend: BackendType | None = None
+    device: str = "auto"
+    precision: Precision | None = None
+    confidence_threshold: float = 0.25
+    iou_threshold: float = 0.45
+    batch_size: int = 1
+    frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST
+    max_queue_size: int = 2
+    prefetch: bool = True
+    auto_letterbox: bool = False
+    pipeline_workers: int = 0
+    metrics_enabled: bool = True
+    error_threshold: int = 10
+    log_level: str = "WARNING"
+    """Logging level for yowo. Maps to YOWO_LOG_LEVEL env var."""
+    structured_logging: bool = False
+    """Emit structured (JSON) log records. Maps to YOWO_STRUCTURED_LOGGING=1."""
+
+    _VALID_LOG_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
+    def __post_init__(self) -> None:
+        if self.num_classes is not None and self.num_classes < 1:
+            raise ConfigError(f"num_classes must be >= 1, got {self.num_classes}")
+        if self.batch_size < 1:
+            raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.max_queue_size < 1:
+            raise ConfigError(f"max_queue_size must be >= 1, got {self.max_queue_size}")
+        if self.pipeline_workers < 0:
+            raise ConfigError(f"pipeline_workers must be >= 0, got {self.pipeline_workers}")
+        if self.error_threshold < 1:
+            raise ConfigError(f"error_threshold must be >= 1, got {self.error_threshold}")
+        if self.log_level not in self._VALID_LOG_LEVELS:
+            raise ConfigError(
+                f"log_level must be one of {sorted(self._VALID_LOG_LEVELS)}, got {self.log_level!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # ExportConfig
 # ---------------------------------------------------------------------------
 
@@ -752,6 +830,7 @@ __all__ = [
     "ClassificationConfig",
     "ExportConfig",
     "InferenceConfig",
+    "OBBConfig",
     "classify_device",
     "classify_source",
     "load_classification_config",

@@ -165,6 +165,24 @@ class PyTorchBackend:
                 # torch.compile and feature cache hooks are detection-only
                 self._model = cls_model
                 self._input_shape = (meta.input_height, meta.input_width)
+            elif self._spec.task == "obb":
+                from yowo.arch import build_obb_model
+                from yowo.arch._weights import load_obb_weights
+                from yowo.models._registry import get_obb
+
+                meta = get_obb(self._spec.family, self._spec.size)
+                spec_nc = self._spec.num_classes
+                nc = spec_nc if spec_nc is not None else meta.num_classes
+                obb_model = build_obb_model(self._spec.family, self._spec.size, num_classes=nc)
+                load_obb_weights(obb_model, model_path)
+                obb_model = obb_model.fuse()
+                obb_model.eval()
+                obb_model.to(resolved)
+                if resolved.startswith("cuda"):
+                    obb_model = obb_model.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
+                # torch.compile and feature cache hooks are detection-only
+                self._model = obb_model
+                self._input_shape = (meta.input_height, meta.input_width)
             else:
                 from yowo.arch import build_model
                 from yowo.arch._weights import load_weights
