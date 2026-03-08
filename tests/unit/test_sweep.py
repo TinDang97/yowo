@@ -349,3 +349,55 @@ class TestRunSweep:
 
         # Both batch sizes skipped — no non-skipped results returned
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 07 tests: TestMeasureConfigDispatch
+# ---------------------------------------------------------------------------
+
+
+class TestMeasureConfigDispatch:
+    """Regression tests verifying _measure_config dispatches the correct engine per task."""
+
+    def _make_spec(self, task: str) -> MagicMock:
+        from yowo.types import ModelFamily, ModelSize
+
+        spec = MagicMock()
+        spec.family = ModelFamily.YOLO11
+        spec.size = ModelSize.NANO
+        spec.task = task
+        spec.num_classes = None
+        spec.weights_path = None
+        return spec
+
+    def test_measure_config_dispatches_obb_engine_for_task_obb(self) -> None:
+        from yowo.tune._sweep import _measure_config
+
+        hw = _make_hw()
+        spec = self._make_spec("obb")
+        mock_engine = MagicMock()
+        mock_engine.detect_obb.return_value = [MagicMock()]
+
+        # Patch at the source module since OBBEngine is lazily imported inside
+        # _measure_config via `from yowo.obb_engine import OBBEngine` — the name
+        # is bound in function scope, not in _sweep's module dict.
+        with patch("yowo.obb_engine.OBBEngine", return_value=mock_engine):
+            mock_engine.load.return_value = None
+            _measure_config(spec, hw, BackendType.PYTORCH, Precision.FP32, 1, 1, 1)
+
+        mock_engine.detect_obb.assert_called()
+
+    def test_measure_config_dispatches_detection_engine_for_task_detect(self) -> None:
+        from yowo.tune._sweep import _measure_config
+
+        hw = _make_hw()
+        spec = self._make_spec("detect")
+        mock_engine = MagicMock()
+
+        # Patch at the source module since DetectionEngine is lazily imported inside
+        # _measure_config via `from yowo.engine import DetectionEngine`.
+        with patch("yowo.engine.DetectionEngine", return_value=mock_engine):
+            mock_engine.load.return_value = None
+            _measure_config(spec, hw, BackendType.PYTORCH, Precision.FP32, 1, 1, 1)
+
+        mock_engine.detect.assert_called()

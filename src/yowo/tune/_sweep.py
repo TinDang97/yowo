@@ -186,32 +186,52 @@ def _measure_config(
     Returns:
         Measured FPS as ``measure_frames / elapsed_seconds``.
     """
-    from yowo.config import InferenceConfig
-    from yowo.engine import DetectionEngine
+    task = spec.task
+    if task == "obb":
+        from yowo.config import OBBConfig
+        from yowo.obb_engine import OBBEngine  # lazy import — patchable in tests
 
-    config = InferenceConfig(
-        model_family=spec.family,
-        model_size=spec.size,
-        num_classes=spec.num_classes,
-        backend=backend,
-        precision=precision,
-        batch_size=batch_size,
-    )
-    engine = DetectionEngine(config)
+        config = OBBConfig(
+            model_family=spec.family,
+            model_size=spec.size,
+            num_classes=spec.num_classes,
+            backend=backend,
+            precision=precision,
+            batch_size=batch_size,
+        )
+        engine = OBBEngine(config)
+    else:
+        from yowo.config import InferenceConfig
+        from yowo.engine import DetectionEngine
+
+        config = InferenceConfig(
+            model_family=spec.family,
+            model_size=spec.size,
+            num_classes=spec.num_classes,
+            backend=backend,
+            precision=precision,
+            batch_size=batch_size,
+        )
+        engine = DetectionEngine(config)
+
     pixels = np.zeros((640, 640, 3), dtype=np.uint8)
     frames = [Frame(pixels=pixels)]
 
     try:
         engine.load()
 
+        # Callable alias avoids repeating the task branch inside tight loops.
+        # type: ignore needed because pyright can't narrow union through assignment.
+        infer = engine.detect_obb if task == "obb" else engine.detect  # type: ignore[union-attr]
+
         # Warmup (not timed)
         for _ in range(warmup_frames):
-            engine.detect(frames)
+            infer(frames)
 
         # Timed measurement
         t0 = time.monotonic()
         for _ in range(measure_frames):
-            engine.detect(frames)
+            infer(frames)
         elapsed = time.monotonic() - t0
 
         return measure_frames / elapsed
