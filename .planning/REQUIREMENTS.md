@@ -54,8 +54,8 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 - [x] **OBB-02**: OBB postprocessing includes rotation-aware NMS
 - [x] **OBB-03**: OBB model variants match ultralytics OBB architecture for yolo11 family
 - [x] **OBB-04**: OBB weights load correctly from ultralytics-trained checkpoints
-- [ ] **OBB-05**: CLI supports `yowo detect-obb SOURCE --model yolo11n-obb`
-- [ ] **OBB-06**: OBB models export to ONNX and TensorRT correctly
+- [x] **OBB-05**: CLI supports `yowo detect-obb SOURCE --model yolo11n-obb`
+- [x] **OBB-06**: OBB models export to ONNX and TensorRT correctly
 
 ### Batch Processing
 
@@ -140,8 +140,8 @@ Deferred to future release. Tracked but not in current roadmap.
 | OBB-02 | Phase 4 | Complete |
 | OBB-03 | Phase 4 | Complete |
 | OBB-04 | Phase 4 | Complete |
-| OBB-05 | Phase 4 | Pending |
-| OBB-06 | Phase 4 | Pending |
+| OBB-05 | Phase 4 | Complete |
+| OBB-06 | Phase 4 | Complete |
 | BATC-01 | Phase 3 | Complete |
 | BATC-02 | Phase 3 | Complete |
 | BATC-03 | Phase 3 | Complete |
