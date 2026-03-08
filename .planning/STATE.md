@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-03-07T16:35:41.545Z"
-last_activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-08T01:54:00Z"
+last_activity: 2026-03-08 -- Completed 04-01 OBB architecture foundation (OBBHead, dist2rbox, probiou NMS, OBBModel, registry)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
-  percent: 37
+  total_plans: 14
+  completed_plans: 12
+  percent: 43
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-07)
 
 ## Current Position
 
-Phase: 2 of 4 (Reliability and Multi-Stream Scaling)
-Plan: 2 of 3 in phase
+Phase: 4 of 4 (OBB Detection)
+Plan: 1 of 3 in phase (04-01 complete)
 Status: In progress
-Last activity: 2026-03-07 -- Completed 02-02 OOM monitor + GPU retry + config log fields
+Last activity: 2026-03-08 -- Completed 04-01 OBB architecture foundation
 
-Progress: [████░░░░░░] 37%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
@@ -104,6 +104,10 @@ Recent decisions affecting current work:
 - [Phase 03]: count_sweep_dimensions() added as public function to tune/_sweep.py to avoid pyright reportPrivateUsage errors when calling from _main.py
 - [Phase 03-05]: Module-level imports in cli/_main.py for run_batch/BatchConfig/DetectionEngine for test patchability
 - [Phase 03-05]: sys.exit(result) propagates integer exit codes 0/1/2 from run_batch through Click
+- [Phase 04-01]: OBBHead inherits Detect; reuses stride/anchor cache init, DFL, cv2/cv3 — only cv4 angle branch is added
+- [Phase 04-01]: dist2rbox placed in _heads.py alongside dist2bbox for co-location; angle encoding (sigmoid-0.25)*pi applied once in OBBHead.forward()
+- [Phase 04-01]: OBB registry is YOLO11-only (nc=15 DOTA v1); YOLO26 has no OBB weights at v8.4.0
+- [Phase 04-01]: probiou_matrix matches ultralytics batch_probiou exactly via Bhattacharyya distance between Gaussians
 
 ### Pending Todos
 
@@ -116,6 +120,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-07T16:31:26.145Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-03-08T01:41:16Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

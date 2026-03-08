@@ -50,10 +50,10 @@ Requirements for production-hardening milestone. Each maps to roadmap phases.
 
 ### OBB Detection
 
-- [ ] **OBB-01**: OBB detection head produces oriented bounding boxes with rotation angle
-- [ ] **OBB-02**: OBB postprocessing includes rotation-aware NMS
-- [ ] **OBB-03**: OBB model variants match ultralytics OBB architecture for yolo11 family
-- [ ] **OBB-04**: OBB weights load correctly from ultralytics-trained checkpoints
+- [x] **OBB-01**: OBB detection head produces oriented bounding boxes with rotation angle
+- [x] **OBB-02**: OBB postprocessing includes rotation-aware NMS
+- [x] **OBB-03**: OBB model variants match ultralytics OBB architecture for yolo11 family
+- [x] **OBB-04**: OBB weights load correctly from ultralytics-trained checkpoints
 - [ ] **OBB-05**: CLI supports `yowo detect-obb SOURCE --model yolo11n-obb`
 - [ ] **OBB-06**: OBB models export to ONNX and TensorRT correctly
 
@@ -136,10 +136,10 @@ Deferred to future release. Tracked but not in current roadmap.
 | TUNE-02 | Phase 3 | Complete |
 | TUNE-03 | Phase 3 | Complete |
 | TUNE-04 | Phase 3 | Complete |
-| OBB-01 | Phase 4 | Pending |
-| OBB-02 | Phase 4 | Pending |
-| OBB-03 | Phase 4 | Pending |
-| OBB-04 | Phase 4 | Pending |
+| OBB-01 | Phase 4 | Complete |
+| OBB-02 | Phase 4 | Complete |
+| OBB-03 | Phase 4 | Complete |
+| OBB-04 | Phase 4 | Complete |
 | OBB-05 | Phase 4 | Pending |
 | OBB-06 | Phase 4 | Pending |
 | BATC-01 | Phase 3 | Complete |
