@@ -39,13 +39,15 @@ _FAMILY_MAP: dict[str, ModelFamily] = {
 def parse_model_name(name: str) -> ModelSpec:
     """Parse a short model name into a :class:`ModelSpec`.
 
-    Supports detection models (``"yolo26n"``) and classification models
-    (``"yolo11n-cls"``). The ``-cls`` suffix sets ``task="classify"`` and
-    is stripped before family/size parsing.
+    Supports detection models (``"yolo26n"``), classification models
+    (``"yolo11n-cls"``), and OBB models (``"yolo11n-obb"``).
+    The ``-cls`` suffix sets ``task="classify"`` and the ``-obb`` suffix sets
+    ``task="obb"``; both are stripped before family/size parsing.
+    OBB models are YOLO11-only — ``"yolo26n-obb"`` raises :class:`ConfigError`.
 
     Args:
         name: Model string, e.g. ``"yolo11s"``, ``"yolo26x"``,
-            ``"yolo11n-cls"``, ``"yolo26s-cls"``.
+            ``"yolo11n-cls"``, ``"yolo26s-cls"``, ``"yolo11n-obb"``.
 
     Returns:
         Corresponding ModelSpec with ``task`` set appropriately.
@@ -57,6 +59,14 @@ def parse_model_name(name: str) -> ModelSpec:
     if name.endswith("-cls"):
         task = "classify"
         name = name[:-4]  # strip "-cls" suffix
+    elif name.endswith("-obb"):
+        if not name.startswith("yolo11"):
+            raise ConfigError(
+                f"OBB models are only available for YOLO11 family, got: {name!r}. "
+                "Only yolo11{n|s|m|l|x}-obb variants exist."
+            )
+        task = "obb"
+        name = name[:-4]  # strip "-obb" suffix
 
     for prefix, family in sorted(_FAMILY_MAP.items(), key=lambda x: -len(x[0])):
         if name.startswith(prefix):
@@ -65,8 +75,8 @@ def parse_model_name(name: str) -> ModelSpec:
                 return ModelSpec(family, _SIZE_MAP[suffix], task=task)
 
     raise ConfigError(
-        f"Unknown model: {name!r}. Expected format: yolo{{11|26}}{{n|s|m|l|x}}[-cls], "
-        f"e.g. yolo26n or yolo11n-cls"
+        f"Unknown model: {name!r}. Expected format: yolo{{11|26}}{{n|s|m|l|x}}[-cls|-obb], "
+        f"e.g. yolo26n, yolo11n-cls, or yolo11n-obb"
     )
 
 

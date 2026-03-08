@@ -80,6 +80,17 @@ def export_model(
         load_classify_weights(model, weights_path)
         model = model.fuse().eval()
         input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
+    elif spec.task == "obb":
+        from yowo.arch import build_obb_model
+        from yowo.arch._weights import load_obb_weights
+        from yowo.models._registry import get_obb
+
+        meta = get_obb(spec.family, spec.size)
+        nc = spec.num_classes if spec.num_classes is not None else meta.num_classes
+        model = build_obb_model(spec.family, spec.size, num_classes=nc)
+        load_obb_weights(model, weights_path)
+        model = model.fuse().eval()
+        input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
     else:
         from yowo.arch import build_model
         from yowo.arch._weights import load_weights
@@ -108,7 +119,8 @@ def export_model(
 
     t0 = time.monotonic()
 
-    model_stem = f"{spec.family.value}{spec.size.value}"
+    task_suffix = "-obb" if spec.task == "obb" else ""
+    model_stem = f"{spec.family.value}{spec.size.value}{task_suffix}"
 
     # CoreML exports directly from PyTorch — skip ONNX intermediate
     if target_format == ExportFormat.COREML:

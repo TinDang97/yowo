@@ -9,8 +9,10 @@ from pathlib import Path
 import click
 
 from yowo.batch._runner import BatchConfig, run_batch
+from yowo.config import OBBConfig
 from yowo.engine import DetectionEngine
 from yowo.hardware import get_hardware_profile
+from yowo.obb_engine import OBBEngine
 from yowo.tune._profile import TuneProfile, compute_fingerprint, load_profile, save_profile
 from yowo.tune._sweep import run_sweep
 from yowo.types import BackendType, ExportFormat, ModelSpec, Precision
@@ -311,6 +313,133 @@ def detect_command(
         out_dir = Path(save_frames)
         write_annotated_frames(detections, out_dir)
         click.echo(f"Saved {len(detections)} annotated frame(s) to {out_dir}/", err=json_output)
+
+
+@cli.command("detect-obb")
+@click.argument("source")
+@click.option("--model", "-m", default="yolo11n-obb", help="OBB model variant, e.g. yolo11n-obb")
+@click.option(
+    "--weights",
+    "-w",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to local .pt weights file",
+)
+@click.option(
+    "--num-classes",
+    "num_classes",
+    default=None,
+    type=int,
+    help="Override class count (default: 15 for DOTA v1)",
+)
+@click.option(
+    "--backend",
+    default="auto",
+    type=click.Choice(["auto", "pytorch", "onnx", "tensorrt", "openvino"]),
+)
+@click.option("--device", default="auto")
+@click.option(
+    "--precision",
+    default="auto",
+    type=click.Choice(["auto", "fp32", "fp16", "int8"]),
+)
+@click.option("--confidence", default=0.25, type=float)
+@click.option("--iou", default=0.45, type=float)
+@click.option("--batch", default=1, type=int)
+@click.option("--output", "-o", default=None, type=click.Path())
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Stream OBB detections as JSONL to stdout",
+)
+@click.option("--no-metrics", is_flag=True, default=False)
+def detect_obb_command(
+    source: str,
+    model: str,
+    weights: str | None,
+    num_classes: int | None,
+    backend: str,
+    device: str,
+    precision: str,
+    confidence: float,
+    iou: float,
+    batch: int,
+    output: str | None,
+    json_output: bool,
+    no_metrics: bool,
+) -> None:
+    """Run oriented bounding box (OBB) detection on SOURCE."""
+    from yowo.io import open_source
+
+    spec = _parse_model_spec(model)
+    weights_path = Path(weights) if weights else spec.weights_path
+
+    config = OBBConfig(
+        model_family=spec.family,
+        model_size=spec.size,
+        weights_path=weights_path,
+        num_classes=num_classes,
+        batch_size=batch,
+        confidence_threshold=confidence,
+        iou_threshold=iou,
+        backend=BackendType(backend) if backend != "auto" else None,
+        device=device,
+        precision=Precision(precision) if precision != "auto" else None,
+        metrics_enabled=not no_metrics,
+    )
+
+    detections: list = []
+    try:
+        with OBBEngine(config) as engine:
+            src = open_source(source)
+            for det in engine.stream_obb(src):
+                detections.append(det)
+                if json_output:
+                    import json as _json
+
+                    click.echo(
+                        _json.dumps(
+                            {
+                                "frame_index": det.frame_index,
+                                "source_id": det.source_id,
+                                "boxes": [
+                                    {
+                                        "cx": b.cx,
+                                        "cy": b.cy,
+                                        "w": b.w,
+                                        "h": b.h,
+                                        "angle": b.angle,
+                                        "confidence": b.confidence,
+                                        "class_id": b.class_id,
+                                        "class_name": b.class_name,
+                                    }
+                                    for b in det.boxes
+                                ],
+                                "inference_time_ms": det.inference_time_ms,
+                            }
+                        )
+                    )
+                else:
+                    click.echo(
+                        f"Frame {det.frame_index}: {len(det.boxes)} OBB detections "
+                        f"({det.inference_time_ms:.1f}ms)"
+                    )
+            if not no_metrics and not json_output:
+                m = engine.metrics
+                click.echo(
+                    f"\nMetrics: {m.frames_total} frames  {m.fps:.1f} FPS  "
+                    f"p50={m.inference_p50_ms:.1f}ms  errors={m.errors_total}"
+                )
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if output:
+        out_path = Path(output)
+        _write_json(detections, out_path)
+        click.echo(f"Saved OBB detections to {output}", err=json_output)
 
 
 @cli.command("export")
