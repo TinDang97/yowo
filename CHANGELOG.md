@@ -24,8 +24,6 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
   `python_version >= '3.11'` markers. `onnx-gpu` extra pinned `<1.20` for
   Python 3.9 (last version with cp39 wheels).
 
-### Added
-
 - **engine**: Custom `num_classes` support — override the registry default (80
   COCO / 1000 ImageNet) for fine-tuned models. Thread from user API
   (`InferenceEngine(num_classes=10)`, `ClassificationEngine(num_classes=10)`,

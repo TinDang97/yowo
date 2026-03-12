@@ -9,6 +9,8 @@ import numpy as np
 
 from yowo.postprocess._obb_nms import DOTA_CLASSES
 
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz  # pyright: ignore[reportDeprecated]  # numpy <2.0 compat
+
 if TYPE_CHECKING:
     from yowo.types import OBBDetection
 
@@ -204,7 +206,7 @@ def evaluate_obb_map(
             fp_cumsum = np.cumsum([1 - x for x in tp_sorted])
             precision = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-9)
             recall = tp_cumsum / (total_gt + 1e-9)
-            ap = float(np.trapezoid(precision, recall))
+            ap = float(_trapezoid(precision, recall))
             ap_by_class.append(ap)
 
         ap_by_threshold.append(float(np.mean(ap_by_class)))
