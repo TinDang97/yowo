@@ -20,7 +20,14 @@ from pathlib import Path
 from typing import Any
 
 from yowo.errors import ConfigError
-from yowo.types import ClassificationResult, Detection, ModelFamily, ModelSize, ModelSpec
+from yowo.types import (
+    ClassificationResult,
+    Detection,
+    ModelFamily,
+    ModelSize,
+    ModelSpec,
+    OBBDetection,
+)
 
 _SIZE_MAP: dict[str, ModelSize] = {
     "n": ModelSize.NANO,
@@ -188,4 +195,59 @@ def classify(
     return results
 
 
-__all__ = ["classify", "detect", "parse_model_name"]
+def detect_obb(
+    source: str | Path,
+    *,
+    model: str = "yolo11n-obb",
+    confidence: float = 0.25,
+    iou: float = 0.45,
+    device: str = "auto",
+    num_classes: int | None = None,
+    **engine_kwargs: Any,
+) -> list[OBBDetection]:
+    """Run YOLO OBB inference and return all oriented detections.
+
+    One-shot OBB detection -- loads the engine, runs inference, closes::
+
+        from yowo import detect_obb
+        results = detect_obb("aerial.jpg", model="yolo11n-obb")
+        for det in results:
+            for box in det.boxes:
+                print(f"{box.class_name}: angle={box.angle:.3f}")
+
+    Args:
+        source: Image/video path or directory.
+        model: Short OBB model name (default ``"yolo11n-obb"``).
+        confidence: Confidence threshold (default 0.25).
+        iou: IoU threshold for NMS (default 0.45).
+        device: Device string (default ``"auto"``).
+        num_classes: Override output class count (default ``None`` = registry).
+        **engine_kwargs: Extra kwargs forwarded to :class:`OBBEngine`.
+
+    Returns:
+        List of :class:`~yowo.types.OBBDetection` objects (one per frame).
+
+    Raises:
+        ConfigError: If *model* is not a valid OBB model name.
+        SourceError: If *source* cannot be opened.
+    """
+    from yowo.io import open_source
+    from yowo.obb_engine import OBBEngine
+
+    spec = parse_model_name(model)
+    results: list[OBBDetection] = []
+    with OBBEngine(
+        model_family=spec.family,
+        model_size=spec.size,
+        num_classes=num_classes,
+        confidence_threshold=confidence,
+        iou_threshold=iou,
+        device=device,
+        **engine_kwargs,
+    ) as engine:
+        for result in engine.stream_obb(open_source(source)):
+            results.append(result)
+    return results
+
+
+__all__ = ["classify", "detect", "detect_obb", "parse_model_name"]

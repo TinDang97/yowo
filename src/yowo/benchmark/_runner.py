@@ -92,8 +92,20 @@ def _load_image_as_frame(image_path: Path, index: int) -> Frame:
                 source_id=str(image_path),
                 frame_index=index,
             )
+        import warnings
+
+        warnings.warn(
+            f"cv2.imread returned None for {image_path}",
+            stacklevel=2,
+        )
     except ImportError:
-        pass
+        import warnings
+
+        warnings.warn(
+            "cv2 not available — benchmark will use dummy black frames. "
+            "Install opencv-python for real image benchmarks.",
+            stacklevel=2,
+        )
     # Fallback: create a dummy 640x480 frame
     return Frame(
         pixels=np.zeros((480, 640, 3), dtype=np.uint8),
@@ -198,6 +210,20 @@ def run_single_backend(
                 all_detections.extend(results)
 
     # Compute FPS and latency percentiles
+    if not latencies:
+        return BenchmarkResult(
+            format=backend_type.value,
+            map_50_95=None,
+            map_50=None,
+            fps_avg=0.0,
+            latency_p50_ms=0.0,
+            latency_p95_ms=0.0,
+            latency_p99_ms=0.0,
+            model_size_mb=_get_model_size_mb(model_spec),
+            device="unknown",
+            num_images=len(images),
+        )
+
     total_time_s = sum(latencies) / 1000.0
     fps_avg = len(images) / total_time_s if total_time_s > 0 else 0.0
 

@@ -363,6 +363,19 @@ class OBBBox:
     class_id: int
     class_name: str = ""
 
+    def to_dict(self) -> dict[str, float | int | str]:
+        """Serialize to a plain dict with JSON-safe primitive values."""
+        return {
+            "cx": self.cx,
+            "cy": self.cy,
+            "w": self.w,
+            "h": self.h,
+            "angle": self.angle,
+            "confidence": self.confidence,
+            "class_id": self.class_id,
+            "class_name": self.class_name,
+        }
+
 
 @dataclass(frozen=True)
 class OBBDetection:
@@ -380,6 +393,19 @@ class OBBDetection:
     source_id: str
     boxes: tuple[OBBBox, ...]
     inference_time_ms: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-safe dict."""
+        return {
+            "frame_index": self.frame_index,
+            "source_id": self.source_id,
+            "inference_time_ms": self.inference_time_ms,
+            "boxes": [box.to_dict() for box in self.boxes],
+        }
+
+    def to_json(self, *, indent: int | None = None) -> str:
+        """Serialize to a JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
 
 
 @dataclass(frozen=True)

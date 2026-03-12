@@ -217,19 +217,20 @@ def _process_video(
     frame_count = 0
 
     source = VideoFileSource(path)
-    for frame in source:
-        detections = engine.detect([frame])
-        frame_detections.append(detections[0].to_dict())
-        frame_count += 1
+    try:
+        for frame in source:
+            detections = engine.detect([frame])
+            frame_detections.append(detections[0].to_dict())
+            frame_count += 1
 
-        if not no_annotate:
-            assert cv2 is not None, "cv2 must be available"
-            frames_dir = output_dir / "frames" / path.stem
-            frames_dir.mkdir(parents=True, exist_ok=True)
-            out_path = frames_dir / f"{frame.frame_index:06d}.jpg"
-            cv2.imwrite(str(out_path), frame.pixels)
-
-    source.close()
+            if not no_annotate:
+                assert cv2 is not None, "cv2 must be available"
+                frames_dir = output_dir / "frames" / path.stem
+                frames_dir.mkdir(parents=True, exist_ok=True)
+                out_path = frames_dir / f"{frame.frame_index:06d}.jpg"
+                cv2.imwrite(str(out_path), frame.pixels)
+    finally:
+        source.close()
 
     row = {"path": str(path), "detections": frame_detections}
     jsonl_file.write(json.dumps(row) + "\n")

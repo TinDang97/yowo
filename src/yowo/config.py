@@ -316,6 +316,12 @@ class OBBConfig:
     def __post_init__(self) -> None:
         if self.num_classes is not None and self.num_classes < 1:
             raise ConfigError(f"num_classes must be >= 1, got {self.num_classes}")
+        if not 0.0 <= self.confidence_threshold <= 1.0:
+            raise ConfigError(
+                f"confidence_threshold must be in [0.0, 1.0], got {self.confidence_threshold}"
+            )
+        if not 0.0 <= self.iou_threshold <= 1.0:
+            raise ConfigError(f"iou_threshold must be in [0.0, 1.0], got {self.iou_threshold}")
         if self.batch_size < 1:
             raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.max_queue_size < 1:

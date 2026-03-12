@@ -256,6 +256,7 @@ class ChromaEmbeddingGallery:
         distances: list[float] = result["distances"][0]
         metadatas: list[dict[str, Any]] = result["metadatas"][0]
 
+        assert len(distances) == len(metadatas), "chromadb distances/metadatas length mismatch"
         return [
             GalleryMatch(
                 global_id=int(meta["global_id"]),

@@ -64,6 +64,7 @@ dev = [
     "torch>=2.0",
     "onnx>=1.12.0,<2.0.0",
     "onnxslim>=0.1.85",
+    # onnxruntime >=1.24 drops cp310 wheels; cap to last known-good release
     "onnxruntime>=1.17,<1.24; python_version == '3.10'",
     "onnxruntime>=1.17; python_version >= '3.11'",
     "setuptools>=82.0.0",

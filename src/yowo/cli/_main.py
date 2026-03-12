@@ -1044,12 +1044,10 @@ def _print_compat_matrix(hw: object) -> None:
 
 
 def _write_json(detections: list[object], path: Path) -> None:
-    """Serialise detections to a JSON file via Detection.to_dict()."""
+    """Serialise detections to a JSON file via to_dict()."""
     import json
 
-    from yowo.types import Detection
-
-    out = [det.to_dict() for det in detections if isinstance(det, Detection)]
+    out = [det.to_dict() for det in detections if hasattr(det, "to_dict")]  # type: ignore[union-attr]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=2), encoding="utf-8")
 

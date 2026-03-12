@@ -95,6 +95,7 @@ def linear_assignment(
         return [], list(range(rows)), list(range(cols))
 
     row_ind, col_ind = _hungarian(cost_matrix)
+    assert len(row_ind) == len(col_ind), "hungarian returned mismatched indices"
 
     matches: list[tuple[int, int]] = []
     matched_rows: set[int] = set()
@@ -543,6 +544,7 @@ def remove_intra_duplicates(
         ii, jj = np.where(np.triu(1.0 - ious < dist_thresh, k=1))
         if ii.shape[0] == 0:
             return tracks
+        assert ii.shape[0] == jj.shape[0], "np.where returned mismatched arrays"
         ages = np.array([t.frame_id - t.start_frame for t in tracks])
         for i, j in zip(ii.tolist(), jj.tolist()):
             if i in remove or j in remove:

@@ -195,6 +195,19 @@ def _measure_config(
             batch_size=batch_size,
         )
         engine = OBBEngine(config)
+    elif task == "classify":
+        from yowo.classify_engine import ClassificationEngine
+        from yowo.config import ClassificationConfig
+
+        config = ClassificationConfig(
+            model_family=spec.family,
+            model_size=spec.size,
+            num_classes=spec.num_classes,
+            backend=backend,
+            precision=precision,
+            batch_size=batch_size,
+        )
+        engine = ClassificationEngine(config)
     else:
         from yowo.config import InferenceConfig
         from yowo.engine import DetectionEngine
@@ -217,7 +230,12 @@ def _measure_config(
 
         # Callable alias avoids repeating the task branch inside tight loops.
         # type: ignore needed because pyright can't narrow union through assignment.
-        infer = engine.detect_obb if task == "obb" else engine.detect  # type: ignore[union-attr]
+        if task == "obb":
+            infer = engine.detect_obb  # type: ignore[union-attr]
+        elif task == "classify":
+            infer = engine.classify  # type: ignore[union-attr]
+        else:
+            infer = engine.detect  # type: ignore[union-attr]
 
         # Warmup (not timed)
         for _ in range(warmup_frames):

@@ -73,10 +73,11 @@ def configure_logging(level: str = "WARNING", *, structured: bool = False) -> No
                     when ``False`` attach a plain ``logging.Formatter``.
     """
     logger = logging.getLogger("yowo")
-    # Remove all existing handlers to prevent duplicates on repeated calls.
-    logger.handlers.clear()
+    # Remove only handlers previously added by configure_logging (tagged with _yowo_managed).
+    logger.handlers[:] = [h for h in logger.handlers if not getattr(h, "_yowo_managed", False)]
 
     handler = logging.StreamHandler()
+    handler._yowo_managed = True  # type: ignore[attr-defined]
     if structured:
         handler.setFormatter(JsonFormatter())
     else:

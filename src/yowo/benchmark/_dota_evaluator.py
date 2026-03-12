@@ -7,29 +7,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from yowo.postprocess._obb_nms import DOTA_CLASSES
+
 if TYPE_CHECKING:
     from yowo.types import OBBDetection
 
-# 15 DOTA v1 categories (matches ultralytics DOTA convention)
-DOTA_CLASS_NAMES: list[str] = [
-    "plane",
-    "ship",
-    "storage-tank",
-    "baseball-diamond",
-    "tennis-court",
-    "basketball-court",
-    "ground-track-field",
-    "harbor",
-    "bridge",
-    "large-vehicle",
-    "small-vehicle",
-    "helicopter",
-    "roundabout",
-    "soccer-ball-field",
-    "swimming-pool",
-]
-
-_DOTA_CLASS_INDEX: dict[str, int] = {name: i for i, name in enumerate(DOTA_CLASS_NAMES)}
+_DOTA_CLASS_INDEX: dict[str, int] = {name: i for i, name in enumerate(DOTA_CLASSES)}
 
 
 def load_dota_dataset(
@@ -54,7 +37,7 @@ def load_dota_dataset(
         gt_boxes_per_image: list of lists; each inner list is 8 float coords
             [x1, y1, x2, y2, x3, y3, x4, y4] (quad corner format).
         gt_classes_per_image: list of lists; each inner list is class indices
-            (int, 0-indexed matching DOTA_CLASS_NAMES).
+            (int, 0-indexed matching DOTA_CLASSES).
 
     Raises:
         FileNotFoundError: If images/val or labelTxt/val directories are missing.
@@ -233,7 +216,7 @@ def evaluate_obb_map(
 
 
 __all__ = [
-    "DOTA_CLASS_NAMES",
+    "DOTA_CLASSES",
     "evaluate_obb_map",
     "load_dota_dataset",
 ]

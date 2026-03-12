@@ -8,7 +8,7 @@ Quick start::
             print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
-from yowo._convenience import classify, detect, parse_model_name
+from yowo._convenience import classify, detect, detect_obb, parse_model_name
 from yowo.backends import ModelBuilder
 from yowo.classify_engine import ClassificationEngine
 from yowo.config import (
@@ -185,6 +185,7 @@ __all__ = [
     "__version__",
     "classify",
     "detect",
+    "detect_obb",
     "export_model",
     "is_free_threaded",
     "load_config",

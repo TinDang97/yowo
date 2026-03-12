@@ -9,7 +9,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from yowo.types import Frame, ModelSpec, OBBBox, OBBDetection
+from yowo.types import Frame, ModelSpec, OBBBox, OBBDetection, PreprocessedTensor
 
 DOTA_CLASSES: list[str] = [
     "plane",
@@ -131,6 +131,7 @@ def postprocess_obb(
     raw: Tensor,
     frames: list[Frame],
     spec: ModelSpec,
+    tensor_meta: PreprocessedTensor,
     conf_threshold: float = 0.25,
     iou_threshold: float = 0.45,
     class_names: list[str] | None = None,
@@ -154,6 +155,11 @@ def postprocess_obb(
 
     for b in range(raw.shape[0]):
         pred = raw[b]  # (4+nc+1, A)
+
+        # Inverse letterbox transform: remove padding, then divide by scale
+        scale_h, _scale_w = tensor_meta.scale_factors[b]
+        scale = scale_h  # uniform scale
+        pad_top, pad_left = tensor_meta.pad_offsets[b]
         boxes_xywh = pred[:4].T  # (A, 4)
         cls_scores = pred[4 : 4 + nc].T  # (A, nc)
         angles = pred[4 + nc :].T  # (A, 1)
@@ -189,12 +195,24 @@ def postprocess_obb(
         obb_boxes: list[OBBBox] = []
         for k in kept.tolist():
             cid = int(cls_ids_f[k].item())
+
+            raw_cx = float(boxes_f[k, 0].item())
+            raw_cy = float(boxes_f[k, 1].item())
+            raw_w = float(boxes_f[k, 2].item())
+            raw_h = float(boxes_f[k, 3].item())
+
+            # Inverse letterbox: remove pad offset, then remove scale
+            cx_orig = (raw_cx - pad_left) / scale
+            cy_orig = (raw_cy - pad_top) / scale
+            w_orig = raw_w / scale
+            h_orig = raw_h / scale
+
             obb_boxes.append(
                 OBBBox(
-                    cx=float(boxes_f[k, 0].item()),
-                    cy=float(boxes_f[k, 1].item()),
-                    w=float(boxes_f[k, 2].item()),
-                    h=float(boxes_f[k, 3].item()),
+                    cx=cx_orig,
+                    cy=cy_orig,
+                    w=w_orig,
+                    h=h_orig,
                     angle=float(angles_f[k].item()),
                     confidence=float(conf_f[k].item()),
                     class_id=cid,

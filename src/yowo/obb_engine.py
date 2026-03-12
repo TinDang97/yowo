@@ -19,10 +19,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import numpy as np
-import torch
+if TYPE_CHECKING:
+    import numpy as np
 
 from yowo.backends import InferenceBackend
 from yowo.config import OBBConfig
@@ -201,17 +201,20 @@ class OBBEngine(BaseEngine):
 
     def _process_batch(
         self,
-        raw_output: np.ndarray,
+        raw_output: np.ndarray[Any, Any],
         tensor: PreprocessedTensor,
         frames: list[Frame],
         elapsed_ms: float,
         scratch: PostprocessBuffer | None,
     ) -> list[OBBDetection]:
+        import torch
+
         raw_t = torch.from_numpy(raw_output)
         results = postprocess_obb(
             raw_t,
             frames,
             self._spec,
+            tensor,
             conf_threshold=self._conf,
             iou_threshold=self._iou,
         )

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from yowo.postprocess._obb_nms import postprocess_obb, probiou_matrix
-from yowo.types import Frame, ModelFamily, ModelSize, ModelSpec, OBBDetection
+from yowo.types import Frame, ModelFamily, ModelSize, ModelSpec, OBBDetection, PreprocessedTensor
 
 
 def _make_frame(frame_index: int = 0, source_id: str = "test") -> Frame:
@@ -52,6 +52,17 @@ class TestProbiouMatrix:
         assert iou.max() <= 1.0 + 1e-5
 
 
+def _make_tensor_meta(batch: int = 1) -> PreprocessedTensor:
+    """Identity transform tensor meta (no rescaling, no padding)."""
+    return PreprocessedTensor(
+        data=np.zeros((batch, 3, 640, 640), dtype=np.float32),
+        original_shapes=tuple((640, 640) for _ in range(batch)),
+        input_shape=(640, 640),
+        scale_factors=tuple((1.0, 1.0) for _ in range(batch)),
+        pad_offsets=tuple((0, 0) for _ in range(batch)),
+    )
+
+
 class TestPostprocessOBB:
     def _make_spec(self, nc: int = 15) -> ModelSpec:
         return ModelSpec(
@@ -69,7 +80,7 @@ class TestPostprocessOBB:
         raw = self._make_raw()
         frames = [_make_frame()]
         spec = self._make_spec()
-        results = postprocess_obb(raw, frames, spec)
+        results = postprocess_obb(raw, frames, spec, _make_tensor_meta())
         assert len(results) == 1
         det = results[0]
         assert isinstance(det, OBBDetection)
@@ -91,7 +102,7 @@ class TestPostprocessOBB:
 
         frames = [_make_frame()]
         spec = self._make_spec(nc=nc)
-        results = postprocess_obb(raw, frames, spec, conf_threshold=0.5)
+        results = postprocess_obb(raw, frames, spec, _make_tensor_meta(), conf_threshold=0.5)
         assert len(results) == 1
         det = results[0]
         assert len(det.boxes) >= 1
@@ -110,7 +121,14 @@ class TestPostprocessOBB:
 
         frames = [_make_frame()]
         spec = self._make_spec(nc=nc)
-        results = postprocess_obb(raw, frames, spec, conf_threshold=0.5, iou_threshold=0.45)
+        results = postprocess_obb(
+            raw,
+            frames,
+            spec,
+            _make_tensor_meta(),
+            conf_threshold=0.5,
+            iou_threshold=0.45,
+        )
         assert len(results) == 1
         # After NMS: two identical boxes → only 1 survives
         assert len(results[0].boxes) == 1
@@ -134,7 +152,14 @@ class TestPostprocessOBB:
 
         frames = [_make_frame()]
         spec = self._make_spec(nc=nc)
-        results = postprocess_obb(raw, frames, spec, conf_threshold=0.5, iou_threshold=0.45)
+        results = postprocess_obb(
+            raw,
+            frames,
+            spec,
+            _make_tensor_meta(),
+            conf_threshold=0.5,
+            iou_threshold=0.45,
+        )
         assert len(results) == 1
         assert len(results[0].boxes) == 2
 
@@ -145,7 +170,7 @@ class TestPostprocessOBB:
         raw = self._make_raw(nc=nc, batch=b_size)
         frames = [_make_frame(frame_index=i, source_id=f"cam{i}") for i in range(b_size)]
         spec = self._make_spec(nc=nc)
-        results = postprocess_obb(raw, frames, spec)
+        results = postprocess_obb(raw, frames, spec, _make_tensor_meta(batch=b_size))
         assert len(results) == b_size
         for i, det in enumerate(results):
             assert det.frame_index == i
