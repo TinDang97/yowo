@@ -385,6 +385,7 @@ class OBBDetection:
         frame_index: Zero-based sequential index of the frame in its source.
         source_id: Opaque identifier of the input source; empty if unknown.
         boxes: Tuple of oriented bounding boxes produced by the model.
+        frame: The source frame that was processed (``None`` when unavailable).
         inference_time_ms: Wall-clock time for the inference call only,
             excluding preprocessing and postprocessing.
     """
@@ -392,6 +393,7 @@ class OBBDetection:
     frame_index: int
     source_id: str
     boxes: tuple[OBBBox, ...]
+    frame: Frame | None = None
     inference_time_ms: float = 0.0
 
     def to_dict(self) -> dict[str, object]:

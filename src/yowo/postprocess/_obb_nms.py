@@ -174,6 +174,7 @@ def postprocess_obb(
                     frame_index=frames[b].frame_index,
                     source_id=frames[b].source_id,
                     boxes=(),
+                    frame=frames[b],
                 )
             )
             continue
@@ -225,6 +226,7 @@ def postprocess_obb(
                 frame_index=frames[b].frame_index,
                 source_id=frames[b].source_id,
                 boxes=tuple(obb_boxes),
+                frame=frames[b],
             )
         )
 

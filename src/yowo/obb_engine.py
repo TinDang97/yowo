@@ -224,6 +224,7 @@ class OBBEngine(BaseEngine):
                 frame_index=r.frame_index,
                 source_id=r.source_id,
                 boxes=r.boxes,
+                frame=r.frame,
                 inference_time_ms=elapsed_ms,
             )
             for r in results
@@ -265,6 +266,27 @@ class OBBEngine(BaseEngine):
             One OBBDetection per frame.
         """
         return await asyncio.to_thread(self.detect_obb, frames)
+
+    def stream(self, source: FrameSource) -> Iterator[OBBDetection]:
+        """Yield OBB detections from a FrameSource, batching internally.
+
+        Overrides :meth:`BaseEngine.stream` so that ``astream()`` works.
+
+        Args:
+            source: Any :class:`~yowo.io.FrameSource`.
+
+        Yields:
+            One :class:`~yowo.types.OBBDetection` per frame.
+
+        Raises:
+            ShutdownError: If the engine is shutting down.
+            InferenceError: If the engine has not been loaded.
+        """
+        if self._shutting_down.is_set():
+            raise ShutdownError("Engine is shutting down")
+        if not self._loaded:
+            raise InferenceError("Engine not loaded. Call load() or use as context manager.")
+        return self._stream_dispatch(source)  # type: ignore[return-value]
 
     def stream_obb(self, source: FrameSource) -> Iterator[OBBDetection]:
         """Yield OBB detections from a FrameSource, batching internally.
