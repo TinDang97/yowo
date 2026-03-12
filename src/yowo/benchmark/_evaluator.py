@@ -124,6 +124,9 @@ def detections_to_coco_results(
     Returns:
         List of COCO-format result dicts ready for ``coco_gt.loadRes()``.
     """
+    if len(detections) != len(image_ids):
+        msg = f"detections/image_ids length mismatch: {len(detections)} vs {len(image_ids)}"
+        raise ValueError(msg)
     results: list[dict[str, object]] = []
     for det, img_id in zip(detections, image_ids):
         for box in det.boxes:

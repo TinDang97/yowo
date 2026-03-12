@@ -123,6 +123,9 @@ class FeatureStore:
         entry_dir.mkdir(parents=True, exist_ok=True)
         shapes: dict[str, tuple[int, ...]] = {}
         dtype_str = ""
+        if len(features) != len(_FEATURE_NAMES):
+            msg = f"expected {len(_FEATURE_NAMES)} features, got {len(features)}"
+            raise ValueError(msg)
         try:
             for name, arr in zip(_FEATURE_NAMES, features):
                 mm = np.memmap(

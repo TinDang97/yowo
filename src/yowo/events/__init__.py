@@ -17,10 +17,10 @@ import asyncio
 import queue
 import threading
 from collections.abc import Callable
-from typing import Any, Optional, Tuple  # noqa: UP035
+from typing import Any, Optional
 
 # Type alias for a listener entry: (callback, is_async, loop_or_None)
-_ListenerEntry = Tuple[Callable[..., Any], bool, Optional[asyncio.AbstractEventLoop]]  # noqa: UP006
+_ListenerEntry = tuple[Callable[..., Any], bool, Optional[asyncio.AbstractEventLoop]]
 
 # ---------------------------------------------------------------------------
 # Well-known event name constants
