@@ -13,6 +13,10 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+---
+
+## [2.4.0] — 2026-03-12
+
 ### Added
 
 - **compat**: Python 3.9 and 3.10 support — backported for ONNX GPU, TensorRT,
@@ -138,7 +142,7 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Tests
 
-- 1615 unit tests (up from 1583). New tests: `TestAutoLetterbox` (12 cases
+- 1910 unit tests (up from 1615). New tests: `TestAutoLetterbox` (12 cases
   covering stride alignment, non-square shapes, pixel range, batch consistency,
   mixed-aspect metadata, inverse transform), `TestAlignToStride` (3 cases),
   `record_frame_dropped` metrics (3 cases), `TestAutoLetterboxValidation`
