@@ -9,6 +9,12 @@ import pytest
 
 from yowo.config import ConfigError, ExportConfig
 
+_has_onnxruntime = True
+try:
+    import onnxruntime  # noqa: F401
+except ImportError:
+    _has_onnxruntime = False
+
 # ---------------------------------------------------------------------------
 # ExportConfig.batch_sizes validation
 # ---------------------------------------------------------------------------
@@ -45,6 +51,7 @@ class TestExportConfigBatchSizes:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_onnxruntime, reason="onnxruntime not installed")
 class TestOnnxBatchDetection:
     def _make_backend(self) -> MagicMock:
         """Create a minimal OnnxBackend with mocked hardware."""

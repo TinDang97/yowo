@@ -13,13 +13,18 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.backends._selector import get_fallback_backends, select_backend
+from yowo.backends._selector import (
+    check_backend_available,
+    get_fallback_backends,
+    select_backend,
+)
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
     "ModelBuilder",
+    "check_backend_available",
     "create_backend",
     "get_fallback_backends",
     "select_backend",
@@ -166,30 +171,29 @@ def create_backend(
         DependencyError: Required SDK is not installed.
         BackendError: Backend cannot be used on this hardware.
     """
-    match backend_type:
-        case BackendType.PYTORCH:
-            from yowo.backends._pytorch import PyTorchBackend
+    if backend_type == BackendType.PYTORCH:
+        from yowo.backends._pytorch import PyTorchBackend
 
-            return PyTorchBackend(
-                hw_profile,
-                model_spec=model_spec,
-                model_builder=model_builder,
-                feature_cache=feature_cache,
-                kv_cache=kv_cache,
-            )
-        case BackendType.ONNX:
-            from yowo.backends._onnx import OnnxBackend
+        return PyTorchBackend(
+            hw_profile,
+            model_spec=model_spec,
+            model_builder=model_builder,
+            feature_cache=feature_cache,
+            kv_cache=kv_cache,
+        )
+    elif backend_type == BackendType.ONNX:
+        from yowo.backends._onnx import OnnxBackend
 
-            return OnnxBackend(hw_profile)
-        case BackendType.TENSORRT:
-            from yowo.backends._tensorrt import TensorRTBackend
+        return OnnxBackend(hw_profile)
+    elif backend_type == BackendType.TENSORRT:
+        from yowo.backends._tensorrt import TensorRTBackend
 
-            return TensorRTBackend(hw_profile)
-        case BackendType.OPENVINO:
-            from yowo.backends._openvino import OpenVinoBackend
+        return TensorRTBackend(hw_profile)
+    elif backend_type == BackendType.OPENVINO:
+        from yowo.backends._openvino import OpenVinoBackend
 
-            return OpenVinoBackend(hw_profile)
-        case BackendType.COREML:
-            from yowo.backends._coreml import CoreMLBackend
+        return OpenVinoBackend(hw_profile)
+    else:  # BackendType.COREML
+        from yowo.backends._coreml import CoreMLBackend
 
-            return CoreMLBackend(hw_profile)
+        return CoreMLBackend(hw_profile)

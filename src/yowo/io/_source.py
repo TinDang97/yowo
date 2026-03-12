@@ -286,6 +286,7 @@ class RTSPStreamSource:
         self._reconnect_timeout_s = reconnect_timeout_s
         self._max_frames = max_frames
         self._frame_skip = frame_skip
+        self._active_cap: cv2.VideoCapture | None = None
 
     @property
     def is_live(self) -> bool:
@@ -313,6 +314,7 @@ class RTSPStreamSource:
 
     def __iter__(self) -> Iterator[Frame]:
         cap = self._open_cap()
+        self._active_cap = cap
         frame_index = 0
         yielded = 0
         retry_count = 0
@@ -350,11 +352,33 @@ class RTSPStreamSource:
                     time.sleep(wait)
                     retry_count += 1
                     cap = self._open_cap()
+                    self._active_cap = cap
         finally:
             cap.release()
+            self._active_cap = None
+
+    def reconnect(self) -> None:
+        """Release and re-open the active RTSP capture to prevent memory leaks.
+
+        Safe to call from the :class:`ThreadedFrameReader` background thread
+        between frame reads. If no active capture exists, this is a no-op.
+        """
+        cap = self._active_cap
+        if cap is None:
+            return
+        cap.release()
+        new_cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        if not new_cap.isOpened():
+            # Fallback: re-open original — let the iterator handle retry
+            new_cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        self._active_cap = new_cap
 
     def close(self) -> None:
-        pass
+        """Release any active capture."""
+        cap = self._active_cap
+        if cap is not None:
+            cap.release()
+            self._active_cap = None
 
     def __enter__(self) -> RTSPStreamSource:
         return self

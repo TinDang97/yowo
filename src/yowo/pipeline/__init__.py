@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING
 from yowo.pipeline._collector import FrameCollector
 from yowo.pipeline._router import DetectionRouter
 from yowo.pipeline._scheduler import BatchScheduler
-from yowo.types import StreamState
+from yowo.types import StreamConfig, StreamState
 
 if TYPE_CHECKING:
     from yowo.engine import InferenceEngine
@@ -57,6 +57,7 @@ __all__ = [
     "BatchScheduler",
     "DetectionRouter",
     "FrameCollector",
+    "StreamConfig",
     "run_pipeline",
 ]
 
@@ -175,6 +176,8 @@ def _check_stream_errors(collector: FrameCollector) -> None:
     """Log or raise if stream errors occurred during the pipeline run.
 
     Raises ``RuntimeError`` when ALL streams failed (total pipeline failure).
+    This includes the case where all streams were auto-removed due to
+    consecutive errors (stream_states is empty, errors non-empty).
     Logs a warning per failed stream for partial failures.
     """
     errors = collector.stream_errors
@@ -182,7 +185,9 @@ def _check_stream_errors(collector: FrameCollector) -> None:
         return
 
     states = collector.stream_states
-    all_failed = states and all(s == StreamState.ERROR for s in states.values())
+    # All active streams in ERROR state, OR all streams were auto-removed
+    # (states is empty but errors were recorded from auto-removed streams).
+    all_failed = (not states) or all(s == StreamState.ERROR for s in states.values())
     if all_failed:
         msg = "; ".join(f"{sid}: {exc}" for sid, exc in errors.items())
         raise RuntimeError(f"All pipeline streams failed: {msg}")

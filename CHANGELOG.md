@@ -15,6 +15,15 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **compat**: Python 3.9 and 3.10 support — backported for ONNX GPU, TensorRT,
+  and Jetson deployment. `StrEnumBase` shim for `enum.StrEnum` (3.11+),
+  `match/case` replaced with `if/elif/else`, `slots=True` removed from
+  dataclasses, `typing.Self` guarded under `TYPE_CHECKING`, `datetime.UTC`
+  replaced with `datetime.timezone.utc`, `zip(strict=)` removed,
+  `isinstance(X | Y)` replaced with tuple form. Dev deps gated with
+  `python_version >= '3.11'` markers. `onnx-gpu` extra pinned `<1.20` for
+  Python 3.9 (last version with cp39 wheels).
+
 - **engine**: Custom `num_classes` support — override the registry default (80
   COCO / 1000 ImageNet) for fine-tuned models. Thread from user API
   (`InferenceEngine(num_classes=10)`, `ClassificationEngine(num_classes=10)`,

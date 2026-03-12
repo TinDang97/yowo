@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +80,17 @@ def export_model(
         load_classify_weights(model, weights_path)
         model = model.fuse().eval()
         input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
+    elif spec.task == "obb":
+        from yowo.arch import build_obb_model
+        from yowo.arch._weights import load_obb_weights
+        from yowo.models._registry import get_obb
+
+        meta = get_obb(spec.family, spec.size)
+        nc = spec.num_classes if spec.num_classes is not None else meta.num_classes
+        model = build_obb_model(spec.family, spec.size, num_classes=nc)
+        load_obb_weights(model, weights_path)
+        model = model.fuse().eval()
+        input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
     else:
         from yowo.arch import build_model
         from yowo.arch._weights import load_weights
@@ -108,7 +119,8 @@ def export_model(
 
     t0 = time.monotonic()
 
-    model_stem = f"{spec.family.value}{spec.size.value}"
+    task_suffix = "-obb" if spec.task == "obb" else ""
+    model_stem = f"{spec.family.value}{spec.size.value}{task_suffix}"
 
     # CoreML exports directly from PyTorch — skip ONNX intermediate
     if target_format == ExportFormat.COREML:
@@ -123,8 +135,8 @@ def export_model(
         # Step 1: Produce ONNX first
         onnx_path = output_dir / f"{model_stem}.onnx"
 
-        # KV-cache export is detection-only — not supported for classify task
-        if kv_cache and spec.task != "classify":
+        # KV-cache export is detection-only — not supported for classify or obb tasks
+        if kv_cache and spec.task not in ("classify", "obb"):
             from yowo.arch._yolo import YOLOModel
             from yowo.export._kv_wrapper import YOLOKVWrapper
 
@@ -149,19 +161,18 @@ def export_model(
             onnx_path = quantized_path
 
         # Step 2: Convert if needed
-        match target_format:
-            case ExportFormat.ONNX:
-                exported_path = onnx_path
-            case ExportFormat.TENSORRT:
-                exported_path = _convert_tensorrt(
-                    onnx_path,
-                    output_dir / f"{model_stem}.engine",
-                    precision,
-                    calibration_data,
-                    imgsz=imgsz,
-                )
-            case ExportFormat.OPENVINO:
-                exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
+        if target_format == ExportFormat.ONNX:
+            exported_path = onnx_path
+        elif target_format == ExportFormat.TENSORRT:
+            exported_path = _convert_tensorrt(
+                onnx_path,
+                output_dir / f"{model_stem}.engine",
+                precision,
+                calibration_data,
+                imgsz=imgsz,
+            )
+        elif target_format == ExportFormat.OPENVINO:
+            exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
 
     elapsed = time.monotonic() - t0
 
@@ -182,7 +193,7 @@ def export_model(
         input_shape=[1, 3, imgsz, imgsz],
         file_path=str(exported_path.resolve()),
         file_size_bytes=size_bytes,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         export_duration_sec=round(elapsed, 2),
         source_weights=str(weights_path),
         yowo_version=getattr(yowo, "__version__", "0.1.0"),

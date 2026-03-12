@@ -136,6 +136,8 @@ class TestRunGpu:
         raw = np.zeros((1, 0, 6), dtype=np.float32)
         backend = _make_mock_backend(infer_output=raw)
         engine = _make_engine_and_load(mock_backend=backend)
+        # Reset mock so warmup validation's infer() call is not counted
+        backend.infer.reset_mock()
 
         tensor = MagicMock(spec=PreprocessedTensor)
         tensor.batch_size = 1

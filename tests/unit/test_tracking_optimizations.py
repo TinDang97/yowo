@@ -100,7 +100,7 @@ class TestPredictedXyxyCache:
         t = _make_strack(50, 60, 150, 260)
         cached = t.predicted_xyxy
         fresh = KalmanFilterXYAH.xyah_to_xyxy(t._mean[:4])
-        for c, f in zip(cached, fresh, strict=True):
+        for c, f in zip(cached, fresh):
             assert abs(c - f) < 1e-10
 
 
@@ -461,7 +461,7 @@ class TestKalmanPredictCorrectness:
         # --- Sequential path ---
         seq_means = []
         seq_covs = []
-        for box, st in zip(boxes, states, strict=True):
+        for box, st in zip(boxes, states):
             t = _make_strack(*box, min_hits=1)
             t.activate(frame_id=0)
             t._mean[7] = 3.5  # nonzero height velocity
@@ -472,7 +472,7 @@ class TestKalmanPredictCorrectness:
 
         # --- Batch path ---
         batch_tracks = []
-        for box, st in zip(boxes, states, strict=True):
+        for box, st in zip(boxes, states):
             t = _make_strack(*box, min_hits=1)
             t.activate(frame_id=0)
             t._mean[7] = 3.5

@@ -12,11 +12,12 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from yowo.io._reader import ThreadedFrameReader
-from yowo.types import Frame, FrameDropPolicy, StreamState, TaggedFrame
+from yowo.types import Frame, FrameDropPolicy, StreamConfig, StreamState, TaggedFrame
 
 if TYPE_CHECKING:
     from yowo.io._source import FrameSource
@@ -29,7 +30,19 @@ __all__ = ["FrameCollector"]
 class _StreamEntry:
     """Internal bookkeeping for a single managed stream."""
 
-    __slots__ = ("bridge", "error", "reader", "source", "state", "stop_event")
+    __slots__ = (
+        "auto_remove",
+        "bridge",
+        "consecutive_errors",
+        "error",
+        "frames_dropped",
+        "frames_processed",
+        "last_frame_time",
+        "reader",
+        "source",
+        "state",
+        "stop_event",
+    )
 
     def __init__(self, reader: ThreadedFrameReader, source: FrameSource) -> None:
         self.reader: ThreadedFrameReader = reader
@@ -38,6 +51,12 @@ class _StreamEntry:
         self.error: BaseException | None = None
         self.bridge: threading.Thread | None = None
         self.stop_event: threading.Event = threading.Event()
+        # Per-stream stats (added in v2.3.0 for STRM-01 to STRM-05)
+        self.auto_remove: bool = False
+        self.consecutive_errors: int = 0
+        self.frames_dropped: int = 0
+        self.frames_processed: int = 0
+        self.last_frame_time: float = 0.0
 
 
 def _put_or_stop(
@@ -62,25 +81,60 @@ def _run_bridge(
     stream_id: str,
     entry: _StreamEntry,
     shared_q: queue.Queue[tuple[str, Frame | None] | None],
+    max_consecutive_errors: int = 3,
 ) -> None:
     """Bridge daemon: read from one ThreadedFrameReader, push to shared_q.
 
     Posts ``(stream_id, None)`` as exhaustion sentinel before exiting.
+
+    Tracks per-stream stats on *entry*:
+    - ``frames_processed``: increments on each successful Frame enqueue.
+    - ``frames_dropped``: increments when ``_put_or_stop`` returns False.
+    - ``consecutive_errors``: increments on each read error, resets to 0
+      on any successful item (Frame or None gap).
+    - ``last_frame_time``: updated to ``time.monotonic()`` on each Frame.
+    - ``auto_remove``: set to True when consecutive_errors reaches
+      *max_consecutive_errors*. The bridge then exits WITHOUT calling
+      remove_stream() directly — the iterator thread handles removal to
+      avoid the self-join deadlock (RESEARCH.md pitfall 2).
     """
     try:
         while not entry.stop_event.is_set():
             try:
                 item = entry.reader.get(timeout=0.1)
             except Exception as exc:
-                logger.exception("Stream %r bridge error", stream_id)
+                entry.consecutive_errors += 1
+                if entry.consecutive_errors >= max_consecutive_errors:
+                    logger.warning(
+                        "Stream %r auto-removing after %d consecutive errors",
+                        stream_id,
+                        entry.consecutive_errors,
+                    )
+                    entry.state = StreamState.ERROR
+                    entry.error = exc
+                    entry.auto_remove = True
+                    break
+                logger.debug(
+                    "Stream %r bridge error (%d/%d): %s",
+                    stream_id,
+                    entry.consecutive_errors,
+                    max_consecutive_errors,
+                    exc,
+                )
                 entry.state = StreamState.ERROR
                 entry.error = exc
-                break
+                continue
 
             if isinstance(item, Frame):
-                if not _put_or_stop(shared_q, (stream_id, item), entry.stop_event):
+                entry.consecutive_errors = 0
+                entry.last_frame_time = time.monotonic()
+                if _put_or_stop(shared_q, (stream_id, item), entry.stop_event):
+                    entry.frames_processed += 1
+                else:
+                    entry.frames_dropped += 1
                     break
             elif item is None:
+                entry.consecutive_errors = 0
                 if entry.reader.is_exhausted:
                     entry.state = StreamState.STOPPED
                     logger.debug(
@@ -137,7 +191,14 @@ class FrameCollector:
         max_queue_size: Per-stream bounded queue depth. Defaults to 2.
     """
 
-    __slots__ = ("_closed", "_lock", "_max_queue_size", "_shared_q", "_streams")
+    __slots__ = (
+        "_auto_removed_errors",
+        "_closed",
+        "_lock",
+        "_max_queue_size",
+        "_shared_q",
+        "_streams",
+    )
 
     def __init__(self, max_queue_size: int = 2) -> None:
         if max_queue_size < 1:
@@ -149,6 +210,9 @@ class FrameCollector:
         self._shared_q: queue.Queue[tuple[str, Frame | None] | None] = queue.Queue(
             maxsize=max_queue_size * 8,
         )
+        # Tracks (stream_id -> exception) for streams auto-removed due to errors.
+        # These are no longer in _streams but must be visible via stream_errors.
+        self._auto_removed_errors: dict[str, BaseException] = {}
 
     # ------------------------------------------------------------------
     # Stream management
@@ -160,6 +224,7 @@ class FrameCollector:
         source: FrameSource,
         *,
         policy: FrameDropPolicy | None = None,
+        stream_config: StreamConfig | None = None,
     ) -> None:
         """Register and start a new stream.
 
@@ -171,6 +236,8 @@ class FrameCollector:
             stream_id: Unique identifier for this stream.
             source: A FrameSource instance to read from.
             policy: Override frame drop policy. Auto-selected when None.
+            stream_config: Per-stream failure handling configuration. Uses
+                ``StreamConfig()`` defaults when None.
 
         Raises:
             RuntimeError: If the collector is closed.
@@ -178,6 +245,8 @@ class FrameCollector:
         """
         if policy is None:
             policy = FrameDropPolicy.LATEST if source.is_live else FrameDropPolicy.NONE
+
+        cfg = stream_config if stream_config is not None else StreamConfig()
 
         reader = ThreadedFrameReader(
             source=source,
@@ -195,7 +264,7 @@ class FrameCollector:
             reader.start()
             bridge = threading.Thread(
                 target=_run_bridge,
-                args=(stream_id, entry, self._shared_q),
+                args=(stream_id, entry, self._shared_q, cfg.max_consecutive_errors),
                 name=f"yowo-bridge-{stream_id}",
                 daemon=True,
             )
@@ -269,7 +338,24 @@ class FrameCollector:
 
             stream_id, frame = item
             if frame is None:
-                # Exhaustion sentinel from bridge thread
+                # Exhaustion sentinel from bridge thread.
+                # Check if this was an auto-remove triggered by consecutive errors.
+                with self._lock:
+                    entry = self._streams.get(stream_id)
+                    should_auto_remove = entry is not None and entry.auto_remove
+                if should_auto_remove:
+                    # Record the error before removing the stream so stream_errors
+                    # remains visible to _check_stream_errors after removal.
+                    with self._lock:
+                        exc = entry.error if entry is not None else None
+                        if exc is not None:
+                            self._auto_removed_errors[stream_id] = exc
+                    # Safe: iterator thread is distinct from all bridge threads.
+                    self.remove_stream(stream_id)
+                    logger.warning(
+                        "Stream %r auto-removed after consecutive errors",
+                        stream_id,
+                    )
                 active.discard(stream_id)
                 continue
             yield TaggedFrame(stream_id=stream_id, frame=frame)
@@ -292,11 +378,17 @@ class FrameCollector:
     def stream_errors(self) -> dict[str, BaseException]:
         """Snapshot of per-stream errors for streams in ERROR state.
 
+        Includes errors from streams that were auto-removed due to consecutive
+        failures — those streams are no longer in ``_streams`` but their errors
+        are tracked in ``_auto_removed_errors``.
+
         Returns:
             Mapping from stream_id to the exception that caused the error.
         """
         with self._lock:
-            return {sid: e.error for sid, e in self._streams.items() if e.error is not None}
+            result = {sid: e.error for sid, e in self._streams.items() if e.error is not None}
+            result.update(self._auto_removed_errors)
+        return result
 
     @property
     def stream_count(self) -> int:

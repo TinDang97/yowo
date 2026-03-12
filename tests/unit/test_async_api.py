@@ -88,14 +88,24 @@ class TestADetect:
         with pytest.raises(ShutdownError):
             await engine.adetect([_dummy_frame()])
 
-    async def test_adetect_propagates_inference_error(self) -> None:
-        """backend.infer raising RuntimeError is wrapped as InferenceError."""
+    async def test_adetect_returns_empty_on_exhausted_retry(self) -> None:
+        """backend.infer raising RuntimeError exhausts retries and returns empty result.
+
+        Since v2.3.0 (RELY-02), _infer_with_retry absorbs backend errors and
+        returns an empty detection array instead of raising, so the engine
+        does not crash. errors_total is incremented instead.
+        """
         mock_be = _make_mock_backend()
-        mock_be.infer.side_effect = RuntimeError("backend failure")
         engine = _loaded_engine(mock_be)
+        # Set side_effect AFTER load() so warmup validation succeeds
+        mock_be.infer.side_effect = RuntimeError("backend failure")
         try:
-            with pytest.raises((InferenceError, RuntimeError)):
-                await engine.adetect([_dummy_frame()])
+            with patch("yowo.engine.time.sleep"):
+                detections = await engine.adetect([_dummy_frame()])
+            # Empty result — no detections (empty boxes), but no raise
+            assert len(detections) == 1
+            assert detections[0].boxes == ()
+            assert engine.metrics.errors_total == 1
         finally:
             engine.close()
 

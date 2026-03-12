@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, field
 
+from yowo.types import StrEnumBase
 
-class CrossDirection(enum.StrEnum):
+
+class CrossDirection(StrEnumBase):  # type: ignore[misc]
     """Direction of a line-crossing event relative to the line's direction vector."""
 
     IN = "in"
     OUT = "out"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CountZone:
     """Polygonal region of interest for zone-based counting.
 
@@ -38,7 +39,7 @@ class CountZone:
             )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CountLine:
     """Directed line segment for crossing-based counting.
 
@@ -65,7 +66,7 @@ class CountLine:
             )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class LineCrossEvent:
     """A single line-crossing event.
 
@@ -86,7 +87,7 @@ class LineCrossEvent:
     timestamp_ms: float
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CountResult:
     """Immutable snapshot returned by ObjectCounter.update().
 

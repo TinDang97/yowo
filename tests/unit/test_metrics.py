@@ -260,7 +260,7 @@ class TestEngineMetrics:
         with pytest.raises((AttributeError, TypeError)):
             m.frames_total = 99  # type: ignore[misc]
 
-    def test_slots_defined(self) -> None:
+    def test_frozen_immutable(self) -> None:
         m = EngineMetrics(
             frames_total=1,
             errors_total=0,
@@ -271,7 +271,8 @@ class TestEngineMetrics:
             fps=1.0,
             uptime_s=1.0,
         )
-        assert not hasattr(m, "__dict__"), "EngineMetrics should use __slots__"
+        with pytest.raises((AttributeError, TypeError)):
+            m.frames_total = 999  # type: ignore[misc]
 
     def test_all_fields_accessible(self) -> None:
         m = EngineMetrics(

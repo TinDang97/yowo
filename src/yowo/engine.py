@@ -21,13 +21,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import threading
 import time
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from typing import Self
+
+    from yowo.hardware import HardwareProfile
 
 import numpy as np
 from numpy.typing import NDArray
@@ -47,6 +54,7 @@ from yowo.errors import (
     InferenceError,
     ModelNotFoundError,
     ShutdownError,
+    WarmupValidationError,
 )
 from yowo.events import EventBus
 from yowo.hardware import get_hardware_profile
@@ -61,6 +69,7 @@ from yowo.models import get as _registry_get
 from yowo.models import resolve_weights
 from yowo.models._registry import ModelMeta
 from yowo.models._registry import get_cls as _registry_get_cls
+from yowo.models._registry import get_obb as _registry_get_obb
 from yowo.postprocess import PostprocessBuffer, postprocess
 from yowo.types import (
     BackendSelection,
@@ -80,15 +89,113 @@ from yowo.types import (
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# HealthReport dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HealthReport:
+    """Immutable snapshot of engine health at a point in time.
+
+    Attributes:
+        status: Current :class:`~yowo.types.HealthStatus` value.
+        uptime_s: Seconds since metrics collector was created or last reset.
+        errors_total: Total inference errors since last reset.
+        frames_total: Total frames processed since last reset.
+        memory_pct: GPU memory reserved / total (0.0-1.0).  ``None`` on CPU.
+        stream_count: Number of currently active streams.
+        batch_size_current: Active batch size (may have been reduced by OOM recovery).
+        precision_current: String representation of the current precision (e.g. ``"fp32"``).
+    """
+
+    status: HealthStatus
+    uptime_s: float
+    errors_total: int
+    frames_total: int
+    memory_pct: float | None
+    stream_count: int
+    batch_size_current: int
+    precision_current: str
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a JSON-serialisable dict with ``status`` as its string value."""
+        d = dataclasses.asdict(self)
+        d["status"] = self.status.value
+        return d
+
+
+# ---------------------------------------------------------------------------
+# OOM monitor thresholds
+# ---------------------------------------------------------------------------
+
+_OOM_TIER1 = 0.80  # halve batch size
+_OOM_TIER2 = 0.90  # attempt precision fallback
+_OOM_TIER3 = 0.95  # evict lowest-activity streams
+_OOM_CLEAR = 0.75  # restore batch size when below this
+
+
+def _load_tune_profile(
+    spec: ModelSpec,
+    config: InferenceConfig,
+    hw: HardwareProfile,
+) -> InferenceConfig:
+    """Apply saved tune profile to config when caller has not explicitly set values.
+
+    Profile values are applied ONLY when config fields are at their defaults:
+    - ``config.backend is None`` → apply ``profile.backend``
+    - ``config.batch_size == 1`` → apply ``profile.batch_size``
+    - ``config.precision is None`` → apply ``profile.precision``
+
+    Uses ``dataclasses.replace()`` — never mutates config in-place.
+
+    Args:
+        spec: Model spec (used to derive model name for profile lookup).
+        config: Resolved inference config (may be partially populated).
+        hw: Current hardware profile for fingerprint computation.
+
+    Returns:
+        Updated :class:`InferenceConfig` with profile values applied, or the
+        original config unchanged when no profile exists.
+    """
+    from yowo.tune._profile import load_profile
+
+    task_suffix = spec.task if spec.task not in ("detect",) else ""
+    model_name = f"{spec.family.value}{spec.size.value}{'-' + task_suffix if task_suffix else ''}"
+    profile = load_profile(model_name, hw)
+    if profile is None:
+        return config
+
+    updates: dict[str, object] = {}
+    if config.backend is None:
+        updates["backend"] = BackendType(profile.backend)
+    if config.batch_size == 1:
+        updates["batch_size"] = profile.batch_size
+    if config.precision is None:
+        updates["precision"] = Precision(profile.precision)
+
+    if not updates:
+        return config
+
+    logger.debug(
+        "Loaded tune profile: backend=%s batch=%d precision=%s fps=%.1f",
+        profile.backend,
+        profile.batch_size,
+        profile.precision,
+        profile.fps_achieved,
+    )
+    return dataclasses.replace(config, **updates)
+
 
 def _resolve_model_meta(spec: ModelSpec, model_builder: Any | None) -> ModelMeta:
     """Resolve model metadata from registry, with custom builder fallback."""
     try:
-        meta = (
-            _registry_get_cls(spec.family, spec.size)
-            if spec.task == "classify"
-            else _registry_get(spec.family, spec.size)
-        )
+        if spec.task == "classify":
+            meta = _registry_get_cls(spec.family, spec.size)
+        elif spec.task == "obb":
+            meta = _registry_get_obb(spec.family, spec.size)
+        else:
+            meta = _registry_get(spec.family, spec.size)
     except ModelNotFoundError:
         if model_builder is None:
             raise
@@ -144,6 +251,7 @@ class BaseEngine(StreamingMixin):
         pipeline_workers: int = 0,
         metrics_enabled: bool = True,
         error_threshold: int = 10,
+        _hw_cache: HardwareProfile | None = None,
     ) -> None:
         self._spec = spec
         self._model_builder = model_builder
@@ -168,7 +276,7 @@ class BaseEngine(StreamingMixin):
             self._hw = None
             self._kv_cache = kv_cache
         else:
-            self._hw = get_hardware_profile()
+            self._hw = _hw_cache if _hw_cache is not None else get_hardware_profile()
             self._selection = select_backend(
                 self._hw,
                 model_size=spec.size.value,
@@ -197,11 +305,17 @@ class BaseEngine(StreamingMixin):
         self._error_threshold = error_threshold
         self._health_state: HealthStatus = HealthStatus.STARTING
         self._event_bus = EventBus()
+        self._infer_lock = threading.Lock()
         self._shutting_down = threading.Event()
         self._shutdown_lock = threading.Lock()
         self._active_streams: set[threading.Event] = set()
         self._streams_drained = threading.Event()
         self._streams_drained.set()
+        # OOM monitor state (initialised here; monitor only starts on CUDA load)
+        self._oom_stop: threading.Event = threading.Event()
+        self._oom_thread: threading.Thread | None = None
+        self._oom_recovering: bool = False
+        self._original_batch_size: int = batch_size
 
     @abstractmethod
     def _process_batch(
@@ -256,6 +370,53 @@ class BaseEngine(StreamingMixin):
         """Zero all metric counters and the latency histogram."""
         self._metrics.reset()
 
+    def health_report(self) -> HealthReport:
+        """Return a frozen :class:`HealthReport` snapshot of current engine state.
+
+        ``memory_pct`` is ``None`` unless the engine is running on a CUDA device.
+        GPU memory reads are best-effort; any failure returns ``None``.
+        """
+        snap = self._metrics.snapshot()
+
+        memory_pct: float | None = None
+        if self._is_cuda:
+            try:
+                import torch
+
+                device_index = self._selection.device_index
+                reserved = torch.cuda.memory_reserved(device_index)
+                total = torch.cuda.get_device_properties(device_index).total_memory
+                if total > 0:
+                    memory_pct = reserved / total
+            except Exception:
+                memory_pct = None
+
+        return HealthReport(
+            status=self.health,
+            uptime_s=snap.uptime_s,
+            errors_total=snap.errors_total,
+            frames_total=snap.frames_total,
+            memory_pct=memory_pct,
+            stream_count=len(self._active_streams),
+            batch_size_current=self._batch_size,
+            precision_current=self._selection.precision.value,
+        )
+
+    def export_metrics(self) -> dict[str, object]:
+        """Return a JSON-serialisable dict of current engine metrics.
+
+        Keys correspond to :class:`~yowo.metrics.EngineMetrics` field names.
+        """
+        return dataclasses.asdict(self._metrics.snapshot())
+
+    def export_metrics_prometheus(self) -> str:
+        """Return a Prometheus text exposition string for current metrics.
+
+        Delegates to :meth:`~yowo.metrics.MetricsCollector.export_prometheus`.
+        Always ends with a newline.
+        """
+        return self._metrics.export_prometheus()
+
     def on(self, event: str, callback: Callable[..., Any]) -> None:
         """Register a synchronous event callback."""
         self._event_bus.on(event, callback)
@@ -287,6 +448,7 @@ class BaseEngine(StreamingMixin):
         if self._user_provided_backend:
             self._backend.load(weights_path, device=self._device)
             self._backend.warmup(batch_size=self._batch_size)
+            self._validate_warmup_output()
             self._finalize_load()
             return
         assert self._hw is not None
@@ -310,6 +472,7 @@ class BaseEngine(StreamingMixin):
                     )
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)
+                self._validate_warmup_output()
                 if bt != self._selection.backend:
                     logger.warning("Using fallback backend: %s", bt.value)
                     _fs = select_backend(
@@ -350,9 +513,176 @@ class BaseEngine(StreamingMixin):
             self._pipeline_workers = 2 if is_free_threaded() else 1
         self._loaded = True
         self._health_state = HealthStatus.READY
+        self._start_oom_monitor()
+        # Wire structured logging after load completes.
+        # Use best-effort config read — config may not always be accessible.
+        try:
+            from yowo.logging import configure_logging as _configure_logging
+
+            log_level: str = getattr(self, "_config_log_level", "WARNING")
+            structured: bool = getattr(self, "_config_structured_logging", False)
+            _configure_logging(level=log_level, structured=structured)
+        except Exception:
+            pass
 
     def _allocate_postprocess_buffer(self) -> None:
         """Hook: allocate task-specific postprocess buffer. Default: no-op."""
+
+    def _validate_warmup_output(self) -> None:
+        """Run a dummy inference and validate output shape and values.
+
+        Called during :meth:`load` after ``backend.warmup()`` to catch
+        corrupt or incompatible models before the engine enters READY state.
+
+        Raises:
+            WarmupValidationError: If output has unexpected shape or values.
+        """
+        h, w = self._model_meta.input_height, self._model_meta.input_width
+        dummy = PreprocessedTensor(
+            data=np.zeros((1, 3, h, w), dtype=np.float32),
+            original_shapes=((h, w),),
+            input_shape=(h, w),
+            scale_factors=((1.0, 1.0),),
+            pad_offsets=((0, 0),),
+        )
+        try:
+            output = self._backend.infer(dummy)
+        except Exception as exc:
+            raise WarmupValidationError(
+                f"backend.infer() raised {type(exc).__name__}: {exc}"
+            ) from exc
+        if output.ndim < 2:
+            raise WarmupValidationError(f"expected output ndim >= 2, got shape {output.shape}")
+        self._validate_output_values(output)
+
+    def _validate_output_values(self, output: NDArray[np.float32]) -> None:
+        """Validate output value ranges. Subclasses override for task-specific checks."""
+
+    # ---------------------------------------------------------------------------
+    # OOM monitor daemon
+    # ---------------------------------------------------------------------------
+
+    @property
+    def _is_cuda(self) -> bool:
+        """True when the active backend is running on a CUDA device."""
+        return self._selection.device_type == DeviceType.CUDA
+
+    def _start_oom_monitor(self) -> None:
+        """Start the OOM monitor daemon thread (CUDA backends only).
+
+        No-op for CPU, ONNX-CPU, CoreML, and other non-CUDA backends.
+        """
+        if not self._is_cuda:
+            return
+        self._oom_stop.clear()
+        self._oom_thread = threading.Thread(
+            target=self._oom_monitor_loop,
+            name="yowo-oom-monitor",
+            daemon=True,
+        )
+        self._oom_thread.start()
+
+    def _oom_monitor_loop(self) -> None:
+        """Poll GPU memory utilisation every 5 s and apply recovery as needed.
+
+        Uses Event.wait() so the daemon exits quickly when _oom_stop is set.
+        GPU memory reads are thread-safe (no _infer_lock needed per RESEARCH.md).
+        """
+        try:
+            import torch
+        except ImportError:
+            logger.warning("OOM monitor: torch not available, exiting")
+            return
+
+        device_index = self._selection.device_index
+        while not self._oom_stop.wait(timeout=5.0):
+            try:
+                reserved = torch.cuda.memory_reserved(device_index)
+                total = torch.cuda.get_device_properties(device_index).total_memory
+                if total > 0:
+                    pct = reserved / total
+                    self._apply_oom_recovery(pct)
+            except Exception as exc:
+                logger.warning("OOM monitor error: %s", exc)
+
+    def _apply_oom_recovery(self, pct: float) -> None:
+        """Apply the three-tier recovery ladder based on *pct* GPU utilisation.
+
+        Tiers (applied top-down, only one action per call):
+          - >= _OOM_TIER3 (0.95): evict lowest-activity streams
+          - >= _OOM_TIER2 (0.90): attempt precision fallback
+          - >= _OOM_TIER1 (0.80): halve batch size
+          - <  _OOM_CLEAR (0.75): restore batch size if recovering
+        """
+        if pct < _OOM_CLEAR:
+            if self._oom_recovering:
+                # Recovery complete — restore original batch size
+                self._batch_size = self._original_batch_size
+                if self._preprocess_buf is not None:
+                    self._preprocess_buf = PreprocessBuffer(
+                        self._batch_size,
+                        (self._model_meta.input_height, self._model_meta.input_width),
+                    )
+                self._oom_recovering = False
+                self._health_state = HealthStatus.READY
+                self._event_bus.emit("health_change", HealthStatus.READY)
+                logger.info(
+                    "OOM monitor: utilisation %.1f%% — batch size restored to %d",
+                    pct * 100,
+                    self._batch_size,
+                )
+            return
+
+        if pct >= _OOM_TIER3:
+            self._evict_lowest_activity_streams()
+            return
+
+        if pct >= _OOM_TIER2:
+            self._try_precision_fallback()
+            return
+
+        if pct >= _OOM_TIER1:
+            self._halve_batch_size()
+
+    def _halve_batch_size(self) -> None:
+        """Tier-1 recovery: halve batch size and reallocate PreprocessBuffer."""
+        if not self._oom_recovering:
+            # Save original on the first reduction only
+            self._original_batch_size = self._batch_size
+        self._batch_size = max(1, self._batch_size // 2)
+        if self._preprocess_buf is not None:
+            self._preprocess_buf = PreprocessBuffer(
+                self._batch_size,
+                (self._model_meta.input_height, self._model_meta.input_width),
+            )
+        self._oom_recovering = True
+        self._health_state = HealthStatus.DEGRADED
+        self._event_bus.emit("health_change", HealthStatus.DEGRADED)
+        logger.warning(
+            "OOM monitor: GPU %.1f%% — batch size halved to %d",
+            0.0,
+            self._batch_size,
+        )
+
+    def _try_precision_fallback(self) -> None:
+        """Tier-2 recovery: attempt FP16 precision fallback if backend supports it."""
+        if hasattr(self._backend, "set_precision"):
+            try:
+                self._backend.set_precision("fp16")  # type: ignore[attr-defined]
+                logger.warning("OOM monitor: switched backend to FP16 precision")
+            except Exception as exc:
+                logger.warning("OOM monitor: precision fallback failed: %s", exc)
+        else:
+            logger.debug("OOM monitor: precision fallback not supported by this backend")
+        self._health_state = HealthStatus.DEGRADED
+
+    def _evict_lowest_activity_streams(self) -> None:
+        """Tier-3 recovery: evict lowest-activity FrameCollector streams.
+
+        BaseEngine stub — no FrameCollector reference held at this layer.
+        Subclasses that manage a pipeline with a FrameCollector should override.
+        """
+        logger.warning("OOM monitor: tier-3 eviction triggered but no stream collector attached")
 
     def close(self, timeout: float = 5.0) -> None:
         """Gracefully shut down: signal streams, drain event bus, release backend."""
@@ -363,6 +693,9 @@ class BaseEngine(StreamingMixin):
             self._health_state = HealthStatus.SHUTTING_DOWN
             for stop_event in list(self._active_streams):
                 stop_event.set()
+        # Signal OOM monitor daemon to exit (no join needed — daemon=True)
+        if hasattr(self, "_oom_stop"):
+            self._oom_stop.set()
         deadline = time.monotonic() + timeout
         self._streams_drained.wait(timeout=max(0.0, deadline - time.monotonic()))
         self._event_bus.emit("health_change", HealthStatus.SHUTTING_DOWN)
@@ -440,6 +773,48 @@ class BaseEngine(StreamingMixin):
             if not self._active_streams:
                 self._streams_drained.set()
 
+    # Retry delays for _infer_with_retry: 100ms, 200ms, 400ms
+    _RETRY_DELAYS = (0.1, 0.2, 0.4)
+
+    def _infer_with_retry(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
+        """Call backend.infer() with exponential backoff retry.
+
+        Retries up to 3 times on any exception (100ms, 200ms, 400ms backoff).
+        On exhaustion: records error, emits "error" event, returns an empty
+        result array so the engine does not crash.
+
+        Must be called with ``_infer_lock`` already held (called from _run_gpu).
+
+        Returns:
+            Raw model output or zeros on exhaustion.
+        """
+        delays = self._RETRY_DELAYS
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate(delays):
+            try:
+                return self._backend.infer(tensor)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < len(delays) - 1:
+                    logger.warning(
+                        "backend.infer() attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt + 1,
+                        len(delays),
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    # All attempts exhausted
+                    logger.warning(
+                        "backend.infer() failed after %d attempts: %s — returning empty result",
+                        len(delays),
+                        exc,
+                    )
+                    self._metrics.record_error()
+                    self._event_bus.emit("error", last_exc)
+        return np.zeros((1, 0, 6), dtype=np.float32)
+
     def _run_gpu(
         self,
         tensor: PreprocessedTensor,
@@ -447,19 +822,20 @@ class BaseEngine(StreamingMixin):
     ) -> tuple[NDArray[np.float32], float]:
         """GPU-only: set_source_id + backend.infer + record metrics.
 
-        Callers in concurrent paths should hold ``infer_lock`` for the
-        duration of this call.  Postprocessing (``_process_batch``) and
-        event emission must happen *outside* the lock so that NMS work
-        does not block the GPU for the next batch.
+        Acquires ``_infer_lock`` internally to serialise GPU access.
+        Postprocessing (``_process_batch``) and event emission happen
+        *outside* the lock so that NMS work does not block the GPU for
+        the next batch.
         """
-        if self._feature_cache is not None and frames:
-            sid = frames[0].source_id
-            if sid:
-                self._backend.set_source_id(sid)
-        t0 = time.perf_counter()
-        raw_output = self._backend.infer(tensor)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
+        with self._infer_lock:
+            if self._feature_cache is not None and frames:
+                sid = frames[0].source_id
+                if sid:
+                    self._backend.set_source_id(sid)
+            t0 = time.perf_counter()
+            raw_output = self._infer_with_retry(tensor)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            self._metrics.record_inference(elapsed_ms, batch_size=tensor.batch_size, frame_time=t0)
         return raw_output, elapsed_ms
 
     def _postprocess_and_emit(
@@ -591,12 +967,20 @@ class DetectionEngine(BaseEngine):
             )
         self._confidence = cfg.confidence_threshold
         self._iou_threshold = cfg.iou_threshold
+        self._config_log_level: str = getattr(cfg, "log_level", "WARNING")
+        self._config_structured_logging: bool = getattr(cfg, "structured_logging", False)
         spec = ModelSpec(
             cfg.model_family,
             cfg.model_size,
             weights_path=cfg.weights_path,
             num_classes=cfg.num_classes,
         )
+        # Apply tune profile (only when user has not explicitly overridden backend/batch/precision
+        # and no custom backend instance was provided)
+        _hw_cache: HardwareProfile | None = None
+        if backend_instance is None:
+            _hw_cache = get_hardware_profile()
+            cfg = _load_tune_profile(spec, cfg, _hw_cache)
         super().__init__(
             spec=spec,
             model_builder=model_builder,
@@ -615,10 +999,18 @@ class DetectionEngine(BaseEngine):
             pipeline_workers=cfg.pipeline_workers,
             metrics_enabled=cfg.metrics_enabled,
             error_threshold=cfg.error_threshold,
+            _hw_cache=_hw_cache,
         )
 
     def _allocate_postprocess_buffer(self) -> None:
         self._postprocess_buf = PostprocessBuffer()
+
+    def _validate_output_values(self, output: NDArray[np.float32]) -> None:
+        """Check detection output for NaN/Inf (raw logits — no [0,1] range check)."""
+        if np.any(np.isnan(output)):
+            raise WarmupValidationError("detection output contains NaN values")
+        if np.any(np.isinf(output)):
+            raise WarmupValidationError("detection output contains Inf values")
 
     def _dispatch_frames(self, frames: list[Frame]) -> list[Any]:
         """Route through detect() so tests can patch it."""
@@ -672,4 +1064,4 @@ class DetectionEngine(BaseEngine):
 #: Alias for :class:`DetectionEngine`.
 InferenceEngine = DetectionEngine
 
-__all__ = ["BaseEngine", "DetectionEngine", "InferenceEngine"]
+__all__ = ["BaseEngine", "DetectionEngine", "HealthReport", "InferenceEngine"]

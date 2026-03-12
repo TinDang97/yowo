@@ -20,11 +20,26 @@ import numpy as np
 from numpy.typing import NDArray
 
 # ---------------------------------------------------------------------------
+# StrEnum compatibility shim (Python 3.9 / 3.10 do not have enum.StrEnum)
+# ---------------------------------------------------------------------------
+
+if sys.version_info >= (3, 11):
+    StrEnumBase = enum.StrEnum
+else:
+
+    class StrEnumBase(str, enum.Enum):  # type: ignore[no-redef]
+        """Backport of StrEnum for Python 3.9/3.10."""
+
+        def __str__(self) -> str:  # match StrEnum: str(v) returns the value
+            return self.value
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class BackendType(enum.StrEnum):
+class BackendType(StrEnumBase):
     """Inference backend identifier."""
 
     PYTORCH = "pytorch"
@@ -34,7 +49,7 @@ class BackendType(enum.StrEnum):
     COREML = "coreml"
 
 
-class DeviceType(enum.StrEnum):
+class DeviceType(StrEnumBase):
     """Compute device family."""
 
     CUDA = "cuda"
@@ -42,14 +57,14 @@ class DeviceType(enum.StrEnum):
     MPS = "mps"
 
 
-class CPUArch(enum.StrEnum):
+class CPUArch(StrEnumBase):
     """CPU instruction set architecture."""
 
     X86_64 = "x86_64"
     AARCH64 = "aarch64"
 
 
-class GPUArch(enum.StrEnum):
+class GPUArch(StrEnumBase):
     """NVIDIA GPU compute capability (SM version)."""
 
     TURING = "sm_75"
@@ -61,14 +76,14 @@ class GPUArch(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
-class ModelFamily(enum.StrEnum):
+class ModelFamily(StrEnumBase):
     """YOLO model family."""
 
     YOLO11 = "yolo11"
     YOLO26 = "yolo26"
 
 
-class ModelSize(enum.StrEnum):
+class ModelSize(StrEnumBase):
     """YOLO model size variant."""
 
     NANO = "n"
@@ -78,7 +93,7 @@ class ModelSize(enum.StrEnum):
     XLARGE = "x"
 
 
-class ExportFormat(enum.StrEnum):
+class ExportFormat(StrEnumBase):
     """Target format for model export."""
 
     ONNX = "onnx"
@@ -87,7 +102,7 @@ class ExportFormat(enum.StrEnum):
     COREML = "coreml"
 
 
-class Precision(enum.StrEnum):
+class Precision(StrEnumBase):
     """Numerical precision for inference or export."""
 
     FP32 = "fp32"
@@ -95,7 +110,7 @@ class Precision(enum.StrEnum):
     INT8 = "int8"
 
 
-class FrameDropPolicy(enum.StrEnum):
+class FrameDropPolicy(StrEnumBase):
     """Frame backlog policy for live streaming.
 
     Controls how ThreadedFrameReader handles a full queue.
@@ -106,7 +121,7 @@ class FrameDropPolicy(enum.StrEnum):
     SKIP_OLDEST = "skip_oldest"  # Evict oldest when queue full
 
 
-class StreamState(enum.StrEnum):
+class StreamState(StrEnumBase):
     """Health state of a stream managed by FrameCollector."""
 
     RUNNING = "running"
@@ -115,7 +130,7 @@ class StreamState(enum.StrEnum):
     ERROR = "error"
 
 
-class HealthStatus(enum.StrEnum):
+class HealthStatus(StrEnumBase):
     """Engine health state, derived from runtime metrics and lifecycle.
 
     Transitions:
@@ -132,7 +147,38 @@ class HealthStatus(enum.StrEnum):
     CLOSED = "closed"
 
 
-class SourceCategory(enum.StrEnum):
+# ---------------------------------------------------------------------------
+# Stream configuration (defined here alongside HealthStatus for co-location)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StreamConfig:
+    """Per-stream configuration for FrameCollector.
+
+    Controls automatic failure handling and (future) reconnect behaviour.
+    All fields are optional and have production-safe defaults.
+
+    Attributes:
+        auto_reconnect: Whether to attempt reconnection after stream failure.
+            Currently stubbed — field is defined for API stability; reconnect
+            loop is not implemented in this release.
+        max_consecutive_errors: Number of consecutive read errors before the
+            stream is automatically removed from the collector. Default: 3.
+        reconnect_backoff_base_s: Initial backoff duration in seconds for
+            reconnect attempts. Doubles on each retry up to the max.
+            Stubbed for future use. Default: 1.0.
+        reconnect_backoff_max_s: Maximum backoff duration in seconds.
+            Stubbed for future use. Default: 30.0.
+    """
+
+    auto_reconnect: bool = False
+    max_consecutive_errors: int = 3
+    reconnect_backoff_base_s: float = 1.0
+    reconnect_backoff_max_s: float = 30.0
+
+
+class SourceCategory(StrEnumBase):
     """Input source classification for preset selection."""
 
     IMAGE = "image"
@@ -140,7 +186,7 @@ class SourceCategory(enum.StrEnum):
     LIVE_STREAM = "live"
 
 
-class DeviceCategory(enum.StrEnum):
+class DeviceCategory(StrEnumBase):
     """Hardware classification for preset selection."""
 
     CUDA_HIGH = "cuda_high"
@@ -165,7 +211,7 @@ RTSP_SCHEMES: tuple[str, ...] = ("rtsp://", "rtsps://")
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ModelSpec:
     """Fully qualified model identity.
 
@@ -187,7 +233,7 @@ class ModelSpec:
     num_classes: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BoundingBox:
     """Axis-aligned detection bounding box in pixel coordinates.
 
@@ -236,7 +282,7 @@ class BoundingBox:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Detection:
     """Inference result for a single frame.
 
@@ -291,7 +337,80 @@ class Detection:
         return json.dumps(self.to_dict(), indent=indent)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
+class OBBBox:
+    """Oriented bounding box in (cx, cy, w, h, angle) format.
+
+    angle: rotation in radians, range [-pi/4, 3pi/4] (ultralytics convention).
+
+    Attributes:
+        cx: Centre x coordinate (pixels).
+        cy: Centre y coordinate (pixels).
+        w: Box width in pixels.
+        h: Box height in pixels.
+        angle: Rotation angle in radians, range [-pi/4, 3pi/4].
+        confidence: Detection confidence in [0, 1].
+        class_id: Integer class index.
+        class_name: Human-readable class label (empty string if unknown).
+    """
+
+    cx: float
+    cy: float
+    w: float
+    h: float
+    angle: float  # radians, [-pi/4, 3pi/4]
+    confidence: float
+    class_id: int
+    class_name: str = ""
+
+    def to_dict(self) -> dict[str, float | int | str]:
+        """Serialize to a plain dict with JSON-safe primitive values."""
+        return {
+            "cx": self.cx,
+            "cy": self.cy,
+            "w": self.w,
+            "h": self.h,
+            "angle": self.angle,
+            "confidence": self.confidence,
+            "class_id": self.class_id,
+            "class_name": self.class_name,
+        }
+
+
+@dataclass(frozen=True)
+class OBBDetection:
+    """Inference result for one frame with oriented bounding boxes.
+
+    Attributes:
+        frame_index: Zero-based sequential index of the frame in its source.
+        source_id: Opaque identifier of the input source; empty if unknown.
+        boxes: Tuple of oriented bounding boxes produced by the model.
+        frame: The source frame that was processed (``None`` when unavailable).
+        inference_time_ms: Wall-clock time for the inference call only,
+            excluding preprocessing and postprocessing.
+    """
+
+    frame_index: int
+    source_id: str
+    boxes: tuple[OBBBox, ...]
+    frame: Frame | None = None
+    inference_time_ms: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-safe dict."""
+        return {
+            "frame_index": self.frame_index,
+            "source_id": self.source_id,
+            "inference_time_ms": self.inference_time_ms,
+            "boxes": [box.to_dict() for box in self.boxes],
+        }
+
+    def to_json(self, *, indent: int | None = None) -> str:
+        """Serialize to a JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
+
+
+@dataclass(frozen=True)
 class ClassificationResult:
     """Inference result for a single frame from a classification model.
 
@@ -336,7 +455,7 @@ class ClassificationResult:
             "top1_score": self.top1_score,
             "topk": [
                 {"class_id": int(cid), "score": float(sc)}
-                for cid, sc in zip(self.topk_class_ids, self.topk_scores, strict=False)
+                for cid, sc in zip(self.topk_class_ids, self.topk_scores)
             ],
         }
 
@@ -345,7 +464,7 @@ class ClassificationResult:
         return json.dumps(self.to_dict(), indent=indent)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ExportResult:
     """Record of a completed model export operation.
 
@@ -368,7 +487,7 @@ class ExportResult:
     created_at: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BackendSelection:
     """Result of hardware-aware backend selection.
 
@@ -392,7 +511,7 @@ class BackendSelection:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass()
 class Frame:
     """A single video/image frame from any input source.
 
@@ -429,7 +548,7 @@ class Frame:
         return (self.height, self.width)
 
 
-@dataclass(slots=True)
+@dataclass()
 class TaggedFrame:
     """A frame annotated with its owning stream identifier.
 
@@ -449,7 +568,7 @@ class TaggedFrame:
     frame: Frame
 
 
-@dataclass(slots=True)
+@dataclass()
 class PreprocessedTensor:
     """Preprocessed model input ready for inference.
 
@@ -513,9 +632,12 @@ __all__ = [
     "ModelFamily",
     "ModelSize",
     "ModelSpec",
+    "OBBBox",
+    "OBBDetection",
     "Precision",
     "PreprocessedTensor",
     "SourceCategory",
+    "StreamConfig",
     "StreamState",
     "TaggedFrame",
     "is_free_threaded",

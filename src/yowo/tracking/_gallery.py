@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 __all__ = ["EmbeddingGallery", "GalleryEntry", "GalleryMatch", "GalleryProtocol"]
 
 
-@dataclass(slots=True)
+@dataclass()
 class GalleryEntry:
     """A single entry in the embedding gallery."""
 
@@ -25,7 +25,7 @@ class GalleryEntry:
     insertion_order: int = 0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class GalleryMatch:
     """Result of a gallery query — a candidate cross-camera match."""
 

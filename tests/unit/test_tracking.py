@@ -77,7 +77,7 @@ class TestKalmanFilter:
         xyxy = (50.0, 80.0, 150.0, 280.0)
         xyah = KalmanFilterXYAH.xyxy_to_xyah(xyxy)
         recovered = KalmanFilterXYAH.xyah_to_xyxy(xyah)
-        for a, b in zip(xyxy, recovered, strict=False):
+        for a, b in zip(xyxy, recovered):
             assert abs(a - b) < 1e-8
 
     def test_project_returns_4d(self) -> None:
@@ -565,7 +565,7 @@ class TestMunkresFallback:
 
         cost = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
         row_ind, col_ind = _munkres(cost)
-        pairs = set(zip(row_ind.tolist(), col_ind.tolist(), strict=True))
+        pairs = set(zip(row_ind.tolist(), col_ind.tolist()))
         assert pairs == {(0, 0), (1, 1)}
 
     def test_hungarian_without_scipy(self, mocker: object) -> None:
@@ -575,7 +575,7 @@ class TestMunkresFallback:
         mocker.patch.object(match_mod, "_has_scipy", False)  # type: ignore[union-attr]
         cost = np.array([[0.1, 0.9], [0.9, 0.1]], dtype=np.float64)
         row_ind, col_ind = match_mod._hungarian(cost)
-        pairs = set(zip(row_ind.tolist(), col_ind.tolist(), strict=True))
+        pairs = set(zip(row_ind.tolist(), col_ind.tolist()))
         assert pairs == {(0, 0), (1, 1)}
 
 

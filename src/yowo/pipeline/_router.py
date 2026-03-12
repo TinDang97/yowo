@@ -104,7 +104,7 @@ class DetectionRouter:
         """
         # Group detections by stream_id using positional correspondence.
         grouped: dict[str, list[Detection]] = defaultdict(list)
-        for det, tagged in zip(detections, batch, strict=False):
+        for det, tagged in zip(detections, batch):
             grouped[tagged.stream_id].append(det)
 
         # Snapshot callbacks under lock, dispatch outside.

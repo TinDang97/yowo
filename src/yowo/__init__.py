@@ -8,12 +8,13 @@ Quick start::
             print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
-from yowo._convenience import classify, detect, parse_model_name
+from yowo._convenience import classify, detect, detect_obb, parse_model_name
 from yowo.backends import ModelBuilder
 from yowo.classify_engine import ClassificationEngine
 from yowo.config import (
     ClassificationConfig,
     InferenceConfig,
+    OBBConfig,
     load_config,
     preset_config,
 )
@@ -34,7 +35,7 @@ from yowo.counter import (
     LineCrossEvent,
     ObjectCounter,
 )
-from yowo.engine import DetectionEngine, InferenceEngine
+from yowo.engine import DetectionEngine, HealthReport, InferenceEngine
 from yowo.errors import (
     BackendError,
     BackendLoadError,
@@ -51,6 +52,7 @@ from yowo.errors import (
     SourceError,
     SourceTimeoutError,
     TrackingError,
+    WarmupValidationError,
     YowoError,
 )
 from yowo.events import EventBus as EventBus
@@ -58,6 +60,7 @@ from yowo.export import ExportMetadata, export_model
 from yowo.io import open_source
 from yowo.metrics import EngineMetrics as EngineMetrics
 from yowo.metrics import MetricsCollector as MetricsCollector
+from yowo.obb_engine import OBBEngine
 from yowo.pipeline import BatchScheduler, DetectionRouter, FrameCollector, run_pipeline
 from yowo.tracking import (
     ByteTracker,
@@ -90,7 +93,10 @@ from yowo.types import (
     ModelFamily,
     ModelSize,
     ModelSpec,
+    OBBBox,
+    OBBDetection,
     Precision,
+    StreamConfig,
     StreamState,
     TaggedFrame,
     is_free_threaded,
@@ -145,6 +151,7 @@ __all__ = [
     "Frame",
     "FrameCollector",
     "FrameDropPolicy",
+    "HealthReport",
     "HealthStatus",
     "InferenceConfig",
     "InferenceEngine",
@@ -157,21 +164,28 @@ __all__ = [
     "ModelNotFoundError",
     "ModelSize",
     "ModelSpec",
+    "OBBBox",
+    "OBBConfig",
+    "OBBDetection",
+    "OBBEngine",
     "ObjectCounter",
     "Precision",
     "ShutdownError",
     "SourceError",
     "SourceTimeoutError",
+    "StreamConfig",
     "StreamState",
     "TaggedFrame",
     "TrackState",
     "TrackedBox",
     "TrackedDetection",
     "TrackingError",
+    "WarmupValidationError",
     "YowoError",
     "__version__",
     "classify",
     "detect",
+    "detect_obb",
     "export_model",
     "is_free_threaded",
     "load_config",

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import torch as _torch
 
+    from yowo.arch._obb import OBBModel
     from yowo.arch._yolo import ClassifyModel, YOLOModel
 
 logger = logging.getLogger(__name__)
@@ -312,4 +313,102 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
     )
 
 
-__all__ = ["load_classify_weights", "load_weights"]
+# ---------------------------------------------------------------------------
+# OBB weight mapping
+# ---------------------------------------------------------------------------
+
+# OBB models share the same layer structure as detection models (layers 0-23).
+# The OBB head sits at layer 23, identical to the detection head except for the
+# added cv4 angle branches.  The existing _LAYER_MAP already maps
+# ``model.23.`` → ``head.`` so we reuse _remap_key directly.
+
+
+def load_obb_weights(model: OBBModel, weights_path: str | Path) -> None:
+    """Load an ultralytics OBB checkpoint into a native OBBModel.
+
+    Uses the same ``_LAYER_MAP`` as :func:`load_weights`.  The OBB head's
+    angle branches (``model.23.cv4.*``) map automatically to ``head.cv4.*``
+    via the shared ``"model.23." → "head."`` prefix rule.
+
+    Args:
+        model: An initialised ``OBBModel`` (from ``build_obb_model()``).
+        weights_path: Path to an ultralytics ``-obb.pt`` checkpoint file.
+
+    Raises:
+        FileNotFoundError: If the weights file does not exist.
+        ValueError: If the checkpoint format is unrecognised.
+        RuntimeError: If weight shapes do not match the model architecture.
+    """
+    path = Path(weights_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Weights file not found: {path}")
+
+    src_state = _extract_state_dict(path)
+
+    # Remap keys using the same _LAYER_MAP as detection loading
+    mapped: dict[str, _torch.Tensor] = {}
+    skipped: list[str] = []
+
+    for src_key, tensor in src_state.items():
+        dst_key = _remap_key(src_key)
+        if dst_key is None:
+            skipped.append(src_key)
+            continue
+        mapped[dst_key] = tensor
+
+    if skipped:
+        logger.debug(
+            "Skipped %d checkpoint keys (parameterless layers): %s",
+            len(skipped),
+            skipped[:5],
+        )
+
+    dst_state = model.state_dict()
+
+    missing = set(dst_state.keys()) - set(mapped.keys())
+    unexpected = set(mapped.keys()) - set(dst_state.keys())
+
+    if unexpected:
+        logger.warning(
+            "Ignoring %d unexpected keys from checkpoint: %s",
+            len(unexpected),
+            sorted(unexpected)[:5],
+        )
+        for k in unexpected:
+            del mapped[k]
+
+    if missing:
+        critical_missing = [
+            k for k in missing if "stride" not in k and "anchor" not in k and "dfl.weight" not in k
+        ]
+        if critical_missing:
+            logger.warning(
+                "%d keys missing from checkpoint (model may produce incorrect results): %s",
+                len(critical_missing),
+                sorted(critical_missing)[:10],
+            )
+
+    # Shape validation
+    shape_mismatches: list[str] = []
+    for key in list(mapped.keys()):
+        if key in dst_state and mapped[key].shape != dst_state[key].shape:
+            shape_mismatches.append(
+                f"  {key}: checkpoint {mapped[key].shape} vs model {dst_state[key].shape}"
+            )
+            del mapped[key]
+
+    if shape_mismatches:
+        raise RuntimeError(
+            "Shape mismatches between checkpoint and OBB model:\n" + "\n".join(shape_mismatches)
+        )
+
+    model.load_state_dict({k: v.detach() for k, v in mapped.items()}, strict=False)
+    logger.info(
+        "Loaded %d/%d OBB parameters from %s",
+        len(mapped),
+        len(dst_state),
+        path.name,
+    )
+
+
+__all__ = ["load_classify_weights", "load_obb_weights", "load_weights"]

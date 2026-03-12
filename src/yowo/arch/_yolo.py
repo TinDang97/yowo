@@ -15,7 +15,7 @@ from torch import Tensor
 from yowo.arch._attention import C2PSA, Attention, C3k2PSA
 from yowo.arch._blocks import SPPF, Bottleneck, C3k2, Conv, fuse_conv_and_bn
 from yowo.arch._config import ClassifyConfig, ModelConfig, scale_channels, scale_repeats
-from yowo.arch._heads import Classify, Detect
+from yowo.arch._heads import Classify, Detect, OBBHead
 from yowo.arch._neck import FPNPANNeck
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ class YOLOModel(nn.Module):
         for m in self.modules():
             if isinstance(m, Attention):
                 m.enable_kv_cache(enabled)
-            elif isinstance(m, C2PSA | C3k2PSA):
+            elif isinstance(m, (C2PSA, C3k2PSA)):
                 m.enable_block_cache(enabled)
         return self
 
@@ -232,7 +232,7 @@ class YOLOModel(nn.Module):
         for m in self.modules():
             if isinstance(m, Attention):
                 m.clear_kv_cache()
-            elif isinstance(m, C2PSA | C3k2PSA):
+            elif isinstance(m, (C2PSA, C3k2PSA)):
                 m.clear_block_cache()
 
 
@@ -301,4 +301,68 @@ class ClassifyModel(nn.Module):
         return self
 
 
-__all__ = ["Backbone", "ClassifyModel", "YOLOModel"]
+class OBBModel(nn.Module):
+    """YOLO OBB detection model: backbone + neck + OBBHead.
+
+    Reuses the same Backbone and FPNPANNeck as YOLOModel but replaces the
+    Detect head with OBBHead, which adds an angle branch (cv4) for oriented
+    bounding box prediction on DOTA datasets.
+
+    Default nc=15 matches DOTA v1 (15 aerial object categories).
+    """
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        self.config = config
+
+        self.backbone = Backbone(config)
+        self.neck = FPNPANNeck(config)
+
+        # Detection head channel widths (P3, P4, P5) — same as YOLOModel
+        ch = (
+            scale_channels(256, config),
+            scale_channels(512, config),
+            scale_channels(1024, config),
+        )
+        self.head = OBBHead(
+            nc=config.num_classes,
+            ne=1,
+            reg_max=config.reg_max,
+            ch=ch,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Full forward pass: image tensor → OBB detection output.
+
+        Args:
+            x: ``(B, 3, H, W)`` input tensor (RGB, normalized 0-1).
+
+        Returns:
+            ``(B, 4+nc+1, total_anchors)`` — cx, cy, w, h, class_scores..., angle.
+        """
+        features = self.backbone(x)
+        enhanced = self.neck(features)
+        return self.head(list(enhanced))
+
+    def fuse(self) -> OBBModel:
+        """Fold BatchNorm into Conv2d weights for inference.
+
+        Returns self for method chaining.
+        """
+        for m in self.modules():
+            if isinstance(m, Conv) and hasattr(m, "bn"):
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                delattr(m, "bn")
+                if isinstance(m.act, nn.Identity):
+                    m.forward = m.forward_fuse_no_act  # type: ignore[assignment]
+                else:
+                    m.forward = m.forward_fuse  # type: ignore[assignment]
+            elif isinstance(m, Bottleneck):
+                if m.add:
+                    m.forward = m._forward_shortcut  # type: ignore[assignment]
+                else:
+                    m.forward = m._forward_no_shortcut  # type: ignore[assignment]
+        return self
+
+
+__all__ = ["Backbone", "ClassifyModel", "OBBModel", "YOLOModel"]
