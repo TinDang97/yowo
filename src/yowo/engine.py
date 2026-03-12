@@ -29,9 +29,11 @@ from abc import abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from yowo.hardware import HardwareProfile
 
 import numpy as np
@@ -92,7 +94,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class HealthReport:
     """Immutable snapshot of engine health at a point in time.
 

@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class HardwareProfile:
     """Immutable snapshot of available hardware for this process.
 

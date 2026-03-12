@@ -9,7 +9,7 @@ from yowo.tracking._gallery import GalleryMatch
 __all__ = ["CameraLink", "CameraLinkModel"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CameraLink:
     """Defines a spatial-temporal transition between two cameras.
 

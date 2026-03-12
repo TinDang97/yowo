@@ -19,7 +19,7 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class EngineMetrics:
     """Immutable snapshot of engine metrics at a point in time.
 

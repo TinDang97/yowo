@@ -691,7 +691,7 @@ def classify_device(hw: HardwareProfile) -> DeviceCategory:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _PresetOverrides:
     """Pipeline/caching knobs that differ from InferenceConfig defaults."""
 

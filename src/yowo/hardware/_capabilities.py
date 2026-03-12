@@ -26,7 +26,7 @@ __all__ = [
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class InstalledLibraries:
     """Snapshot of optional inference SDK availability.
 

@@ -16,7 +16,7 @@ from yowo.batch._runner import (
     _write_checkpoint,
     run_batch,
 )
-from yowo.types import BackendType, Detection, Frame, ModelSpec
+from yowo.types import BackendType, Detection, Frame, ModelFamily, ModelSize, ModelSpec
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,7 +28,7 @@ def _make_detection(source_id: str = "test", frame_index: int = 0) -> Detection:
     frame = Frame(
         pixels=np.zeros((4, 4, 3), dtype=np.uint8), source_id=source_id, frame_index=frame_index
     )
-    spec = MagicMock(spec=ModelSpec)
+    spec = ModelSpec(family=ModelFamily.YOLO11, size=ModelSize.NANO)
     return Detection(
         frame=frame,
         boxes=(),

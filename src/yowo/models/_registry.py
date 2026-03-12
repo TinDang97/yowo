@@ -14,7 +14,7 @@ from yowo.types import ModelFamily, ModelSize
 _ASSETS_BASE = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ModelMeta:
     """Metadata for a registered model variant.
 

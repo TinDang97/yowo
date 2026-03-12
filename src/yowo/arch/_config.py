@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from yowo.types import ModelFamily, ModelSize
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ModelConfig:
     """Architecture configuration for a single YOLO variant.
 
@@ -113,7 +113,7 @@ def get_config(family: ModelFamily, size: ModelSize) -> ModelConfig:
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ClassifyConfig:
     """Architecture configuration for a YOLO classification variant.
 

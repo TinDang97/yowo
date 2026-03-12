@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ExportMetadata:
     """Serialisable record of a completed model export.
 

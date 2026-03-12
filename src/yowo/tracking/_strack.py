@@ -26,7 +26,7 @@ class TrackState(enum.IntEnum):
     REMOVED = 3
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TrackedBox:
     """A bounding box annotated with a persistent track ID.
 
@@ -79,7 +79,7 @@ class TrackedBox:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TrackedDetection:
     """Tracking result for a single frame.
 

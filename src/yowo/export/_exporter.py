@@ -161,19 +161,18 @@ def export_model(
             onnx_path = quantized_path
 
         # Step 2: Convert if needed
-        match target_format:
-            case ExportFormat.ONNX:
-                exported_path = onnx_path
-            case ExportFormat.TENSORRT:
-                exported_path = _convert_tensorrt(
-                    onnx_path,
-                    output_dir / f"{model_stem}.engine",
-                    precision,
-                    calibration_data,
-                    imgsz=imgsz,
-                )
-            case ExportFormat.OPENVINO:
-                exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
+        if target_format == ExportFormat.ONNX:
+            exported_path = onnx_path
+        elif target_format == ExportFormat.TENSORRT:
+            exported_path = _convert_tensorrt(
+                onnx_path,
+                output_dir / f"{model_stem}.engine",
+                precision,
+                calibration_data,
+                imgsz=imgsz,
+            )
+        elif target_format == ExportFormat.OPENVINO:
+            exported_path = _convert_openvino(onnx_path, output_dir / f"{model_stem}_openvino")
 
     elapsed = time.monotonic() - t0
 

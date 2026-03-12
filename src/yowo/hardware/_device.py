@@ -27,7 +27,7 @@ _FP16_ARCHS: frozenset[GPUArch] = frozenset(
 _INT8_ARCHS: frozenset[GPUArch] = _FP16_ARCHS
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Device:
     """Immutable description of a single compute device.
 

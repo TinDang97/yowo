@@ -20,11 +20,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 # ---------------------------------------------------------------------------
+# StrEnum compatibility shim (Python 3.9 / 3.10 do not have enum.StrEnum)
+# ---------------------------------------------------------------------------
+
+if sys.version_info >= (3, 11):
+    StrEnumBase = enum.StrEnum
+else:
+
+    class StrEnumBase(str, enum.Enum):  # type: ignore[no-redef]
+        """Backport of StrEnum for Python 3.9/3.10."""
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class BackendType(enum.StrEnum):
+class BackendType(StrEnumBase):
     """Inference backend identifier."""
 
     PYTORCH = "pytorch"
@@ -34,7 +46,7 @@ class BackendType(enum.StrEnum):
     COREML = "coreml"
 
 
-class DeviceType(enum.StrEnum):
+class DeviceType(StrEnumBase):
     """Compute device family."""
 
     CUDA = "cuda"
@@ -42,14 +54,14 @@ class DeviceType(enum.StrEnum):
     MPS = "mps"
 
 
-class CPUArch(enum.StrEnum):
+class CPUArch(StrEnumBase):
     """CPU instruction set architecture."""
 
     X86_64 = "x86_64"
     AARCH64 = "aarch64"
 
 
-class GPUArch(enum.StrEnum):
+class GPUArch(StrEnumBase):
     """NVIDIA GPU compute capability (SM version)."""
 
     TURING = "sm_75"
@@ -61,14 +73,14 @@ class GPUArch(enum.StrEnum):
     UNKNOWN = "unknown"
 
 
-class ModelFamily(enum.StrEnum):
+class ModelFamily(StrEnumBase):
     """YOLO model family."""
 
     YOLO11 = "yolo11"
     YOLO26 = "yolo26"
 
 
-class ModelSize(enum.StrEnum):
+class ModelSize(StrEnumBase):
     """YOLO model size variant."""
 
     NANO = "n"
@@ -78,7 +90,7 @@ class ModelSize(enum.StrEnum):
     XLARGE = "x"
 
 
-class ExportFormat(enum.StrEnum):
+class ExportFormat(StrEnumBase):
     """Target format for model export."""
 
     ONNX = "onnx"
@@ -87,7 +99,7 @@ class ExportFormat(enum.StrEnum):
     COREML = "coreml"
 
 
-class Precision(enum.StrEnum):
+class Precision(StrEnumBase):
     """Numerical precision for inference or export."""
 
     FP32 = "fp32"
@@ -95,7 +107,7 @@ class Precision(enum.StrEnum):
     INT8 = "int8"
 
 
-class FrameDropPolicy(enum.StrEnum):
+class FrameDropPolicy(StrEnumBase):
     """Frame backlog policy for live streaming.
 
     Controls how ThreadedFrameReader handles a full queue.
@@ -106,7 +118,7 @@ class FrameDropPolicy(enum.StrEnum):
     SKIP_OLDEST = "skip_oldest"  # Evict oldest when queue full
 
 
-class StreamState(enum.StrEnum):
+class StreamState(StrEnumBase):
     """Health state of a stream managed by FrameCollector."""
 
     RUNNING = "running"
@@ -115,7 +127,7 @@ class StreamState(enum.StrEnum):
     ERROR = "error"
 
 
-class HealthStatus(enum.StrEnum):
+class HealthStatus(StrEnumBase):
     """Engine health state, derived from runtime metrics and lifecycle.
 
     Transitions:
@@ -137,7 +149,7 @@ class HealthStatus(enum.StrEnum):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StreamConfig:
     """Per-stream configuration for FrameCollector.
 
@@ -163,7 +175,7 @@ class StreamConfig:
     reconnect_backoff_max_s: float = 30.0
 
 
-class SourceCategory(enum.StrEnum):
+class SourceCategory(StrEnumBase):
     """Input source classification for preset selection."""
 
     IMAGE = "image"
@@ -171,7 +183,7 @@ class SourceCategory(enum.StrEnum):
     LIVE_STREAM = "live"
 
 
-class DeviceCategory(enum.StrEnum):
+class DeviceCategory(StrEnumBase):
     """Hardware classification for preset selection."""
 
     CUDA_HIGH = "cuda_high"
@@ -196,7 +208,7 @@ RTSP_SCHEMES: tuple[str, ...] = ("rtsp://", "rtsps://")
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ModelSpec:
     """Fully qualified model identity.
 
@@ -218,7 +230,7 @@ class ModelSpec:
     num_classes: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BoundingBox:
     """Axis-aligned detection bounding box in pixel coordinates.
 
@@ -267,7 +279,7 @@ class BoundingBox:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Detection:
     """Inference result for a single frame.
 
@@ -322,7 +334,7 @@ class Detection:
         return json.dumps(self.to_dict(), indent=indent)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OBBBox:
     """Oriented bounding box in (cx, cy, w, h, angle) format.
 
@@ -349,7 +361,7 @@ class OBBBox:
     class_name: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OBBDetection:
     """Inference result for one frame with oriented bounding boxes.
 
@@ -367,7 +379,7 @@ class OBBDetection:
     inference_time_ms: float = 0.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ClassificationResult:
     """Inference result for a single frame from a classification model.
 
@@ -421,7 +433,7 @@ class ClassificationResult:
         return json.dumps(self.to_dict(), indent=indent)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ExportResult:
     """Record of a completed model export operation.
 
@@ -444,7 +456,7 @@ class ExportResult:
     created_at: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class BackendSelection:
     """Result of hardware-aware backend selection.
 
@@ -468,7 +480,7 @@ class BackendSelection:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass()
 class Frame:
     """A single video/image frame from any input source.
 
@@ -505,7 +517,7 @@ class Frame:
         return (self.height, self.width)
 
 
-@dataclass(slots=True)
+@dataclass()
 class TaggedFrame:
     """A frame annotated with its owning stream identifier.
 
@@ -525,7 +537,7 @@ class TaggedFrame:
     frame: Frame
 
 
-@dataclass(slots=True)
+@dataclass()
 class PreprocessedTensor:
     """Preprocessed model input ready for inference.
 

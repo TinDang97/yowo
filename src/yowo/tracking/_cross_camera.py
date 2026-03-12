@@ -20,7 +20,7 @@ from yowo.types import Detection
 __all__ = ["CrossCameraTracker", "GlobalTrackedBox"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class GlobalTrackedBox:
     """Extends TrackedBox with global cross-camera identity.
 

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["PreparedItem", "ThreadedFrameReader"]
 
 
-@dataclass(slots=True)
+@dataclass()
 class PreparedItem:
     """A frame that has been preprocessed in the reader thread.
 

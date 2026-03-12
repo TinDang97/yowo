@@ -119,26 +119,21 @@ def _precisions_for_backend(
     """
     has_gpu = hw.has_nvidia_gpu
 
-    match backend:
-        case BackendType.TENSORRT:
-            trt_available = hw.libraries.tensorrt_version is not None
-            if trt_available:
-                return [Precision.FP32, Precision.FP16, Precision.INT8]
-            return [Precision.FP32]
-
-        case BackendType.PYTORCH | BackendType.ONNX:
-            if has_gpu:
-                return [Precision.FP32, Precision.FP16]
-            return [Precision.FP32]
-
-        case BackendType.OPENVINO:
-            return [Precision.FP32]
-
-        case BackendType.COREML:
+    if backend == BackendType.TENSORRT:
+        trt_available = hw.libraries.tensorrt_version is not None
+        if trt_available:
+            return [Precision.FP32, Precision.FP16, Precision.INT8]
+        return [Precision.FP32]
+    elif backend in (BackendType.PYTORCH, BackendType.ONNX):
+        if has_gpu:
             return [Precision.FP32, Precision.FP16]
-
-        case _:
-            return [Precision.FP32]
+        return [Precision.FP32]
+    elif backend == BackendType.OPENVINO:
+        return [Precision.FP32]
+    elif backend == BackendType.COREML:
+        return [Precision.FP32, Precision.FP16]
+    else:
+        return [Precision.FP32]
 
 
 # ---------------------------------------------------------------------------

@@ -362,30 +362,24 @@ def check_backend_available(backend: BackendType, hw: HardwareProfile) -> None:
     """Raise BackendError if the specified backend is not usable on this hardware."""
     libs = hw.libraries
 
-    match backend:
-        case BackendType.PYTORCH:
-            if not libs.torch_version:
-                raise BackendError(
-                    "PyTorch (torch) is not installed. Install with: uv add yowo[pytorch]"
-                )
-        case BackendType.ONNX:
-            if not libs.onnxruntime_version:
-                raise BackendError(
-                    "ONNX Runtime is not installed. Install with: uv add onnxruntime"
-                )
-        case BackendType.TENSORRT:
-            if not libs.tensorrt_version:
-                raise BackendError("TensorRT is not installed. Install with: uv add tensorrt")
-            if not hw.has_nvidia_gpu:
-                raise BackendError("TensorRT requires an NVIDIA GPU.")
-        case BackendType.OPENVINO:
-            if not libs.openvino_version:
-                raise BackendError("OpenVINO is not installed. Install with: uv add openvino")
-        case BackendType.COREML:
-            if not libs.coremltools_version:
-                raise BackendError(
-                    "coremltools is not installed. Install with: uv add coremltools>=7.0"
-                )
+    if backend == BackendType.PYTORCH:
+        if not libs.torch_version:
+            raise BackendError(
+                "PyTorch (torch) is not installed. Install with: uv add yowo[pytorch]"
+            )
+    elif backend == BackendType.ONNX:
+        if not libs.onnxruntime_version:
+            raise BackendError("ONNX Runtime is not installed. Install with: uv add onnxruntime")
+    elif backend == BackendType.TENSORRT:
+        if not libs.tensorrt_version:
+            raise BackendError("TensorRT is not installed. Install with: uv add tensorrt")
+        if not hw.has_nvidia_gpu:
+            raise BackendError("TensorRT requires an NVIDIA GPU.")
+    elif backend == BackendType.OPENVINO:
+        if not libs.openvino_version:
+            raise BackendError("OpenVINO is not installed. Install with: uv add openvino")
+    elif backend == BackendType.COREML and not libs.coremltools_version:
+        raise BackendError("coremltools is not installed. Install with: uv add coremltools>=7.0")
 
 
 def _parse_precision(value: str | None) -> Precision | None:

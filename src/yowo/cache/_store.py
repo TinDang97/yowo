@@ -20,7 +20,7 @@ _FEATURE_NAMES = ("p3", "p4", "p5")
 _Features = tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]
 
 
-@dataclass(slots=True)
+@dataclass()
 class _MmapMeta:
     """Metadata for a mmap-backed cache entry."""
 

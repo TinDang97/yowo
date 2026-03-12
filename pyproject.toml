@@ -4,13 +4,15 @@ version = "2.3.0"
 description = "Production YOLO inference and export library for edge and cloud deployment"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 authors = [{ name = "Tin Dang", email = "rainstone1029x@gmail.com" }]
 keywords = ["yolo", "inference", "edge", "tensorrt", "onnx", "openvino"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -73,7 +75,7 @@ build-backend = "hatchling.build"
 packages = ["src/yowo"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py39"
 line-length = 100
 src = ["src", "tests"]
 

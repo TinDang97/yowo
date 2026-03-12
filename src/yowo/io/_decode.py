@@ -24,7 +24,7 @@ from yowo.types import Frame, PreprocessedTensor
 _LETTERBOX_FILL = (114, 114, 114)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TensorMeta:
     """Transform parameters needed to invert the letterbox preprocessing.
 
