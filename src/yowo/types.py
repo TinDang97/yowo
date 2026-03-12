@@ -30,6 +30,9 @@ else:
     class StrEnumBase(str, enum.Enum):  # type: ignore[no-redef]
         """Backport of StrEnum for Python 3.9/3.10."""
 
+        def __str__(self) -> str:  # match StrEnum: str(v) returns the value
+            return self.value
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -424,7 +427,7 @@ class ClassificationResult:
             "top1_score": self.top1_score,
             "topk": [
                 {"class_id": int(cid), "score": float(sc)}
-                for cid, sc in zip(self.topk_class_ids, self.topk_scores, strict=False)
+                for cid, sc in zip(self.topk_class_ids, self.topk_scores)
             ],
         }
 

@@ -264,7 +264,7 @@ class ChromaEmbeddingGallery:
                 local_track_id=int(meta["local_track_id"]),
                 timestamp=float(meta["timestamp"]),
             )
-            for dist, meta in zip(distances, metadatas, strict=True)
+            for dist, meta in zip(distances, metadatas)
             if dist <= threshold
         ]
 

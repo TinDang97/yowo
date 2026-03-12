@@ -115,7 +115,7 @@ class TestOBBHead:
         # For 640 input: strides 8, 16, 32 → spatial 80, 40, 20
         strides = [8, 16, 32]
         feats = []
-        for c, s in zip(ch, strides, strict=False):
+        for c, s in zip(ch, strides):
             h = w = input_size // s
             feats.append(torch.zeros(1, c, h, w))
         return feats

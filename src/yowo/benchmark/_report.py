@@ -6,7 +6,7 @@ and produces structured JSON for programmatic consumption.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from rich.console import Console
@@ -104,7 +104,7 @@ def results_to_json(
     output: dict[str, Any] = {
         "model": model_name,
         "device": device_info,
-        "timestamp": datetime.now(tz=UTC).isoformat(),
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
         "results": result_dicts,
     }
 

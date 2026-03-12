@@ -125,7 +125,7 @@ def detections_to_coco_results(
         List of COCO-format result dicts ready for ``coco_gt.loadRes()``.
     """
     results: list[dict[str, object]] = []
-    for det, img_id in zip(detections, image_ids, strict=True):
+    for det, img_id in zip(detections, image_ids):
         for box in det.boxes:
             x1, y1, x2, y2 = box.x1, box.y1, box.x2, box.y2
             w = x2 - x1

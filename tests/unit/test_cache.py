@@ -55,7 +55,7 @@ class TestFeatureStoreInMemory:
 
         loaded = store.load("cam1")
         assert loaded is not None
-        for orig, cached in zip(features, loaded, strict=True):
+        for orig, cached in zip(features, loaded):
             np.testing.assert_array_equal(orig, cached)
 
     def test_load_missing_key_returns_none(self) -> None:
@@ -104,7 +104,7 @@ class TestFeatureStoreMmap:
 
         loaded = store.load("cam1")
         assert loaded is not None
-        for orig, cached in zip(features, loaded, strict=True):
+        for orig, cached in zip(features, loaded):
             np.testing.assert_array_equal(orig, cached)
 
     def test_fifo_eviction_at_capacity(self, tmp_path: Path) -> None:

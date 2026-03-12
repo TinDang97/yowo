@@ -817,7 +817,7 @@ def classify_command(
                 parts = [
                     f"Top-{rank + 1}: cls_{cid:04d} ({score:.3f})"
                     for rank, (cid, score) in enumerate(
-                        zip(result.topk_class_ids, result.topk_scores, strict=True)
+                        zip(result.topk_class_ids, result.topk_scores)
                     )
                 ]
                 click.echo(f"[{result.frame_index}] {' | '.join(parts)}")
@@ -1254,7 +1254,7 @@ def tune_command(
         batch_size=best.batch_size,
         precision=best.precision,
         fps_achieved=best.fps,
-        tuned_at=datetime.datetime.now(datetime.UTC).isoformat(),
+        tuned_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         fingerprint=fingerprint,
     )
     save_profile(profile, path=output)

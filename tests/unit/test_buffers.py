@@ -166,7 +166,7 @@ class TestPostprocessBuffer:
         )
 
         assert len(result_with) == len(result_without)
-        for d_with, d_without in zip(result_with, result_without, strict=True):
+        for d_with, d_without in zip(result_with, result_without):
             assert len(d_with.boxes) == len(d_without.boxes)
 
     def test_get_inverse_out_zero_rows(self) -> None:

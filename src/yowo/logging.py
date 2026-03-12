@@ -43,7 +43,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Return the log record as a JSON string."""
         # ISO8601 UTC timestamp
-        ts = datetime.datetime.fromtimestamp(record.created, tz=datetime.UTC)
+        ts = datetime.datetime.fromtimestamp(record.created, tz=datetime.timezone.utc)
         timestamp = ts.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ts.microsecond // 1000:03d}Z"
 
         payload: dict[str, object] = {

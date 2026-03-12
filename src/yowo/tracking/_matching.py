@@ -100,7 +100,7 @@ def linear_assignment(
     matched_rows: set[int] = set()
     matched_cols: set[int] = set()
 
-    for r, c in zip(row_ind, col_ind, strict=True):
+    for r, c in zip(row_ind, col_ind):
         if cost_matrix[r, c] <= thresh:
             matches.append((int(r), int(c)))
             matched_rows.add(int(r))
@@ -544,7 +544,7 @@ def remove_intra_duplicates(
         if ii.shape[0] == 0:
             return tracks
         ages = np.array([t.frame_id - t.start_frame for t in tracks])
-        for i, j in zip(ii.tolist(), jj.tolist(), strict=True):
+        for i, j in zip(ii.tolist(), jj.tolist()):
             if i in remove or j in remove:
                 continue
             if _should_veto_removal(

@@ -124,7 +124,7 @@ class FeatureStore:
         shapes: dict[str, tuple[int, ...]] = {}
         dtype_str = ""
         try:
-            for name, arr in zip(_FEATURE_NAMES, features, strict=True):
+            for name, arr in zip(_FEATURE_NAMES, features):
                 mm = np.memmap(
                     entry_dir / f"{name}.dat",
                     dtype=arr.dtype,

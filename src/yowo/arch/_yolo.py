@@ -223,7 +223,7 @@ class YOLOModel(nn.Module):
         for m in self.modules():
             if isinstance(m, Attention):
                 m.enable_kv_cache(enabled)
-            elif isinstance(m, C2PSA | C3k2PSA):
+            elif isinstance(m, (C2PSA, C3k2PSA)):
                 m.enable_block_cache(enabled)
         return self
 
@@ -232,7 +232,7 @@ class YOLOModel(nn.Module):
         for m in self.modules():
             if isinstance(m, Attention):
                 m.clear_kv_cache()
-            elif isinstance(m, C2PSA | C3k2PSA):
+            elif isinstance(m, (C2PSA, C3k2PSA)):
                 m.clear_block_cache()
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +193,7 @@ def export_model(
         input_shape=[1, 3, imgsz, imgsz],
         file_path=str(exported_path.resolve()),
         file_size_bytes=size_bytes,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         export_duration_sec=round(elapsed, 2),
         source_weights=str(weights_path),
         yowo_version=getattr(yowo, "__version__", "0.1.0"),

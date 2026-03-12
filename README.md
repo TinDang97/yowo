@@ -28,7 +28,10 @@ pip install yowo[all]
 pip install tensorrt>=10.0 --extra-index-url https://pypi.nvidia.com
 ```
 
-**Requirements**: Python >=3.11, Linux (production) / macOS (development)
+**Requirements**: Python >=3.9, Linux (production) / macOS (development)
+
+> **Jetson (aarch64)**: NVIDIA provides custom `onnxruntime-gpu` wheels via JetPack.
+> Install from NVIDIA's index instead of PyPI.
 
 ---
 
