@@ -15,6 +15,40 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ---
 
+## [2.4.1] — 2026-03-17
+
+### Added
+
+- **compat**: Python 3.8 support for Jetson Nano — lowered `requires-python`
+  from `>=3.9` to `>=3.8`. The codebase already used `from __future__ import
+  annotations` in all source files, making annotation syntax Python 3.8
+  compatible. Configuration changes: `ruff target-version = "py38"`, Python 3.8
+  classifier, `tracking` extra gated to `python_version >= "3.9"` (scipy has no
+  3.8 wheels).
+
+### Fixed
+
+- **compat**: Resolved 4 runtime Python 3.8 incompatibilities found during
+  manual testing on Python 3.8.20:
+  - `counter/_geometry.py`: `Point = tuple[float, float]` → `Tuple[float, float]`
+    (runtime type alias, not protected by `from __future__`)
+  - `events/__init__.py`: `_ListenerEntry = tuple[Callable[...], ...]` →
+    `Tuple[...]` and `collections.abc.Callable` → `typing.Callable` (not
+    subscriptable on 3.8)
+  - `cache/_store.py`: `_Features = tuple[NDArray[...], ...]` → `Tuple[...]`
+  - `batch/_runner.py`: parenthesized context manager `with (...):`  →
+    backslash continuation (parenthesized form requires Python 3.10+)
+
+### Tests
+
+- 2084 unit tests (up from 1910 in v2.4.0). 174 new guard tests ensuring
+  Python 3.8 compatibility: `from __future__ import annotations` presence,
+  no runtime union syntax in `__init__.py`, no runtime lowercase generic type
+  aliases (`tuple[...]`, `list[...]` etc.), StrEnum backport validation, and
+  public API import smoke tests.
+
+---
+
 ## [2.4.0] — 2026-03-12
 
 ### Added
