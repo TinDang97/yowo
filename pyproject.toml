@@ -4,13 +4,14 @@ version = "2.4.0"
 description = "Production YOLO inference and export library for edge and cloud deployment"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 authors = [{ name = "Tin Dang", email = "rainstone1029x@gmail.com" }]
 keywords = ["yolo", "inference", "edge", "tensorrt", "onnx", "openvino"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -37,7 +38,7 @@ onnx-gpu = [
 ]
 openvino = ["openvino>=2024.0"]
 coreml = ["coremltools>=7.0"]
-tracking = ["scipy>=1.11"]
+tracking = ["scipy>=1.11; python_version >= '3.9'"]
 chromadb = [
     "chromadb>=0.5.0",
 ]
@@ -64,8 +65,8 @@ dev = [
     "torch>=2.0",
     "onnx>=1.12.0,<2.0.0",
     "onnxslim>=0.1.85",
-    # onnxruntime >=1.24 drops cp310 wheels; cap to last known-good release
-    "onnxruntime>=1.17,<1.24; python_version == '3.10'",
+    # onnxruntime >=1.20 drops Python 3.8 wheels; >=1.24 drops cp310 wheels
+    "onnxruntime>=1.17,<1.20; python_version < '3.11'",
     "onnxruntime>=1.17; python_version >= '3.11'",
     "setuptools>=82.0.0",
     "onnxscript>=0.6.2; python_version >= '3.10'",
@@ -87,7 +88,7 @@ build-backend = "hatchling.build"
 packages = ["src/yowo"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py38"
 line-length = 100
 src = ["src", "tests"]
 

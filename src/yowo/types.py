@@ -28,7 +28,7 @@ if sys.version_info >= (3, 11):
 else:
 
     class StrEnumBase(str, enum.Enum):  # type: ignore[no-redef]
-        """Backport of StrEnum for Python 3.9/3.10."""
+        """Backport of StrEnum for Python < 3.11."""
 
         def __str__(self) -> str:  # match StrEnum: str(v) returns the value
             return self.value
