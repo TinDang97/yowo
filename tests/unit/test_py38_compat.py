@@ -135,6 +135,62 @@ def test_no_runtime_union_syntax_in_init(init_file: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 2b: No runtime type aliases using lowercase generics (tuple[...], list[...])
+# ---------------------------------------------------------------------------
+
+
+class _RuntimeGenericVisitor(ast.NodeVisitor):
+    """Detect runtime type aliases like `Point = tuple[float, float]`.
+
+    `from __future__ import annotations` only affects annotation contexts (function
+    signatures, variable annotations). Plain assignments like `X = tuple[...]` are
+    evaluated at runtime and fail on Python 3.8 with TypeError: 'type' object is
+    not subscriptable. Use `typing.Tuple` etc. for runtime type aliases.
+    """
+
+    _BUILTINS = frozenset({"tuple", "list", "dict", "set", "frozenset", "type"})
+
+    def __init__(self) -> None:
+        self.violations: list[tuple[int, str]] = []
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        # Check: X = tuple[...] or X = list[...]
+        self._check_subscript(node.value, node.lineno)
+        self.generic_visit(node)
+
+    def _check_subscript(self, node: ast.expr, lineno: int) -> None:
+        if not isinstance(node, ast.Subscript):
+            return
+        if isinstance(node.value, ast.Name) and node.value.id in self._BUILTINS:
+            self.violations.append((lineno, ast.unparse(node)))
+
+
+def _all_py_files() -> list[Path]:
+    """Return all .py files under src/yowo/."""
+    return list(_SRC_ROOT.rglob("*.py"))
+
+
+@pytest.mark.parametrize("src_file", _all_py_files(), ids=lambda p: str(p.relative_to(_SRC_ROOT)))
+def test_no_runtime_lowercase_generic_aliases(src_file: Path) -> None:
+    """No source file may use `X = tuple[...]` etc. — fails on Python 3.8.
+
+    Use `typing.Tuple`, `typing.List`, etc. for runtime type aliases instead.
+    `from __future__ import annotations` does NOT protect plain assignments.
+    """
+    source = src_file.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(src_file))
+    visitor = _RuntimeGenericVisitor()
+    visitor.visit(tree)
+
+    assert visitor.violations == [], (
+        f"{src_file.relative_to(_SRC_ROOT.parent.parent)} uses runtime lowercase generic "
+        f"type aliases (Python 3.9+ only):\n"
+        + "\n".join(f"  line {ln}: {expr}" for ln, expr in visitor.violations)
+        + "\n  Fix: use typing.Tuple/List/Dict/Set/FrozenSet instead"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 3: StrEnumBase backport is usable on all Python versions
 # ---------------------------------------------------------------------------
 
