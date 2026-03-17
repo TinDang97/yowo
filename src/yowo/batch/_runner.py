@@ -339,19 +339,17 @@ def run_batch(config: BatchConfig, engine: DetectionEngine) -> int:
 
     # ---- Main loop -----------------------------------------------------------
     try:
-        with (
-            open(jsonl_path, jsonl_mode, encoding="utf-8") as jsonl_file,
-            open(errors_log_path, "a", encoding="utf-8") as err_file,
-            Progress(
-                SpinnerColumn(),
-                BarColumn(),
-                TaskProgressColumn(),
-                TextColumn("[cyan]{task.fields[files_done]}/{task.total} files"),
-                TextColumn("[green]{task.fields[fps]:.1f} FPS"),
-                TimeRemainingColumn(),
-                console=console,
-            ) as progress,
-        ):
+        with open(jsonl_path, jsonl_mode, encoding="utf-8") as jsonl_file, open(
+            errors_log_path, "a", encoding="utf-8"
+        ) as err_file, Progress(
+            SpinnerColumn(),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("[cyan]{task.fields[files_done]}/{task.total} files"),
+            TextColumn("[green]{task.fields[fps]:.1f} FPS"),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
             task_id = progress.add_task(
                 "Batch inference",
                 total=total_files,

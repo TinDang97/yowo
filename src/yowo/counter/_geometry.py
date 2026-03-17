@@ -6,7 +6,9 @@ Designed for small N (< 20 zones, < 10 lines, < 100 detections per frame).
 
 from __future__ import annotations
 
-Point = tuple[float, float]
+from typing import Tuple
+
+Point = Tuple[float, float]
 
 
 def box_center(box: object) -> Point:

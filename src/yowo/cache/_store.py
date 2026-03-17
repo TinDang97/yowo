@@ -9,6 +9,7 @@ import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 _FEATURE_NAMES = ("p3", "p4", "p5")
 
-_Features = tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]
+_Features = Tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]
 
 
 @dataclass()
