@@ -177,12 +177,17 @@ def detect_gpus() -> list[Device]:
     """Detect available NVIDIA CUDA GPUs.
 
     Primary path: pynvml (if installed).
-    Fallback: nvidia-smi subprocess with --query-gpu.
+    Fallback: nvidia-smi subprocess with --query-gpu — also taken when pynvml
+    loads but reports no devices, which is what NVML does on some Tegra
+    builds where nvidia-smi can still see the iGPU.
     Compute capability resolved via torch.cuda when available.
     Returns an empty list on any error — never raises.
     """
     try:
-        return _detect_gpus_nvml()
+        devices = _detect_gpus_nvml()
+        if devices:
+            return devices
+        _log.debug("detect_gpus: pynvml reported no devices, trying nvidia-smi")
     except Exception:
         _log.debug("detect_gpus: pynvml probe failed, trying nvidia-smi", exc_info=True)
 
@@ -247,6 +252,25 @@ def _detect_gpus_nvml() -> list[Device]:
         pynvml.nvmlShutdown()
 
 
+# nvidia-smi prints a placeholder instead of a number for any field the driver
+# cannot report. On Jetson the GPU has no VRAM of its own — it shares system
+# RAM — so both memory columns come back as "[N/A]".
+_SMI_NO_VALUE: frozenset[str] = frozenset(
+    {"", "n/a", "[n/a]", "not supported", "[not supported]", "unknown", "[unknown error]"}
+)
+
+
+def _parse_smi_int(value: str) -> int | None:
+    """Parse one nvidia-smi CSV field as an int, or None when it carries no value."""
+    text = value.strip()
+    if text.lower() in _SMI_NO_VALUE:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def _detect_gpus_smi() -> list[Device]:
     """Probe GPUs via nvidia-smi subprocess (fallback)."""
     result = subprocess.run(
@@ -271,10 +295,24 @@ def _detect_gpus_smi() -> list[Device]:
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 4:
             continue
-        idx = int(parts[0])
+        idx = _parse_smi_int(parts[0])
+        if idx is None:
+            continue
         name = parts[1]
-        total_mb = int(parts[2])
-        free_mb = int(parts[3])
+        total_mb = _parse_smi_int(parts[2])
+        free_mb = _parse_smi_int(parts[3])
+
+        if total_mb is None or free_mb is None:
+            # Unified memory (Jetson): the GPU has no separate pool, so system
+            # RAM *is* its memory budget. Substituting 0 would be a lie in the
+            # other direction — every capacity check would fail on a board with
+            # plenty of memory. An unreadable memory column must never cost us
+            # the device itself.
+            sys_total_mb, sys_available_mb = detect_system_memory_mb()
+            if total_mb is None:
+                total_mb = sys_total_mb
+            if free_mb is None:
+                free_mb = sys_available_mb
 
         cc = _get_compute_capability(idx)
         arch = detect_gpu_arch(*cc) if cc is not None else GPUArch.UNKNOWN
