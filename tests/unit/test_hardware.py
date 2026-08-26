@@ -461,6 +461,65 @@ class TestComputeCapFromSmi:
         assert gpu.arch == GPUArch.ORIN
 
 
+class TestComputeCapFieldUnsupported:
+    """An older driver rejects ``compute_cap`` as a query *field*.
+
+    Unlike a per-field ``[N/A]`` value, an unknown field makes nvidia-smi fail
+    the WHOLE query with a non-zero exit and empty stdout. Asking for
+    compute_cap unconditionally would therefore cost us every device on exactly
+    the older Jetsons this fallback exists to serve — reintroducing the very
+    "reads as no GPU" bug the fallback was written to kill. The probe must
+    retry the base columns alone and still return the device.
+    """
+
+    def test_field_rejected_query_retries_without_compute_cap(self) -> None:
+        # First call (with compute_cap) fails as an old driver does; the retry
+        # without it succeeds. The device must survive; arch comes from torch.
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                side_effect=[
+                    _smi_result("", returncode=6),
+                    _smi_result(_SMI_JETSON),
+                ],
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            devices = _detect_gpus_smi()
+
+        assert len(devices) == 1
+        gpu = devices[0]
+        assert gpu.type == DeviceType.CUDA
+        assert gpu.is_jetson is True
+        assert gpu.arch == GPUArch.ORIN  # from the torch fallback, not smi
+
+    def test_modern_driver_makes_only_one_call(self) -> None:
+        """When the first query succeeds, we do not pay a second subprocess."""
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_JETSON_CC),
+            ) as mock_run,
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+        assert mock_run.call_count == 1
+
+    def test_both_queries_failing_still_yields_no_devices(self) -> None:
+        """A genuine 'no GPU here' must not be masked by the retry."""
+        with patch(
+            "yowo.hardware._detect.subprocess.run",
+            return_value=_smi_result("", returncode=9),
+        ) as mock_run:
+            assert _detect_gpus_smi() == []
+        assert mock_run.call_count == 2  # asked, retried, gave up
+
+
 class TestDetectGpus:
     def test_jetson_is_visible_through_the_public_entry_point(self) -> None:
         """End-to-end for the bug: pynvml absent, nvidia-smi reports [N/A]."""

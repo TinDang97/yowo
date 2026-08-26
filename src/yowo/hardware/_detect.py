@@ -287,12 +287,19 @@ def _parse_compute_cap(value: str) -> tuple[int, int] | None:
         return None
 
 
-def _detect_gpus_smi() -> list[Device]:
-    """Probe GPUs via nvidia-smi subprocess (fallback)."""
-    result = subprocess.run(
+# The base columns every nvidia-smi build understands. compute_cap is a newer
+# --query-gpu field; a driver too old to know it fails the WHOLE query (non-zero
+# exit, empty stdout) rather than emitting a per-field placeholder, so it is
+# asked for separately and dropped on failure.
+_SMI_BASE_FIELDS = "index,name,memory.total,memory.free"
+_SMI_COMPUTE_CAP_FIELD = "compute_cap"
+
+
+def _run_smi_query(fields: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             "nvidia-smi",
-            "--query-gpu=index,name,memory.total,memory.free,compute_cap",
+            f"--query-gpu={fields}",
             "--format=csv,noheader,nounits",
         ],
         capture_output=True,
@@ -300,6 +307,20 @@ def _detect_gpus_smi() -> list[Device]:
         timeout=5,
         check=False,
     )
+
+
+def _detect_gpus_smi() -> list[Device]:
+    """Probe GPUs via nvidia-smi subprocess (fallback)."""
+    # Ask for compute_cap so the arch is correct without torch. An older driver
+    # rejects it as an unknown field and fails the entire query - which would
+    # cost us every device on exactly the older Jetsons this fallback serves,
+    # reintroducing the "reads as no GPU" bug it exists to kill. So retry the
+    # base columns alone; the arch then comes from the torch probe (or stays
+    # UNKNOWN), the same path a per-field [N/A] already takes. Only a genuine
+    # "no GPU here" - both queries failing - returns empty.
+    result = _run_smi_query(f"{_SMI_BASE_FIELDS},{_SMI_COMPUTE_CAP_FIELD}")
+    if result.returncode != 0:
+        result = _run_smi_query(_SMI_BASE_FIELDS)
     if result.returncode != 0:
         return []
 
