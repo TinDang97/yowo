@@ -271,12 +271,28 @@ def _parse_smi_int(value: str) -> int | None:
         return None
 
 
+def _parse_compute_cap(value: str) -> tuple[int, int] | None:
+    """Parse an nvidia-smi ``compute_cap`` field like "8.7" into (8, 7).
+
+    Returns None for the placeholder a driver prints when it cannot report the
+    capability, so the caller falls back to the torch probe.
+    """
+    text = value.strip()
+    if text.lower() in _SMI_NO_VALUE or "." not in text:
+        return None
+    try:
+        major, minor = text.split(".", 1)
+        return (int(major), int(minor))
+    except ValueError:
+        return None
+
+
 def _detect_gpus_smi() -> list[Device]:
     """Probe GPUs via nvidia-smi subprocess (fallback)."""
     result = subprocess.run(
         [
             "nvidia-smi",
-            "--query-gpu=index,name,memory.total,memory.free",
+            "--query-gpu=index,name,memory.total,memory.free,compute_cap",
             "--format=csv,noheader,nounits",
         ],
         capture_output=True,
@@ -314,7 +330,13 @@ def _detect_gpus_smi() -> list[Device]:
             if free_mb is None:
                 free_mb = sys_available_mb
 
-        cc = _get_compute_capability(idx)
+        # nvidia-smi reports compute_cap directly (e.g. "8.7" on Orin), so the
+        # architecture no longer needs torch. This is what makes fp16/int8
+        # capability correct on a Jetson that has no torch installed - the
+        # torch probe stays as a fallback for drivers too old to report it.
+        cc = _parse_compute_cap(parts[4]) if len(parts) >= 5 else None
+        if cc is None:
+            cc = _get_compute_capability(idx)
         arch = detect_gpu_arch(*cc) if cc is not None else GPUArch.UNKNOWN
 
         devices.append(

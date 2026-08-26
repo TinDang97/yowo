@@ -35,6 +35,7 @@ from yowo.hardware._capabilities import (
 )
 from yowo.hardware._detect import (
     _detect_gpus_smi,
+    _parse_compute_cap,
     detect_cpu_arch,
     detect_cpu_features,
     detect_gpu_arch,
@@ -374,6 +375,90 @@ class TestDetectGpusSmi:
             return_value=_smi_result("", returncode=9),
         ):
             assert _detect_gpus_smi() == []
+
+
+# nvidia-smi with the compute_cap column (real output on driver 540+, incl. Jetson).
+_SMI_JETSON_CC = "0, Orin (nvgpu), [N/A], [N/A], 8.7"
+_SMI_DISCRETE_CC = "0, NVIDIA L4, 23034, 22800, 8.9"
+
+
+class TestParseComputeCap:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("8.7", (8, 7)),
+            (" 8.9 ", (8, 9)),
+            ("7.5", (7, 5)),
+            ("[N/A]", None),
+            ("N/A", None),
+            ("", None),
+            ("87", None),  # no dot - not a capability
+            ("Orin", None),
+        ],
+    )
+    def test_parse(self, value, expected) -> None:
+        assert _parse_compute_cap(value) == expected
+
+
+class TestComputeCapFromSmi:
+    """The architecture comes off nvidia-smi, so it is correct WITHOUT torch.
+
+    This is what lets Device.supports_fp16() report True on a Jetson that has
+    no torch: the old code left arch UNKNOWN there, so fp16/int8 both read as
+    unsupported on a board that supports both.
+    """
+
+    def test_jetson_arch_is_orin_without_torch(self) -> None:
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_JETSON_CC)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            # torch probe returns None (no torch); arch must still be ORIN.
+            patch("yowo.hardware._detect._get_compute_capability", return_value=None),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+        assert gpu.supports_fp16() is True
+        assert gpu.supports_int8() is True
+
+    def test_discrete_arch_from_compute_cap(self) -> None:
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_DISCRETE_CC)
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=False),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=None),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ADA  # 8.9
+
+    def test_smi_compute_cap_wins_over_torch_probe(self) -> None:
+        """When nvidia-smi reports it, the torch probe is not even called."""
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_JETSON_CC)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability") as torch_probe,
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+        torch_probe.assert_not_called()
+
+    def test_placeholder_compute_cap_falls_back_to_torch(self) -> None:
+        """An old driver prints [N/A] for compute_cap; torch fills the gap."""
+        line = "0, Orin (nvgpu), [N/A], [N/A], [N/A]"
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(line)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
 
 
 class TestDetectGpus:
