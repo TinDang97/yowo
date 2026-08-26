@@ -73,6 +73,11 @@ class InferenceConfig:
         model_size: Size variant of the model.
         weights_path: Optional path to a local .pt weights file. When
             ``None`` the registry resolves the path automatically.
+        class_names: Class label strings, index-aligned to the model's class
+            ids. When set, detections carry these names instead of the COCO
+            defaults - the one way a custom-trained model gets its own labels
+            through the engine. When ``None`` the COCO names are used. If
+            ``num_classes`` is also given it must equal ``len(class_names)``.
         num_classes: Override number of output classes. When ``None`` the
             registry default is used (80 for COCO detection).
         backend: Inference backend. ``None`` triggers automatic selection
@@ -120,6 +125,7 @@ class InferenceConfig:
     model_size: ModelSize = ModelSize.NANO
     weights_path: Path | None = None
     num_classes: int | None = None
+    class_names: list[str] | None = None
     backend: BackendType | None = None
     device: str = "auto"
     precision: Precision | None = None
@@ -146,6 +152,18 @@ class InferenceConfig:
     def __post_init__(self) -> None:
         if self.num_classes is not None and self.num_classes < 1:
             raise ConfigError(f"num_classes must be >= 1, got {self.num_classes}")
+        if self.class_names is not None:
+            if len(self.class_names) == 0:
+                raise ConfigError("class_names must be non-empty when provided")
+            if self.num_classes is not None and self.num_classes != len(self.class_names):
+                raise ConfigError(
+                    f"num_classes ({self.num_classes}) does not match "
+                    f"len(class_names) ({len(self.class_names)})"
+                )
+            # A names list is a class count. Fill it in so the spec and the
+            # labels can never silently disagree downstream.
+            if self.num_classes is None:
+                self.num_classes = len(self.class_names)
         if not (0.0 <= self.confidence_threshold <= 1.0):
             raise ConfigError(
                 f"confidence_threshold must be in [0.0, 1.0], got {self.confidence_threshold}"
