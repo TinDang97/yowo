@@ -31,7 +31,6 @@ from yowo.errors import InferenceError, ShutdownError, WarmupValidationError
 from yowo.hardware import HardwareProfile, get_hardware_profile
 from yowo.io import FrameSource
 from yowo.postprocess import PostprocessBuffer
-from yowo.postprocess._obb_nms import postprocess_obb
 from yowo.types import (
     BackendType,
     Frame,
@@ -207,7 +206,14 @@ class OBBEngine(BaseEngine):
         elapsed_ms: float,
         scratch: PostprocessBuffer | None,
     ) -> list[OBBDetection]:
+        # Both imports are deferred to the one place OBB decoding actually
+        # happens. postprocess/__init__.py already routes _obb_nms through a
+        # lazy __getattr__ "to avoid top-level import torch"; reaching past it
+        # into the private module put torch back on the import path of anyone
+        # who merely typed `import yowo`.
         import torch
+
+        from yowo.postprocess import postprocess_obb
 
         raw_t = torch.from_numpy(raw_output)
         results = postprocess_obb(
