@@ -5,6 +5,8 @@ Tests cover:
 - detect_system_memory_mb() — /proc/meminfo parsing + graceful fallback
 - detect_is_jetson()        — file-system flags
 - detect_gpu_arch()         — compute-capability mapping
+- detect_gpus()             — pynvml primary, nvidia-smi fallback
+- _detect_gpus_smi()        — CSV parsing, incl. Jetson "[N/A]" memory columns
 - probe_tensorrt()          — import success / ImportError
 - probe_onnxruntime()       — CUDA provider detection
 - HardwareProfile           — properties: has_nvidia_gpu, is_jetson, primary_gpu
@@ -18,7 +20,7 @@ from __future__ import annotations
 
 import io
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -32,9 +34,12 @@ from yowo.hardware._capabilities import (
     probe_torch,
 )
 from yowo.hardware._detect import (
+    _detect_gpus_smi,
+    _parse_compute_cap,
     detect_cpu_arch,
     detect_cpu_features,
     detect_gpu_arch,
+    detect_gpus,
     detect_is_jetson,
     detect_system_memory_mb,
 )
@@ -260,6 +265,307 @@ class TestDetectGpuArch:
     )
     def test_compute_capability_mapping(self, major: int, minor: int, expected: GPUArch) -> None:
         assert detect_gpu_arch(major, minor) == expected
+
+
+# ---------------------------------------------------------------------------
+# detect_gpus / _detect_gpus_smi
+# ---------------------------------------------------------------------------
+
+# What nvidia-smi actually prints on a Jetson Orin (JetPack 6.2, L4T R36.4.4).
+# The memory columns are placeholders because the iGPU shares system RAM.
+_SMI_JETSON = "0, Orin (nvgpu), [N/A], [N/A]"
+_SMI_DISCRETE = "0, NVIDIA L4, 23034, 22800"
+
+
+def _smi_result(stdout: str, returncode: int = 0) -> Any:
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
+
+
+class TestDetectGpusSmi:
+    """The nvidia-smi fallback, including the Jetson unified-memory case.
+
+    Regression guard: ``int("[N/A]")`` raised ValueError inside the parse loop,
+    ``detect_gpus`` swallowed it by contract, and the whole board came back as
+    "no GPU" — which made ``has_nvidia_gpu`` False and pushed a perfectly good
+    Orin onto the CPU backend with no error anywhere.
+    """
+
+    def test_jetson_placeholder_memory_still_yields_the_device(self) -> None:
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_JETSON),
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            devices = _detect_gpus_smi()
+
+        assert len(devices) == 1
+        gpu = devices[0]
+        assert gpu.type == DeviceType.CUDA
+        assert gpu.index == 0
+        assert gpu.name == "Orin (nvgpu)"
+        assert gpu.is_jetson is True
+        assert gpu.arch == GPUArch.ORIN
+
+    def test_jetson_memory_falls_back_to_system_ram(self) -> None:
+        """Unified memory: system RAM is the GPU's budget, so report it as such."""
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_JETSON),
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.memory_total_mb == 7620
+        assert gpu.memory_available_mb == 4100
+
+    def test_discrete_gpu_memory_is_read_from_smi_not_system_ram(self) -> None:
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_DISCRETE),
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=False),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(64000, 32000)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 9)),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.memory_total_mb == 23034
+        assert gpu.memory_available_mb == 22800
+        assert gpu.is_jetson is False
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        ["[N/A]", "N/A", "[Not Supported]", "Unknown", ""],
+    )
+    def test_every_known_placeholder_is_tolerated(self, placeholder: str) -> None:
+        line = f"0, Orin (nvgpu), {placeholder}, {placeholder}"
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(line)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=None),
+        ):
+            devices = _detect_gpus_smi()
+
+        assert len(devices) == 1
+        assert devices[0].memory_total_mb == 7620
+
+    def test_only_the_memory_column_is_forgiving_a_bad_index_drops_the_row(self) -> None:
+        """An unparseable index means we cannot address the device — skip it."""
+        line = "GPU, Orin (nvgpu), [N/A], [N/A]"
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(line)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+        ):
+            assert _detect_gpus_smi() == []
+
+    def test_nonzero_returncode_yields_no_devices(self) -> None:
+        with patch(
+            "yowo.hardware._detect.subprocess.run",
+            return_value=_smi_result("", returncode=9),
+        ):
+            assert _detect_gpus_smi() == []
+
+
+# nvidia-smi with the compute_cap column (real output on driver 540+, incl. Jetson).
+_SMI_JETSON_CC = "0, Orin (nvgpu), [N/A], [N/A], 8.7"
+_SMI_DISCRETE_CC = "0, NVIDIA L4, 23034, 22800, 8.9"
+
+
+class TestParseComputeCap:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("8.7", (8, 7)),
+            (" 8.9 ", (8, 9)),
+            ("7.5", (7, 5)),
+            ("[N/A]", None),
+            ("N/A", None),
+            ("", None),
+            ("87", None),  # no dot - not a capability
+            ("Orin", None),
+        ],
+    )
+    def test_parse(self, value, expected) -> None:
+        assert _parse_compute_cap(value) == expected
+
+
+class TestComputeCapFromSmi:
+    """The architecture comes off nvidia-smi, so it is correct WITHOUT torch.
+
+    This is what lets Device.supports_fp16() report True on a Jetson that has
+    no torch: the old code left arch UNKNOWN there, so fp16/int8 both read as
+    unsupported on a board that supports both.
+    """
+
+    def test_jetson_arch_is_orin_without_torch(self) -> None:
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_JETSON_CC)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            # torch probe returns None (no torch); arch must still be ORIN.
+            patch("yowo.hardware._detect._get_compute_capability", return_value=None),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+        assert gpu.supports_fp16() is True
+        assert gpu.supports_int8() is True
+
+    def test_discrete_arch_from_compute_cap(self) -> None:
+        with (
+            patch(
+                "yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_DISCRETE_CC)
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=False),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=None),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ADA  # 8.9
+
+    def test_smi_compute_cap_wins_over_torch_probe(self) -> None:
+        """When nvidia-smi reports it, the torch probe is not even called."""
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(_SMI_JETSON_CC)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability") as torch_probe,
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+        torch_probe.assert_not_called()
+
+    def test_placeholder_compute_cap_falls_back_to_torch(self) -> None:
+        """An old driver prints [N/A] for compute_cap; torch fills the gap."""
+        line = "0, Orin (nvgpu), [N/A], [N/A], [N/A]"
+        with (
+            patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(line)),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            gpu = _detect_gpus_smi()[0]
+
+        assert gpu.arch == GPUArch.ORIN
+
+
+class TestDetectGpus:
+    def test_jetson_is_visible_through_the_public_entry_point(self) -> None:
+        """End-to-end for the bug: pynvml absent, nvidia-smi reports [N/A]."""
+        with (
+            patch(
+                "yowo.hardware._detect._detect_gpus_nvml",
+                side_effect=ImportError("No module named 'pynvml'"),
+            ),
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_JETSON),
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            devices = detect_gpus()
+
+        assert len(devices) == 1, "a Jetson must not read as a machine with no GPU"
+
+    def test_empty_nvml_result_still_falls_through_to_smi(self) -> None:
+        """NVML loads on some Tegra builds but reports zero devices."""
+        with (
+            patch("yowo.hardware._detect._detect_gpus_nvml", return_value=[]),
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                return_value=_smi_result(_SMI_JETSON),
+            ),
+            patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+            patch("yowo.hardware._detect.detect_system_memory_mb", return_value=(7620, 4100)),
+            patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+        ):
+            devices = detect_gpus()
+
+        assert len(devices) == 1
+
+    def test_nvml_result_wins_when_it_is_not_empty(self) -> None:
+        nvml_gpu = _make_gpu(name="NVIDIA L4")
+        with (
+            patch("yowo.hardware._detect._detect_gpus_nvml", return_value=[nvml_gpu]),
+            patch("yowo.hardware._detect.subprocess.run") as mock_run,
+        ):
+            devices = detect_gpus()
+
+        assert devices == [nvml_gpu]
+        mock_run.assert_not_called()
+
+    def test_both_probes_failing_returns_empty_and_never_raises(self) -> None:
+        with (
+            patch("yowo.hardware._detect._detect_gpus_nvml", side_effect=ImportError),
+            patch(
+                "yowo.hardware._detect.subprocess.run",
+                side_effect=FileNotFoundError("nvidia-smi"),
+            ),
+        ):
+            assert detect_gpus() == []
+
+
+class TestHasNvidiaGpuOnJetson:
+    def test_a_jetson_profile_reports_a_gpu(self) -> None:
+        """The property the whole backend selector hangs off.
+
+        ``has_nvidia_gpu`` False is what made ``TensorRTBackend.__init__``
+        refuse with "an NVIDIA GPU is required" on a board that has one.
+        """
+        jetson_cpu = Device(
+            type=DeviceType.CPU,
+            index=0,
+            name="aarch64 CPU",
+            arch=None,
+            cpu_arch=CPUArch.AARCH64,
+            memory_total_mb=7620,
+            memory_available_mb=4100,
+            is_jetson=True,
+        )
+        clear_cache()
+        try:
+            # `subprocess.run` is patched on the shared module object, so it is
+            # visible to anything else the profile builds - pin detect_cpu_device
+            # rather than let it read the fake nvidia-smi output as a CPU name.
+            with (
+                patch(
+                    "yowo.hardware._detect._detect_gpus_nvml",
+                    side_effect=ImportError,
+                ),
+                patch(
+                    "yowo.hardware._detect.subprocess.run",
+                    return_value=_smi_result(_SMI_JETSON),
+                ),
+                patch("yowo.hardware.detect_cpu_device", return_value=jetson_cpu),
+                patch("yowo.hardware._detect.detect_is_jetson", return_value=True),
+                patch(
+                    "yowo.hardware._detect.detect_system_memory_mb",
+                    return_value=(7620, 4100),
+                ),
+                patch("yowo.hardware._detect._get_compute_capability", return_value=(8, 7)),
+            ):
+                profile = get_hardware_profile(force_refresh=True)
+
+            assert profile.has_nvidia_gpu is True
+            assert profile.is_jetson is True
+            assert profile.primary_gpu is not None
+            assert profile.primary_gpu.arch == GPUArch.ORIN
+        finally:
+            clear_cache()
 
 
 # ---------------------------------------------------------------------------
