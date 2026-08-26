@@ -112,7 +112,9 @@ def detect(
         iou: IoU threshold for NMS (default 0.45).
         device: Device string (default ``"auto"``).
         num_classes: Override output class count (default ``None`` = registry).
-        **engine_kwargs: Extra kwargs forwarded to :class:`InferenceEngine`.
+        **engine_kwargs: Extra kwargs forwarded to :class:`InferenceEngine` -
+            notably ``class_names=[...]`` to label a custom-trained model with
+            its own class names instead of the COCO defaults.
 
     Returns:
         List of :class:`Detection` objects (one per frame).  For video

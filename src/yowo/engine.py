@@ -923,6 +923,7 @@ class DetectionEngine(BaseEngine):
         model_size: ModelSize = ModelSize.NANO,
         weights_path: Path | None = None,
         num_classes: int | None = None,
+        class_names: list[str] | None = None,
         backend: BackendType | None = None,
         device: str = "auto",
         precision: Precision | None = None,
@@ -948,6 +949,7 @@ class DetectionEngine(BaseEngine):
                 model_size=model_size,
                 weights_path=weights_path,
                 num_classes=num_classes,
+                class_names=class_names,
                 backend=backend,
                 device=device,
                 precision=precision,
@@ -967,6 +969,9 @@ class DetectionEngine(BaseEngine):
             )
         self._confidence = cfg.confidence_threshold
         self._iou_threshold = cfg.iou_threshold
+        # Forwarded to postprocess so a custom model keeps its own labels.
+        # None means the COCO defaults, exactly as before.
+        self._class_names = cfg.class_names
         self._config_log_level: str = getattr(cfg, "log_level", "WARNING")
         self._config_structured_logging: bool = getattr(cfg, "structured_logging", False)
         spec = ModelSpec(
@@ -1032,6 +1037,7 @@ class DetectionEngine(BaseEngine):
             backend=self._selection.backend,
             confidence_threshold=self._confidence,
             iou_threshold=self._iou_threshold,
+            class_names=self._class_names,
             inference_time_ms=elapsed_ms,
             scratch=scratch,
         )
