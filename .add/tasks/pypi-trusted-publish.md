@@ -25,7 +25,7 @@ why: there is no PyPI upload step in CI at all — `release.yml:69` runs `semant
 human decision (recorded, not derived) — the publishing path is **OIDC trusted publishing, no stored secret**.
   Asked with three options; the human answered "trusted publishing".
   Rejected: storing a freshly-minted API token — works, but keeps a long-lived credential and would have
-    required reopening m1-trust-the-ship's frozen exit criterion "no long-lived token exists anywhere".
+    required reopening m1-trust-the-ship's exit leg (iv), "PyPI shows zero active project API tokens".
   Rejected: continuing to publish manually — leaves intact the local-working-tree upload path that caused
     the defect twice.
   Consequence: `release.yml:9` already declares `id-token: write` and nothing consumes it, so the workflow
@@ -57,9 +57,12 @@ human decision 2 (recorded, not derived) — the release commit and tag reach pr
   repository secrets, and that private key is long-lived. What the App buys is that the credential is
   scoped (contents:write on this repo only), owned by an app rather than a person, independently
   revocable, and never valid for PyPI. The PyPI half stays genuinely secretless via OIDC. m1's exit
-  criterion "no long-lived token exists anywhere" is verified by leg (iv) — "PyPI shows zero active
-  project API tokens" — so the App key does not breach it as written, but the wording oversells the
-  result and should be read as scoped to PyPI.
+  leg (iv) is "PyPI shows zero active project API tokens", which the App key does not breach — it is a
+  GitHub credential and can never authenticate to PyPI.
+  CORRECTION: an earlier version of this line quoted m1 as requiring "no long-lived token exists
+  anywhere". No such wording exists in m1-trust-the-ship; it was my paraphrase, repeated until it read
+  as a citation. The milestone has always been PyPI-scoped. Left visible rather than quietly deleted,
+  because a fabricated citation that shaped two human decisions is worth a record.
 
 why the release workflow has failed five times running (evidence, replacing an earlier wrong guess of
   "unpinned python-semantic-release"): `semantic-release version` commits the bump and tag and pushes
