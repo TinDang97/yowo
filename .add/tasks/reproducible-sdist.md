@@ -1,7 +1,7 @@
 ---
 type: Task
 title: A published artifact provably matches its source
-status: direction
+status: done
 depth: standard
 sensitivity: architecture
 milestone: m1-trust-the-ship
@@ -22,6 +22,8 @@ verified:
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:08f6f1ce28fa33a7", binding: "sha256:b85b43f28c97dd59" }
   - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:131b99014108750d" }
   - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/reproducible-sdist.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/reproducible-sdist.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/reproducible-sdist.d/runs/2.md, brief: "sha256:568623a0ef61113e" }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
@@ -34,7 +36,7 @@ probe (discharges A2 before freeze): with `SOURCE_DATE_EPOCH=1700000000`, two co
 `uv build` runs of this tree produced byte-identical artifacts — sdist `8567aea31fa98717…` and wheel
 `15624a7d72ad696c…` both times. Hatchling already honours SOURCE_DATE_EPOCH, so this task needs no
 build-backend change: it only has to pin the epoch, build twice and compare.
-beat: scaffold · next: author reproducible-sdist's RULES, ASSUMPTIONS and CHECKS, then add freeze reproducible-sdist
+beat: done · next: add status
 
 ## RULES
 <must>
