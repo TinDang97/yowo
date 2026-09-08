@@ -87,6 +87,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/yowo"]
 
+# `only-include`, NOT `include`. Hatchling's `include` ADDS patterns to a default
+# whole-repo sweep instead of replacing it — with `include` the sdist still carried
+# .add/, bench/ and docs/. Only this key restricts. yowo 2.4.0 and 2.4.1 shipped a
+# 5.6 MB AGPL-licensed yolo11n.pt to PyPI under an Apache-2.0 declaration because no
+# sdist target existed at all; both are yanked.
+# `tests` is deliberately absent: the sdist is a build input, not a test bundle.
+# Asserted by scripts/verify_sdist_contents.py, run by the `sdist` job in ci.yml.
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/yowo",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+
 [tool.ruff]
 target-version = "py38"
 line-length = 100

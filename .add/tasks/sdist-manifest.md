@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Explicit sdist include list
-status: direction
+status: done
 depth: standard
 sensitivity: architecture
 milestone: m1-trust-the-ship
@@ -16,13 +16,19 @@ gives:
   - S3 scripts/verify_sdist_contents.py — builds both distributions, reports every violation, emits JUnit XML
 needs: [/tasks/pr-ci-gate.md#gives]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-08, act: interview, authority: human, interview: "sha256:cc6f01844ac14337", receipt: /tasks/sdist-manifest.d/interviews/1.md, answers: "A1=confirm" }
+  - { by: "Tin Dang", at: 2026-09-08, act: interview, authority: human, interview: "sha256:cc6f01844ac14337", receipt: /tasks/sdist-manifest.d/interviews/2.md, answers: "A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:BINARY=confirm|R:SWEEP=confirm" }
+  - { by: "Tin Dang", at: 2026-09-08, act: freeze, authority: human, direction: "sha256:ade6701bbc2a03ba", binding: "sha256:b85b43f28c97dd59" }
+  - { by: "cli", at: 2026-09-08, act: brief, authority: process, brief: "sha256:7c3a416c6d6d0e12" }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/sdist-manifest.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-08, act: gate, authority: human, outcome: PASS, receipt: /tasks/sdist-manifest.d/runs/1.md, brief: "sha256:f3456672fb0e6c0d" }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: The published source distribution contains what we chose to publish, and nothing the working tree happened to be holding.
 why: yowo 2.4.0 and 2.4.1 both shipped a 5.6 MB AGPL-licensed yolo11n.pt to PyPI under an Apache-2.0 declaration, because hatchling has no sdist target configured and falls back to a whole-repo sweep filtered only by .gitignore.
-beat: direction · next: run the checks red, then add interview sdist-manifest
+beat: done · next: add status
 
 ## GROUND
 - `pyproject.toml:83-88` — build backend is hatchling; `[tool.hatch.build.targets.wheel] packages = ["src/yowo"]`
@@ -64,9 +70,10 @@ beat: direction · next: run the checks red, then add interview sdist-manifest
 - A1 [who] covers: S1 · the request does not say who may widen the allowlist later; taking: anyone may edit
   pyproject.toml, and S2 is what makes a widening visible in review rather than at upload time
   -> a silent re-widening lands exactly the way this defect landed, and nobody sees it until PyPI does.
-- A2 [which] covers: S1 · the request says "explicit include list" but names no entries; taking:
-  `src/yowo`, `tests`, `README.md`, `LICENSE`, `CHANGELOG.md`, `pyproject.toml` in — and `docs/`, `bench/`,
-  `examples/`, `.github/`, `CLAUDE.md`, `CONTEXT.md`, `uv.lock`, `chroma/` out
+- A2 [which] covers: S1 · the request says "explicit include list" but names no entries; the HUMAN DECIDED
+  the set: `src/yowo`, `README.md`, `LICENSE`, `CHANGELOG.md`, `pyproject.toml` in — and `tests`, `docs/`,
+  `bench/`, `examples/`, `.github/`, `CLAUDE.md`, `CONTEXT.md`, `uv.lock`, `chroma/` out. `tests` was in my
+  reading and was taken OUT on their instruction; see A6.
   · probe: a built sdist's top-level entries equal that set exactly
   · found: the entry set is right, but `include` is the WRONG KEY — with
     `[tool.hatch.build.targets.sdist] include = [...]` the sdist still carried `.add/`, `bench/`, `docs/`
@@ -89,9 +96,12 @@ beat: direction · next: run the checks red, then add interview sdist-manifest
   · probe: removing LICENSE from the allowlist's expected set must fail the verifier
   -> an sdist ships with no LICENSE and the Apache-2.0 attribution obligation goes unmet.
 - A5 [order] n/a · an include list has no ordering semantics; hatchling applies the patterns as a set.
-- A6 [experience] covers: S1 · the request does not say who receives the sdist; taking: downstream
-  repackagers (Debian, conda-forge, nixpkgs) who build from source and expect to run the suite, which is
-  why `tests` stays IN despite adding weight -> distros that cannot validate a build drop the package.
+- A6 [experience] covers: S1 · the request does not say who receives the sdist; my reading was downstream
+  repackagers (Debian, conda-forge, nixpkgs) who build from source and expect to run the suite, so `tests`
+  should stay IN. The HUMAN REVERSED this: the sdist is a build input, not a test bundle, and anyone
+  validating yowo runs the suite from the git repo. `tests` is OUT.
+  -> a distro whose policy requires an in-tarball test suite cannot validate a build and may decline to
+     package yowo. Knowingly accepted; reversible by adding one line to `only-include` if it ever bites.
 - A7 [who] covers: S2 · the request does not say whether this job gates merge; taking: it runs on every PR
   but this task does NOT add it to the branch-protection required contexts — that is a human action, and
   `pypi-trusted-publish` is the node that should own promoting it
@@ -128,7 +138,8 @@ beat: direction · next: run the checks red, then add interview sdist-manifest
 
 ## PLAN
 contract:
-  - S1 `[tool.hatch.build.targets.sdist]` with `only-include = [...]` naming exactly the A2 set.
+  - S1 `[tool.hatch.build.targets.sdist]` with `only-include = [...]` naming exactly the A2 set
+    (`src/yowo`, `README.md`, `LICENSE`, `CHANGELOG.md`, `pyproject.toml` — no `tests`).
     NOT `include` — probe-falsified above; `include` adds to the sweep instead of replacing it.
   - S2 a job appended to ci.yml (id `sdist`, name `Source Distribution`), registered in `FROZEN_JOB_IDS`.
   - S3 `scripts/verify_sdist_contents.py` — `build() -> (sdist_path, wheel_path)`, `violations(...) -> list[str]`,

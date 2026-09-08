@@ -21,7 +21,9 @@ RELEASE = WORKFLOWS / "release.yml"
 
 # The frozen job-id set. A later task ADDS an id here in the same commit that adds
 # the job; it never reuses or renames one (task pr-ci-gate, A11).
-FROZEN_JOB_IDS = {"quality"}
+# `sdist` appended by task sdist-manifest — registered here in the same commit,
+# which is what makes an append deliberate rather than silent drift.
+FROZEN_JOB_IDS = {"quality", "sdist"}
 
 # The four quality commands both gates must run identically (task pr-ci-gate, M2).
 _QUALITY_MARKERS = ("ruff check", "ruff format", "pyright", "pytest tests/unit")

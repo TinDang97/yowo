@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 1
+delta_seq: 2
 ---
 ## Now
 
@@ -45,5 +45,6 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M2 · open · 2026-09-08] hatchling's sdist `include` ADDS to a whole-repo sweep; only `only-include` restricts it. A probe before freeze caught this — the contract would have frozen the wrong key and shipped green checks over a still-broken artifact. (evidence: /tasks/sdist-manifest.md)
 - [ADD · M1 · open · 2026-09-08] A roadmap drafted as milestones + tasks with dependencies written in prose is a partition, not a DAG. 'milestone:' is the ONE edge key that accepts a bare slug (add.py:452); every other key — depends_on: included — needs a full '/tasks/<slug>.md' cid or the value stays silently unresolved and yields no edge. Symptom: graph.json shows only milestone edges, and 'add status' walks slug order, so the resume point lands in a late milestone on a task whose real prerequisites do not exist yet. Draw depends_on edges when the tasks are created, then confirm with 'add wave <milestone>' that the levels match the intended order. (evidence: 25e907e)
   discipline CLAUDE.md already established.
