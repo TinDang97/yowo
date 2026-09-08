@@ -68,7 +68,18 @@ beat: direction · next: run the checks red, then add interview sdist-manifest
   `src/yowo`, `tests`, `README.md`, `LICENSE`, `CHANGELOG.md`, `pyproject.toml` in — and `docs/`, `bench/`,
   `examples/`, `.github/`, `CLAUDE.md`, `CONTEXT.md`, `uv.lock`, `chroma/` out
   · probe: a built sdist's top-level entries equal that set exactly
-  -> an sdist missing a file the build backend needs cannot be built from source at all.
+  · found: the entry set is right, but `include` is the WRONG KEY — with
+    `[tool.hatch.build.targets.sdist] include = [...]` the sdist still carried `.add/`, `bench/`, `docs/`
+    and `.gitignore`, because hatchling's `include` ADDS to the default whole-repo sweep rather than
+    replacing it. `only-include` is the key that restricts. It also force-ships `.gitignore` whatever the
+    selection says, so `.gitignore` joins `PKG-INFO` as admitted-but-not-required.
+    With `only-include`: top level is exactly `src tests README.md LICENSE CHANGELOG.md pyproject.toml`
+    plus `PKG-INFO` and `.gitignore`; sdist 5.99 MB -> 468K, wheel 292K; `src/yowo/` nests correctly; the
+    E1 and R:BINARY checks flip green. (evidence: `uv build --out-dir /tmp/probe-dist` on a scratch
+    pyproject, reverted; 5 failing checks -> 3, the 3 remaining being the CI job and the two assertions
+    this finding corrected.)
+  -> an sdist missing a file the build backend needs cannot be built from source at all; and, as found,
+     freezing `include` would have shipped a contract that reads strict and behaves as a whole-repo sweep.
 - A3 [when] covers: S1 · the request does not say whether this applies to already-published releases;
   taking: forward-only — 2.4.0 and 2.4.1 are a separate human decision (yank), not something a build
   config can reach -> the AGPL weight stays reachable on PyPI while we believe this task fixed it.
@@ -117,7 +128,8 @@ beat: direction · next: run the checks red, then add interview sdist-manifest
 
 ## PLAN
 contract:
-  - S1 `[tool.hatch.build.targets.sdist]` with an explicit `include = [...]` naming exactly the A2 set.
+  - S1 `[tool.hatch.build.targets.sdist]` with `only-include = [...]` naming exactly the A2 set.
+    NOT `include` — probe-falsified above; `include` adds to the sweep instead of replacing it.
   - S2 a job appended to ci.yml (id `sdist`, name `Source Distribution`), registered in `FROZEN_JOB_IDS`.
   - S3 `scripts/verify_sdist_contents.py` — `build() -> (sdist_path, wheel_path)`, `violations(...) -> list[str]`,
     `--junitxml=PATH`, exit non-zero on any violation or on a build that produced no artifact.

@@ -23,12 +23,13 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-# The allowlist (A2). PKG-INFO is synthesised by the build backend and is always
-# present in an sdist, so it is admitted but never required of the source tree.
+# The allowlist (A2). PKG-INFO is synthesised by the build backend, and hatchling
+# force-ships the VCS ignore file whatever the selection says (verified by probe).
+# Both are admitted but never required of the source tree.
 REQUIRED_ENTRIES = frozenset(
     {"src", "tests", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"}
 )
-GENERATED_ENTRIES = frozenset({"PKG-INFO"})
+GENERATED_ENTRIES = frozenset({"PKG-INFO", ".gitignore"})
 ALLOWED_ENTRIES = REQUIRED_ENTRIES | GENERATED_ENTRIES
 
 # R:BINARY — no model weight, checkpoint or exported artifact, anywhere in either

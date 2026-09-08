@@ -97,11 +97,16 @@ def test_no_binary_artifact_in_either_distribution(built: tuple[Path, Path]) -> 
 
 
 def test_pyproject_declares_an_explicit_sdist_include_list() -> None:
-    """covers: R:SWEEP — no include list means a whole-repo sweep."""
+    """covers: R:SWEEP — only `only-include` restricts; `include` does not.
+
+    Probe evidence: with `include = [...]` the sdist still carried .add/, bench/,
+    docs/ and .gitignore. `only-include` is the key that actually narrows it.
+    """
     config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
     sdist_target = config["tool"]["hatch"]["build"]["targets"]["sdist"]
-    assert sdist_target.get("include"), (
-        "an empty or absent include list makes hatchling sweep the whole repo"
+    assert sdist_target.get("only-include"), (
+        "hatchling's `include` ADDS to a whole-repo sweep; only `only-include` "
+        "restricts it. An empty or absent only-include re-widens the artifact."
     )
 
 
