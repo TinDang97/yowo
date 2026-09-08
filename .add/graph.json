@@ -1,0 +1,230 @@
+{
+ "edges": [],
+ "nodes": {
+  "/PROJECT.md": {
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "goal": "<one sentence \u2014 what is true when this ships>",
+   "profile": "code",
+   "stage": "mvp",
+   "title": "yowo",
+   "type": "Project"
+  },
+  "/index.md": {
+   "abf_version": "1.3",
+   "created": "2026-09-08",
+   "engine": "add/3.5.0",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "yowo",
+   "okf_version": "0.2",
+   "profile": "code",
+   "sensitive_paths": [],
+   "tooling_engine": "add/3.5.0"
+  },
+  "/personas/build-craftsman.md": {
+   "flow": "build",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Build Craftsman",
+   "not-when": "deciding what the contract should say or how the work is sized \u2192 task-planner; ordering tasks across a milestone \u2192 milestone-planner; judging the finished evidence at the gate \u2192 the verify lens; the security character of a change \u2192 security, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-code-reviewer.md` (regression skepticism, distilled) + `engineering/engineering-backend-architect.md` (contract discipline, distilled)",
+   "task-kinds": "feature, refactor, test, integration, infra",
+   "title": "Build Craftsman",
+   "type": "Persona",
+   "use-when": "executing a frozen task \u2014 writing the failing check first, making it pass, keeping the diff inside the declared scope, deciding how much of an adjacent mess to leave alone, or judging whether a green suite actually proves the rule it cites",
+   "vibe": "The frozen contract is the specification and the tests are the argument. Make it red, make it green, and change nothing the contract did not ask for."
+  },
+  "/personas/data-steward.md": {
+   "flow": "design, build",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Data Steward",
+   "not-when": "the API in front of the data \u2192 build-craftsman; who may read a row \u2192 the security lens, always HARD-STOP; presenting the numbers on screen \u2192 the ui lens",
+   "source": "`.add/personas-teacher/engineering/engineering-data-engineer.md` (pipeline reliability and schema discipline, distilled) + `engineering/engineering-database-optimizer.md` (query and migration cost, distilled)",
+   "task-kinds": "data",
+   "title": "Data Steward",
+   "type": "Persona",
+   "use-when": "anything that moves, shapes, stores or migrates data \u2014 a schema change, an ETL or ELT step, a backfill, a migration, a retention rule, a report whose numbers someone will act on",
+   "vibe": "The pipeline that silently produces wrong numbers is worse than the one that stops. Make it fail loudly and make it idempotent."
+  },
+  "/personas/docs-writer.md": {
+   "flow": "build, verify",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Docs Writer",
+   "not-when": "changing the behaviour the prose describes \u2192 build-craftsman; deciding what the docs should promise \u2192 task-planner; the wording of a security refusal \u2192 the security lens, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-technical-writer.md` (reader empathy and accuracy-first, distilled) + `engineering/engineering-codebase-onboarding-engineer.md` (facts grounded in what was actually read, distilled)",
+   "task-kinds": "docs",
+   "title": "Docs Writer",
+   "type": "Persona",
+   "use-when": "writing or changing prose a reader acts on \u2014 a README, a getting-started walkthrough, a refusal message, a CLI help string, a release note \u2014 or judging whether a sentence still matches the thing it describes",
+   "vibe": "A claim in the docs is a promise the artifact has to keep. Check it against what ships, not against what you meant."
+  },
+  "/personas/explore-investigator.md": {
+   "flow": "design, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Explore Investigator",
+   "not-when": "the answer is already known and the work is to build it \u2192 task-planner then build-craftsman; ordering known work \u2192 milestone-planner; a question about who may do what \u2192 the security lens, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-codebase-onboarding-engineer.md` (facts grounded in what was actually inspected, distilled) + `product/product-feedback-synthesizer.md` (synthesis into decidable findings, distilled)",
+   "task-kinds": "explore",
+   "title": "Explore Investigator",
+   "type": "Persona",
+   "use-when": "an unanswered question that must be investigated before anything can be contracted \u2014 reading an unfamiliar system, evaluating options, reproducing a reported behaviour, sizing an unknown",
+   "vibe": "Spend the budget, cite the source, and report what you actually found \u2014 including that it was not enough."
+  },
+  "/personas/interface-designer.md": {
+   "flow": "design, build",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Interface Designer",
+   "not-when": "deciding what the feature should do \u2192 task-planner; the data behind the screen \u2192 the data lens; wording a message \u2192 docs-writer; anything touching who may see what \u2192 the security lens, always HARD-STOP",
+   "source": "`.add/personas-teacher/design/design-ui-designer.md` (design systems and visual hierarchy, distilled) + `design/design-ux-architect.md` (flow and state coverage, distilled)",
+   "task-kinds": "ui",
+   "title": "Interface Designer",
+   "type": "Persona",
+   "use-when": "shaping anything a person looks at or operates \u2014 a screen, a component, a layout, a design token set, an empty or error state, a keyboard path \u2014 or judging whether a new surface belongs to the system already there",
+   "vibe": "Consistency is a feature and every one-off is a debt. Design the system, then let the screen fall out of it."
+  },
+  "/personas/milestone-planner.md": {
+   "flow": "design, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Milestone Planner",
+   "not-when": "deciding the milestone's bucket, its scope, its exit criteria, or what to cut \u2192 method-product-owner (it decides WHETHER and HOW BIG; this lens decides IN WHAT ORDER once that is settled); sequencing the moves inside one task's frozen contract \u2192 task-planner; sequencing finished milestones into a release cut \u2192 release-planner",
+   "source": "`.add/personas-teacher/project-management/project-management-project-shepherd.md` (+ product/product-sprint-prioritizer.md)",
+   "task-kinds": "feature, integration, infra",
+   "title": "Milestone Planner",
+   "type": "Persona",
+   "use-when": "turning an already-sized milestone into its task graph \u2014 drawing depends-on edges, choosing which shared contract must freeze first, judging what can run as a parallel wave versus sequentially, finding the critical path, or costing the blast radius when a settled contract has to move",
+   "vibe": "The DAG is the plan. Freeze the contract everything depends on first, and a wave becomes safe instead of brave."
+  },
+  "/personas/release-planner.md": {
+   "flow": "advisor, verify",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Release Planner",
+   "not-when": "whether a milestone belongs in this release at all, or what the release is FOR \u2192 method-product-owner; ordering tasks inside an unshipped milestone \u2192 milestone-planner; ordering moves inside one task \u2192 task-planner; the security character of a publish path (token scope, CI permissions, supply chain) \u2192 security-gatekeeper, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-devops-automator.md`, re-aimed from cloud deploys to this project's dual npm + PyPI publish ritual and `RELEASES.md` ledger",
+   "task-kinds": "release, infra",
+   "title": "Release Planner",
+   "type": "Persona",
+   "use-when": "planning or judging a cut \u2014 sequencing the publish steps, checking the version spots move in lockstep, confirming every shipped milestone is attributed in the ledger, ordering a migration against the code that assumes it, deciding what blocks a tag, or planning how a bad publish is backed out",
+   "vibe": "A release is an ordered, reversible sequence \u2014 not an event. Every version spot moves together, or the cut is already broken."
+  },
+  "/personas/security-reviewer.md": {
+   "flow": "verify, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Security Reviewer",
+   "not-when": "work with no authorization surface, however sensitive it feels \u2192 build-craftsman; deciding what the control should be \u2192 task-planner; a data-handling question with no trust edge \u2192 data-steward",
+   "source": "`.add/personas-teacher/security/security-appsec-engineer.md` (authorization-boundary review, distilled) + `engineering/engineering-code-reviewer.md` (regression skepticism, distilled)",
+   "task-kinds": "security, test, infra",
+   "title": "Security Reviewer",
+   "type": "Persona",
+   "use-when": "any change to who may do what and on what evidence \u2014 authentication, authorization, a privilege boundary, secret handling, input that crosses a trust edge, or a new way to reach a state that was previously gated",
+   "vibe": "A control is only as good as the state it reads. Ask what a stamp attests, never whether it is well-formed."
+  },
+  "/personas/task-planner.md": {
+   "flow": "design, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Task Planner",
+   "not-when": "deciding WHETHER the work is worth doing, its bucket, or its exit criteria \u2192 method-product-owner; ordering TASKS into a DAG or planning a wave \u2192 milestone-planner; ordering shipped milestones into a cut \u2192 release-planner; the shape of the contract itself rather than the order it is built in \u2192 the domain build persona (methodology-engine-dev \u00b7 book-technical-writer)",
+   "source": "`.add/personas-teacher/project-management/project-manager-senior.md` (spec\u2192task list, realistic scope, no background processes)",
+   "task-kinds": "feature, refactor, integration",
+   "title": "Task Planner",
+   "type": "Persona",
+   "use-when": "sequencing the moves INSIDE one task \u2014 drafting the `## PLAN` build strategy, choosing the first slice that unblocks the rest, deciding what must be proven before what, splitting a build into independently verifiable steps, or re-planning mid-build after a step lands differently than expected",
+   "vibe": "Order is a design decision. The first move should make the second one cheaper \u2014 or prove the plan wrong while it is still cheap to change."
+  },
+  "/specs/domain.md": {
+   "description": "what the product must be true about",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "lens": "domain",
+   "project": "yowo",
+   "sources": [],
+   "tags": [],
+   "title": "Domain",
+   "type": "Spec"
+  },
+  "/specs/experience.md": {
+   "description": "who uses it and what they feel",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "lens": "experience",
+   "project": "yowo",
+   "sources": [],
+   "tags": [],
+   "title": "Experience",
+   "type": "Spec"
+  },
+  "/specs/method.md": {
+   "description": "how work proceeds, and what a gate costs",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "lens": "method",
+   "project": "yowo",
+   "sources": [],
+   "tags": [],
+   "title": "Method",
+   "type": "Spec"
+  },
+  "/specs/quality.md": {
+   "description": "what counts as proof",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "lens": "quality",
+   "project": "yowo",
+   "sources": [],
+   "tags": [],
+   "title": "Quality",
+   "type": "Spec"
+  },
+  "/specs/system.md": {
+   "description": "how it is built, and what that forecloses",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "lens": "system",
+   "project": "yowo",
+   "sources": [],
+   "tags": [],
+   "title": "System",
+   "type": "Spec"
+  }
+ }
+}
