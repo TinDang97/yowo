@@ -133,3 +133,37 @@ def test_pypi_upload_does_not_rebuild_the_artifact(publish_job: dict) -> None:
     assert "uv build" not in runs and "python -m build" not in runs, (
         "the publish job must upload the built artifact, never rebuild it"
     )
+
+
+def test_release_job_writes_the_released_output(release: dict) -> None:
+    """covers: M1 — an output that is referenced but never written skips silently.
+
+    `publish` is gated on `needs.release.outputs.released`. python-semantic-release
+    sets that output only when used as a GitHub Action; run as a plain command it
+    sets nothing, so the gate would always be false and every job would still be
+    green. Nothing else in the suite can see that.
+    """
+    job = release["jobs"]["release"]
+    assert "released" in job.get("outputs", {}), "the release job declares no `released` output"
+    runs = " ".join(s.get("run", "") for s in _steps(job))
+    assert "released=true" in runs and "GITHUB_OUTPUT" in runs, (
+        "`released` is referenced but never written to $GITHUB_OUTPUT"
+    )
+
+
+def test_release_permissions_are_least_privilege(release: dict) -> None:
+    """covers: M3 — a job that only reads the repo must not inherit write.
+
+    Found by the security residue lens during Verify, not by a frozen rule:
+    workflow-level `contents: write` was being inherited by the two gate jobs,
+    which never write anything.
+    """
+    assert release["permissions"] == {"contents": "read"}, (
+        "the workflow-level default must be read-only"
+    )
+    assert release["jobs"]["release"]["permissions"] == {"contents": "write"}
+    assert release["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+    for job in ("quality", "sdist"):
+        assert "permissions" not in release["jobs"][job], (
+            f"{job} only reads; it should inherit the read-only default"
+        )

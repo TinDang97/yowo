@@ -1,7 +1,7 @@
 ---
 type: Task
 title: OIDC trusted publishing, every release tool pinned
-status: direction
+status: done
 depth: standard
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -15,7 +15,15 @@ gives:
 depends_on:
   - /tasks/sdist-manifest.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-08, act: interview, authority: human, interview: "sha256:7fefa6b6c5ea7025", receipt: /tasks/pypi-trusted-publish.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:SECRET=confirm|R:UNGATED=confirm" }
+  - { by: "Tin Dang", at: 2026-09-08, act: freeze, authority: human, direction: "sha256:be89099f775501a7", binding: "sha256:b85b43f28c97dd59" }
+  - { by: "cli", at: 2026-09-08, act: brief, authority: process, brief: "sha256:4a776d4ccfd140dd" }
+  - { by: "builder", at: 2026-09-08, act: replan, authority: process, note: "Build discovered that python-semantic-release sets a `released` step output only when used as a GitHub Action; invoked as a plain `run:` command it sets nothing. The publish job is gated on that output, so PyPI publishing would have silently never run while every job stayed green — the exact limit the CHECKS honesty note predicted. Wrote the output by hand from a populated dist/, and ADDED a 10th check (test_release_job_writes_the_released_output). Adding a check strengthens the contract; no existing check was changed and no frozen `gives:` moved." }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pypi-trusted-publish.d/runs/1.md }
+  - { by: "builder", at: 2026-09-08, act: replan, authority: process, note: "Verify's security residue lens found workflow-level `permissions: contents: write` being inherited by the `quality` and `sdist` jobs, which never write. Pre-existing, not introduced by this task, and not exploitable on its own — jobs run trusted code from main — so a hardening opportunity rather than a HARD-STOP finding. Scoped permissions per job (workflow default read-only; `release` gets contents:write, `publish` gets id-token:write) and added an 11th check so it cannot silently regress." }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pypi-trusted-publish.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-08, act: gate, authority: human, outcome: PASS, receipt: /tasks/pypi-trusted-publish.d/runs/2.md, brief: "sha256:5a1a56a438cac27f" }
 advised_by: release-planner
 ---
 ## CARD
@@ -78,7 +86,7 @@ scope widened during Direction (the node is unfrozen, so this is authoring, not 
 
 ordering: `depends_on: sdist-manifest` is deliberate and must hold — automating publication of an artifact
 that is still a whole-repo sweep would only make the defect faster.
-beat: scaffold · next: author pypi-trusted-publish's RULES, ASSUMPTIONS and CHECKS, then add freeze pypi-trusted-publish
+beat: done · next: add status
 
 ## RULES
 <must>
