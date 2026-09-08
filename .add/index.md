@@ -51,6 +51,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 - [Report the backend that executed, never the one requested](tasks/benchmark-truth.md) — `direction` · `standard`
 - [Postprocess cost bounded independent of scene content](tasks/bounded-postprocess.md) — `direction` · `standard`
 - [Every blocking I/O call bounded by a stated timeout](tasks/capture-timeouts.md) — `direction` · `standard`
+- [One check-run name per workflow, so the required context is unambiguous](tasks/check-name-collision.md) — `direction` · `quick`
 - [CI runs the support surface the package claims, or the claim narrows](tasks/ci-matrix.md) — `direction` · `standard` · `architecture`
 - [A cached, integrity-verified model weight CI can reach](tasks/ci-weight-fixture.md) — `direction` · `standard` · `data`
 - [Live sources stream results instead of accumulating them](tasks/cli-bounded-memory.md) — `direction` · `standard`
@@ -69,7 +70,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 - [An mAP baseline on a real dataset, enforced](tasks/map-regression-gate.md) — `direction` · `deep`
 - [No reported value that was not measured; drops reach the operator](tasks/metrics-truth.md) — `direction` · `standard`
 - [A self-contained artifact, and a recorded opset that is the produced opset](tasks/onnx-external-data.md) — `direction` · `standard`
-- [The quality gate runs before merge, not after](tasks/pr-ci-gate.md) — `direction` · `quick`
+- [The quality gate runs before merge, not after](tasks/pr-ci-gate.md) — `done` · `standard`
 - [Precision reaches the executing backend, or leaves the surface](tasks/precision-plumbing.md) — `direction` · `deep` · `architecture`
 - [Every public name deliberate, in __all__, leaking no private type](tasks/public-surface-audit.md) — `direction` · `deep` · `architecture`
 - [OIDC trusted publishing, every release tool pinned](tasks/pypi-trusted-publish.md) — `direction` · `standard` · `security`

@@ -1,7 +1,7 @@
 ---
 type: Task
 title: The quality gate runs before merge, not after
-status: direction
+status: done
 depth: standard
 milestone: m1-trust-the-ship
 scope:
@@ -19,12 +19,17 @@ verified:
   - { by: "Tin Dang", at: 2026-09-08, act: freeze, authority: human, direction: "sha256:f98bc5dcf2027e9e", binding: "sha256:666ebb922435c321" }
   - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/1.md }
   - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-08, act: refreeze, authority: human, direction: "sha256:4b251423ca8fe31e", binding: "sha256:666ebb922435c321" }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/3.md }
+  - { by: "cli", at: 2026-09-08, act: brief, authority: process, brief: "sha256:df21baee75937fd3" }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-08, act: gate, authority: human, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/4.md, brief: "sha256:df21baee75937fd3" }
 advised_by: release-planner
 ---
 ## CARD
 goal: A pull request cannot merge without the quality gate having run on it.
 why: The gate's content is already good — it runs after the merge it was meant to guard, and six later tasks need a `ci.yml` that does not yet exist to append their jobs to.
-beat: direction · next: run the checks red, then add freeze pr-ci-gate
+beat: done · next: add status
 
 ## RULES
 <must>
