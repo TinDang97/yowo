@@ -2,7 +2,7 @@
 type: Task
 title: The quality gate runs before merge, not after
 status: direction
-depth: quick
+depth: standard
 milestone: m1-trust-the-ship
 scope:
   - .github/workflows/ci.yml
@@ -17,6 +17,8 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-08, act: interview, authority: human, interview: "sha256:4e01440a957dcae9", receipt: /tasks/pr-ci-gate.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|R:SILENT_PASS=confirm|R:DIVERGENCE=confirm" }
   - { by: "Tin Dang", at: 2026-09-08, act: freeze, authority: human, direction: "sha256:f98bc5dcf2027e9e", binding: "sha256:666ebb922435c321" }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/pr-ci-gate.d/runs/2.md }
 advised_by: release-planner
 ---
 ## CARD
@@ -75,12 +77,12 @@ regression floor: the existing unit suite stays green; `release.yml` is byte-unc
 - E3 Protection is enabled naming a required context GitHub has never observed — the API accepts it, and every merge blocks forever on a check that will never report. A9's ordering exists to prevent this; the verify script must catch it if the ordering is violated.
 
 ## CHECKS
-- test_ci_workflow_triggers_on_pull_request · covers: G1 · loads `ci.yml` with `yaml.safe_load` and asserts `pull_request` is a key of the parsed `on:` mapping with `main` in its `branches` — catches E1, since `on: pull-request` parses fine and fails this.
-- test_ci_job_ids_are_the_frozen_set · covers: G2 · asserts the job-id set is exactly `{"quality"}`, so any later append is a deliberate edit of this assertion rather than a silent addition — catches E2.
-- test_ci_runs_the_same_four_quality_commands_as_release · covers: G2 · parses both workflows and asserts `ci.yml`'s step `run:` commands for ruff/format/pyright/pytest are equal to `release.yml`'s — binds R:DIVERGENCE.
-- test_ci_has_no_silently_passing_step · covers: G2 · asserts no step in `ci.yml` carries `continue-on-error: true` and no `run:` contains `|| true` — binds R:SILENT_PASS.
-- test_required_check_name_matches_published_job_name · covers: G3 · asserts the check name recorded in the required-checks doc equals the `name:` the `quality` job publishes — binds A6's probe, and catches protection configured against a name that never reports.
-- verify_branch_protection · covers: G3 · `scripts/verify_branch_protection.py` queries `repos/TinDang97/yowo/branches/main/protection` and asserts `required_status_checks.contexts` contains the published job name AND `enforce_admins.enabled is true`; exits non-zero and emits JUnit XML otherwise — binds M5. Currently red for the strongest possible reason: the endpoint returns 404 `Branch not protected`.
+- test_ci_workflow_triggers_on_pull_request · covers: M1, E1 · loads `ci.yml` with `yaml.safe_load` and asserts `pull_request` is a key of the parsed `on:` mapping with `main` in its `branches` — catches E1, since `on: pull-request` parses fine and fails this.
+- test_ci_job_ids_are_the_frozen_set · covers: M3, E2 · asserts the job-id set is exactly `{"quality"}`, so any later append is a deliberate edit of this assertion rather than a silent addition — catches E2.
+- test_ci_runs_the_same_four_quality_commands_as_release · covers: M2, R:DIVERGENCE · parses both workflows and asserts `ci.yml`'s step `run:` commands for ruff/format/pyright/pytest are equal to `release.yml`'s — binds R:DIVERGENCE.
+- test_ci_has_no_silently_passing_step · covers: R:SILENT_PASS · asserts no step in `ci.yml` carries `continue-on-error: true` and no `run:` contains `|| true` — binds R:SILENT_PASS.
+- test_required_check_name_matches_published_job_name · covers: M4, A6 · asserts the check name recorded in the required-checks doc equals the `name:` the `quality` job publishes — binds A6's probe, and catches protection configured against a name that never reports.
+- verify_branch_protection · covers: M5, E3 · `scripts/verify_branch_protection.py` queries `repos/TinDang97/yowo/branches/main/protection` and asserts `required_status_checks.contexts` contains the published job name AND `enforce_admins.enabled is true`; exits non-zero and emits JUnit XML otherwise — binds M5. It ALSO asserts GitHub has actually reported a check-run named `Quality Gate` against the commit under test, which is what binds E3: a context set in protection but never observed is accepted by the API and then blocks every merge forever, and a string-equality check on the context name cannot see that.
 red-first: every check MUST fail first.
 
 ## EVIDENCE
@@ -88,4 +90,5 @@ receipt: <runs/<n>.md>
 gate: <PASS | RISK-ACCEPTED | HARD-STOP>
 
 ## LESSONS
-- <lesson> -> add learn <lens>
+- `release.yml`'s `quality` job and `ci.yml`'s both publish the check-run name `Quality Gate`, so the required-status-check context is ambiguous between the two workflows. Harmless for merges — only `ci.yml` runs on a `pull_request` event — but it means a live "was this context observed?" assertion can be satisfied by the wrong workflow, and the first RED demonstration of E3 had to be taken against a commit with no check-runs at all rather than against `main`. Worth resolving when `ci-matrix` restructures the workflows. -> add learn add
+- Direction defect caught at the gate, not by review: this node declared M1-M5, two Rejects, E1-E3 and a probed A6, but every CHECKS line cited a `gives:` surface (G1/G2/G3). The engine binds EVERY referent a node names, so eleven rules had no reported passing check and `gate PASS` refused. Ten were mislabelled — the checks already proved them. One, E3, was genuinely uncovered. Writing rules at one depth's shape while binding checks at another's vocabulary produces a node that looks complete and proves less than it claims. -> add learn tdd
