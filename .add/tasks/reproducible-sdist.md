@@ -138,7 +138,8 @@ Regenerate with:
 
 Toolchain that produced them — a digest without these is reproducible by nobody (A3, A14):
 
-    commit    the commit that adds this record, on branch fix/m1-version-and-check-names
+    commit    a8c81e3 (branch fix/m1-version-single-source), verified to reproduce
+              both digests above after the three m1 commits landed
     python    3.11.15
     hatchling resolved by uv build isolation
     uv        0.10.11

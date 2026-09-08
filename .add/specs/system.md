@@ -7,6 +7,7 @@ description: how it is built, and what that forecloses
 tags: [python, multi-backend, packaging, ci]
 sources: [pyproject.toml, .github/workflows/release.yml, src/yowo/, tests/]
 generated: { by: add/3.5.0, at: 2026-09-08 }
+delta_seq: 1
 ---
 ## Now
 
@@ -63,4 +64,5 @@ run by one workflow — `.github/workflows/release.yml` — on push to `main`, o
 
 ## Deltas
 - 2026-09-08 · bundle initialised; system authored from `pyproject.toml`, the single workflow, and
+- [SDD · S1 · open · 2026-09-09] A milestone exit box can hold more clauses than the task pointed at it. Author RULES from the BOX, not from the task title, or the gate goes green on a contract that covers a third of what was asked. (evidence: /tasks/reproducible-sdist.md)
   the module tree as they stand at v2.5.0.
