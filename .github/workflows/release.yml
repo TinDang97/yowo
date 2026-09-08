@@ -18,7 +18,11 @@ permissions:
 
 jobs:
   quality:
-    name: Quality Gate
+    # `(release)` suffix, not a bare name: ci.yml publishes `Quality Gate` and
+    # that string is what branch protection on `main` is configured with. Two
+    # workflows publishing one check-run name means a required check can be
+    # satisfied by the wrong run (task check-name-collision, R:AMBIGUOUS).
+    name: Quality Gate (release)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.4.0
@@ -50,7 +54,7 @@ jobs:
   # R:UNGATED — ci.yml's sdist job only runs on pull_request, so the push-to-main
   # path needs its own. Nothing publishes unless this and `quality` both pass.
   sdist:
-    name: Source Distribution
+    name: Source Distribution (release)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.4.0

@@ -1,7 +1,7 @@
 ---
 type: Task
 title: One check-run name per workflow, so the required context is unambiguous
-status: direction
+status: done
 depth: quick
 milestone: m1-trust-the-ship
 scope:
@@ -20,6 +20,8 @@ verified:
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:8ec63f789aebbec7", binding: "sha256:22249aa61fd2594e" }
   - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:7bf1a3c4aafb1378" }
   - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/check-name-collision.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/check-name-collision.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/check-name-collision.d/runs/2.md, brief: "sha256:fb46da10089bb6c7" }
 advised_by: release-planner
 ---
 ## CARD
@@ -33,7 +35,7 @@ same check-run name ci.yml already used. Two ambiguous names became four:
   release.yml quality -> 'Quality Gate'   sdist -> 'Source Distribution'
 Recorded because it shows the failure mode is live and re-occurring, not historical.
 
-beat: scaffold · next: author check-name-collision's RULES, ASSUMPTIONS and CHECKS, then add freeze check-name-collision
+beat: done · next: add status
 
 ## RULES
 <must>
