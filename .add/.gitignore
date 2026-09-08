@@ -17,3 +17,14 @@ pre-update-state.bak.json
 tooling/
 docs/
 personas-teacher/
+
+# Run receipts and the compiled graph — local working state, not durable bundle.
+# (Patterns are BARE because this file lives inside .add/, per the note above.)
+#
+# runs/*.md record the command, its exit code and a scope digest — all carrying
+# absolute machine-local paths (/private/tmp/..., /Users/...). The node itself
+# keeps what survives: the gate verdict, its authority, and the EVIDENCE block.
+# graph.json is a rebuildable cache; `add doctor --sync` regenerates it from the
+# nodes, so committing it only ever produces merge conflicts over derived data.
+tasks/*.d/runs/*.md
+graph.json
