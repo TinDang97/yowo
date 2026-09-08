@@ -73,6 +73,143 @@ def _remap_key(key: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Restricted checkpoint reading
+# ---------------------------------------------------------------------------
+
+# An ultralytics `.pt` stores its weights inside a pickled `nn.Module`, so reading
+# one with a stock unpickler means the FILE chooses what gets imported. That had two
+# consequences: `ultralytics` became an undeclared runtime dependency (a clean
+# install raised `ModuleNotFoundError: No module named 'ultralytics.nn.tasks'`), and
+# a checkpoint author held an import primitive.
+#
+# `weights_only=True` cannot fix it — it refuses the `nn.Module` the weights live
+# inside. So we drive `torch.load` with our own unpickler instead: torch's tensor
+# rebuild helpers and real `torch.nn` layers are constructed normally, every
+# `ultralytics.*` name resolves to an inert stub so the pickle stream can be walked
+# to the tensors it carries, and anything else is refused BY NAME without importing
+# the module it came from.
+#
+# Frozen by ADD task `checkpoint-loader`. Widening `_ALLOWED_*` is a change-request,
+# not a build detail — each entry carries why it is here.
+
+_ALLOWED_EXACT: frozenset[tuple[str, str]] = frozenset(
+    {
+        # Rebuilds a tensor from a storage + stride. The single global every
+        # torch checkpoint needs; constructs data, not behaviour.
+        ("torch._utils", "_rebuild_tensor_v2"),
+        ("torch._utils", "_rebuild_tensor"),
+        ("torch._utils", "_rebuild_parameter"),
+        # A tuple subclass carrying tensor shapes. Data, not behaviour — and the
+        # one global the hermetic fixtures did not exercise, caught by the
+        # equivalence floor against a real checkpoint.
+        ("torch", "Size"),
+        # Plain container used by older checkpoints for the state_dict itself.
+        ("collections", "OrderedDict"),
+    }
+    # Plain data containers. `nn.Module` keeps `_non_persistent_buffers_set` and
+    # friends, so a checkpoint legitimately names these. They construct data and
+    # nothing else — note `eval`, `exec`, `getattr` and `__import__` are absent
+    # from this list on purpose, and adding one is a change-request.
+    | {
+        (mod, name)
+        for mod in ("builtins", "__builtin__")
+        for name in ("set", "frozenset", "dict", "list", "tuple")
+    }
+)
+
+# Real torch layers (Conv2d, BatchNorm2d, Sequential, SiLU, …). They are the actual
+# modules the weights hang off; refusing them would refuse every checkpoint.
+_ALLOWED_PREFIXES: tuple[str, ...] = ("torch.nn.modules.", "torch.nn.parameter")
+
+# Typed storages live directly on `torch` (torch.FloatStorage, torch.HalfStorage, …).
+_ALLOWED_STORAGE_SUFFIX = "Storage"
+
+# Third-party model classes. Never constructed — stubbed, see `_InertModule`.
+_STUBBED_PREFIXES: tuple[str, ...] = ("ultralytics.", "models.")
+
+
+def _inert_module_cls() -> type:
+    """A stand-in for a checkpoint-named class, built lazily so torch stays deferred."""
+    import torch
+
+    class _InertModule(torch.nn.Module):
+        """Constructed in place of a foreign class; runs none of its code.
+
+        Subclasses ``nn.Module`` so that unpickling restores the original object's
+        ``_parameters`` / ``_buffers`` / ``_modules`` into something whose inherited
+        ``.float()`` and ``.state_dict()`` behave exactly as before. No method of
+        the class named by the checkpoint is ever reachable.
+        """
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__()
+
+    return _InertModule
+
+
+def _restricted_unpickler_module(checkpoint_path: Path):
+    """A `pickle_module` for `torch.load` whose `find_class` enforces the allowlist."""
+    import pickle
+    import types
+
+    from yowo.errors import ModelLoadError
+
+    inert = _inert_module_cls()
+
+    class _RestrictedUnpickler(pickle.Unpickler):
+        def find_class(self, module: str, name: str) -> object:
+            if (module, name) in _ALLOWED_EXACT:
+                return super().find_class(module, name)
+            if module.startswith(_ALLOWED_PREFIXES):
+                return super().find_class(module, name)
+            if module == "torch" and name.endswith(_ALLOWED_STORAGE_SUFFIX):
+                return super().find_class(module, name)
+            if module.startswith(_STUBBED_PREFIXES):
+                return inert
+            raise ModelLoadError(
+                f"Refusing to load {checkpoint_path}: the checkpoint asks for "
+                f"'{module}.{name}', which is not a weights primitive. A checkpoint "
+                f"that names arbitrary code is not just weights — treat this file as "
+                f"untrusted rather than looking for a flag to disable this check."
+            )
+
+    shim = types.ModuleType("yowo_restricted_pickle")
+    shim.Unpickler = _RestrictedUnpickler  # type: ignore[attr-defined]
+    shim.load = pickle.load  # type: ignore[attr-defined]
+    shim.Pickler = pickle.Pickler  # type: ignore[attr-defined]
+    shim.dump = pickle.dump  # type: ignore[attr-defined]
+    shim.dumps = pickle.dumps  # type: ignore[attr-defined]
+    shim.loads = pickle.loads  # type: ignore[attr-defined]
+    return shim
+
+
+def _safe_load(checkpoint_path: Path) -> object:
+    """`torch.load` the checkpoint through the restricted unpickler.
+
+    Raises:
+        ModelLoadError: If the file cannot be read, or names a global that is not
+            a weights primitive.
+    """
+    import torch
+
+    from yowo.errors import ModelLoadError
+
+    try:
+        return torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            weights_only=False,
+            pickle_module=_restricted_unpickler_module(checkpoint_path),
+        )
+    except ModelLoadError:
+        raise
+    except Exception as exc:
+        raise ModelLoadError(
+            f"Could not read checkpoint {checkpoint_path}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     """Load checkpoint and extract the float32 state_dict.
 
@@ -83,7 +220,7 @@ def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     """
     import torch
 
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = _safe_load(checkpoint_path)
 
     # Raw state_dict (unlikely but handle gracefully)
     if isinstance(ckpt, dict) and all(isinstance(v, torch.Tensor) for v in ckpt.values()):
