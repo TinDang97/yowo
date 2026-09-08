@@ -41,9 +41,7 @@ def _install_fake_ultralytics() -> None:
     tasks.DetectionModel = _Stand_in  # type: ignore[attr-defined]
     pkg.nn = nn  # type: ignore[attr-defined]
     nn.tasks = tasks  # type: ignore[attr-defined]
-    sys.modules.update(
-        {"ultralytics": pkg, "ultralytics.nn": nn, "ultralytics.nn.tasks": tasks}
-    )
+    sys.modules.update({"ultralytics": pkg, "ultralytics.nn": nn, "ultralytics.nn.tasks": tasks})
 
 
 def _remove_fake_ultralytics() -> None:
@@ -104,12 +102,10 @@ def test_loads_without_ultralytics_importable(
     assert all(isinstance(v, torch.Tensor) for v in sd.values())
 
 
-def test_refuses_a_foreign_global_by_name(
-    hostile_checkpoint: Path, _no_ultralytics: None
-) -> None:
+def test_refuses_a_foreign_global_by_name(hostile_checkpoint: Path, _no_ultralytics: None) -> None:
     """covers: M2, R:ARBITRARY_IMPORT, E2 — the checkpoint must not pick imports."""
-    from yowo.errors import ModelLoadError
     from yowo.arch._weights import _extract_state_dict
+    from yowo.errors import ModelLoadError
 
     with pytest.raises(ModelLoadError) as excinfo:
         _extract_state_dict(hostile_checkpoint)
@@ -153,8 +149,8 @@ def test_unreadable_checkpoint_raises_a_typed_yowo_error(
     tmp_path: Path, _no_ultralytics: None
 ) -> None:
     """covers: M5, A6, R:SILENT_PARTIAL — a typed error, never a raw UnpicklingError."""
-    from yowo.errors import ModelLoadError
     from yowo.arch._weights import _extract_state_dict
+    from yowo.errors import ModelLoadError
 
     path = tmp_path / "truncated.pt"
     path.write_bytes(b"not a checkpoint at all")

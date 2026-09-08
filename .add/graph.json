@@ -109,6 +109,18 @@
    "/milestones/m1-trust-the-ship.md"
   ],
   [
+   "/tasks/checkpoint-loader.d/interviews/1.md",
+   "task",
+   "/tasks/checkpoint-loader.md",
+   "/tasks/checkpoint-loader.md"
+  ],
+  [
+   "/tasks/checkpoint-loader.d/runs/1.md",
+   "task",
+   "/tasks/checkpoint-loader.md",
+   "/tasks/checkpoint-loader.md"
+  ],
+  [
    "/tasks/checkpoint-loader.md",
    "milestone",
    "m1-trust-the-ship",
@@ -401,6 +413,24 @@
    "milestone",
    "m2-survive-week-two",
    "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/narrow-loader-allowlist.md",
+   "depends_on",
+   "/tasks/checkpoint-loader.md",
+   "/tasks/checkpoint-loader.md"
+  ],
+  [
+   "/tasks/narrow-loader-allowlist.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/narrow-loader-allowlist.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
   ],
   [
    "/tasks/onnx-external-data.md",
@@ -1114,6 +1144,33 @@
    "type": "Task",
    "verified": []
   },
+  "/tasks/checkpoint-loader.d/interviews/1.md": {
+   "at": "2026-09-08",
+   "by": "Tin Dang",
+   "interview": "sha256:612eea024c436da8",
+   "task": "/tasks/checkpoint-loader.md",
+   "type": "Interview"
+  },
+  "/tasks/checkpoint-loader.d/runs/1.md": {
+   "computation": "\"bash -c",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "process:run"
+   },
+   "python3 /private/tmp/claude-501/-Users-tindang-workspaces-tind-repo-yowo/19f517be-1b38-4c34-8bcb-f464b06c7204/scratchpad/merge_junit.py ${TMPDIR": "-/tmp}/add-run.xml /private/tmp/claude-501/-Users-tindang-workspaces-tind-repo-yowo/19f517be-1b38-4c34-8bcb-f464b06c7204/scratchpad/c.xml /private/tmp/claude-501/-Users-tindang-workspaces-tind-repo-yowo/19f517be-1b38-4c34-8bcb-f464b06c7204/scratchpad/d.xml",
+   "receipt": {
+    "at": "2026-09-08",
+    "exit": "0",
+    "freshness": "content",
+    "ids": "5/5 reported",
+    "kind": "test-ids",
+    "note": "",
+    "stdout": "merged 5 case(s), 0 failure(s), 0 error(s) -> /var/folders/1j/dpmnj2ns0l9b36b65zjktclc0000gn/T//add-run.xml"
+   },
+   "runtime": "process",
+   "task": "/tasks/checkpoint-loader.md",
+   "type": "Run"
+  },
   "/tasks/checkpoint-loader.md": {
    "advised_by": "security-reviewer",
    "depth": "deep",
@@ -1122,18 +1179,64 @@
     "by": "add/3.5.0"
    },
    "gives": [
-    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+    "S1 `load_weights(model, checkpoint_path)` \u2014 the public entry that populates a native model from a .pt file",
+    "S2 the restrictive unpickler's accept/refuse decision \u2014 which pickled classes may be constructed while reading a checkpoint",
+    "S3 the error raised when a checkpoint cannot be read safely \u2014 the type and message a caller branches on"
    ],
    "milestone": "m1-trust-the-ship",
    "scope": [
     "src/yowo/arch/_weights.py",
-    "tests/unit/test_checkpoint_loader.py"
+    "tests/unit/test_checkpoint_loader.py",
+    "scripts/verify_checkpoint_equivalence.py",
+    "tests/fixtures/checkpoint_reference.json"
    ],
    "sensitivity": "security",
-   "status": "direction",
+   "status": "done",
    "title": "Load an ultralytics .pt without ultralytics, and without unpickling foreign code",
    "type": "Task",
-   "verified": []
+   "verified": [
+    {
+     "act": "interview",
+     "answers": "A1=confirm|A2=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:ARBITRARY_IMPORT=confirm|R:SILENT_PARTIAL=confirm",
+     "at": "2026-09-08",
+     "authority": "human",
+     "by": "Tin Dang",
+     "interview": "sha256:612eea024c436da8",
+     "receipt": "/tasks/checkpoint-loader.d/interviews/1.md"
+    },
+    {
+     "act": "freeze",
+     "at": "2026-09-08",
+     "authority": "human",
+     "binding": "sha256:5e828bdea5ba3705",
+     "by": "Tin Dang",
+     "direction": "sha256:a4ec5ff62314901a"
+    },
+    {
+     "act": "brief",
+     "at": "2026-09-08",
+     "authority": "process",
+     "brief": "sha256:0c05949e3f580ecf",
+     "by": "cli"
+    },
+    {
+     "act": "run",
+     "at": "2026-09-08",
+     "authority": "process",
+     "by": "process:run",
+     "outcome": "PASS",
+     "receipt": "/tasks/checkpoint-loader.d/runs/1.md"
+    },
+    {
+     "act": "gate",
+     "at": "2026-09-08",
+     "authority": "human",
+     "brief": "sha256:0c901e22456a9ae0",
+     "by": "Tin Dang",
+     "outcome": "PASS",
+     "receipt": "/tasks/checkpoint-loader.d/runs/1.md"
+    }
+   ]
   },
   "/tasks/ci-matrix.md": {
    "advised_by": "release-planner",
@@ -1535,6 +1638,32 @@
    ],
    "status": "direction",
    "title": "No reported value that was not measured; drops reach the operator",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/narrow-loader-allowlist.md": {
+   "advised_by": "security-reviewer",
+   "depends_on": [
+    "/tasks/checkpoint-loader.md",
+    "/tasks/ci-weight-fixture.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "src/yowo/arch/_weights.py",
+    "tests/unit/test_checkpoint_loader.py",
+    "scripts/"
+   ],
+   "sensitivity": "security",
+   "status": "direction",
+   "title": "Enumerate the torch layer classes the allowlist admits, instead of a prefix",
    "type": "Task",
    "verified": []
   },

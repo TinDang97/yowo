@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Load an ultralytics .pt without ultralytics, and without unpickling foreign code
-status: direction
+status: done
 depth: deep
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -18,6 +18,9 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-08, act: interview, authority: human, interview: "sha256:612eea024c436da8", receipt: /tasks/checkpoint-loader.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:ARBITRARY_IMPORT=confirm|R:SILENT_PARTIAL=confirm" }
   - { by: "Tin Dang", at: 2026-09-08, act: freeze, authority: human, direction: "sha256:a4ec5ff62314901a", binding: "sha256:5e828bdea5ba3705" }
+  - { by: "cli", at: 2026-09-08, act: brief, authority: process, brief: "sha256:0c05949e3f580ecf" }
+  - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-08, act: gate, authority: human, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/1.md, brief: "sha256:0c901e22456a9ae0" }
 advised_by: security-reviewer
 ---
 ## CARD
