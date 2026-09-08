@@ -22,11 +22,10 @@ risks:
   - Declaring GA is a commitment that constrains every future change. It should not be taken until m1–m4 have actually closed.
 
 ## EXIT
-- [ ] Every public name is deliberate, in `__all__`, and returns no underscore-prefixed type   (← public-surface-audit)
+- [ ] A deprecation mechanism exists and fires: at least one `DeprecationWarning` in `src/`, with a test asserting it fires. The written stability policy accompanies it as a review item — the mechanism is the gate   (← deprecation-policy)
+- [ ] Every public name is deliberate, in `__all__`, and returns no underscore-prefixed type — across the top-level surface AND `yowo.arch`'s 16 architecture exports, which freeze model internals. If the arch surface is deliberately excluded, that exclusion is written down   (← public-surface-audit)
 - [ ] Config objects round-trip through `asdict`/`yaml.safe_dump` and no field can bypass its own validation   (← config-contract-repair)
-- [ ] A deprecation mechanism exists, is used, and a written stability policy says what a pin guarantees   (← deprecation-policy)
-- [ ] The `backend_instance=` extension point is documented and covered by a test that injects a third-party backend   (← backend-extension-contract)
-- [ ] Package metadata states the real maturity, and a deployment/operations guide exists for the edge operator   (← ga-metadata)
-
+- [ ] The `backend_instance=` extension point is documented and covered by a test that injects a third-party backend, which is admitted by passing the m3 conformance suite   (← backend-extension-contract)
+- [ ] Package metadata states the real maturity, `CHANGELOG.md` has its missing 2.5.0 section, and a deployment/operations guide exists   (← ga-metadata)
 ## CLOSE
 evidence: <one row per task>

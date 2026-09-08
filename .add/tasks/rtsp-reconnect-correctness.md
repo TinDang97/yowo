@@ -8,6 +8,9 @@ scope:
   - src/yowo/io/_source.py
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/rtsp-credential-redaction.md
+  - /tasks/capture-timeouts.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: edge-reliability-operator

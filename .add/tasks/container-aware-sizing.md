@@ -10,6 +10,8 @@ scope:
   - src/yowo/engine.py
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/real-backend-smoke.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: edge-reliability-operator

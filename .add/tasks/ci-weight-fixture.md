@@ -1,24 +1,27 @@
 ---
 type: Task
-title: OIDC trusted publishing, every release tool pinned
+title: A cached, integrity-verified model weight CI can reach
 status: direction
 depth: standard
-sensitivity: security
+sensitivity: data
 milestone: m1-trust-the-ship
 scope:
+  - tests/
   - .github/workflows/
+  - src/yowo/models/
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
 depends_on:
-  - /tasks/sdist-manifest.md
+  - /tasks/weight-integrity.md
+  - /tasks/pr-ci-gate.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
-advised_by: release-planner
+advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: <one line>
 why: <why this task exists — optional>
-beat: scaffold · next: author pypi-trusted-publish's RULES, ASSUMPTIONS and CHECKS, then add freeze pypi-trusted-publish
+beat: scaffold · next: author ci-weight-fixture's RULES, ASSUMPTIONS and CHECKS, then add freeze ci-weight-fixture
 
 ## RULES
 <must>

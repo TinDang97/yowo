@@ -9,6 +9,9 @@ scope:
   - .github/workflows/
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/ci-weight-fixture.md
+  - /tasks/pr-ci-gate.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: build-craftsman

@@ -3,11 +3,13 @@ type: Task
 title: Every backend create_backend() returns is constructed and executed
 status: direction
 depth: standard
-milestone: m3-prove-it
+milestone: m2-survive-week-two
 scope:
   - tests/
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/ci-weight-fixture.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: inference-parity-engineer

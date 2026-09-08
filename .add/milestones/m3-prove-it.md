@@ -23,14 +23,14 @@ risks:
   - Settling `requires-python >=3.8` is a scope decision with user impact: the claim is currently untested by any CI or lockfile, and dropping it is a breaking change for anyone on 3.8.
 
 ## EXIT
-- [ ] Every backend `create_backend()` can return is constructed and executed by at least one test   (← real-backend-smoke)
-- [ ] A shared parametrized conformance suite asserts identical behaviour across backends — output shape/dtype, empty detections, class mapping, error type on bad input — with a stated tolerance and the actual deviation reported   (← backend-conformance-suite)
+- [ ] Every backend `create_backend()` can return is either constructed and executed by a test, or named in a committed unverified list with its reason and the runner it would need. A `skipif`-green test counts as unverified, not as covered   (← backend-conformance-suite)
+- [ ] A shared parametrized conformance suite asserts identical behaviour across the backends CI can run — output shape/dtype, empty detections, class mapping, error type on bad input — with the tolerance stated before the run and the actual deviation reported   (← backend-conformance-suite)
 - [ ] The ultralytics equivalence harness is tracked, runs in CI, and its result is a gate   (← arch-equivalence-in-ci)
-- [ ] PyTorch↔ONNX numeric agreement is asserted for every exported variant   (← export-roundtrip-parity)
-- [ ] An mAP regression gate runs against a real dataset with a recorded baseline   (← map-regression-gate)
+- [ ] PyTorch↔ONNX numeric agreement is asserted with a tolerance stated up front — n/s variants in PR CI, all 10 nightly; the split is deliberate, not a later quiet narrowing   (← export-roundtrip-parity)
+- [ ] An evaluation dataset is chosen, its licence declared, its storage and CI access decided, and its provenance recorded   (← accuracy-dataset)
+- [ ] An mAP regression gate runs against that dataset with a recorded baseline   (← map-regression-gate)
 - [ ] `pytest tests/integration` passes from a clean checkout with no hardcoded personal paths, and CI invokes it   (← integration-tier-revival)
-- [ ] CI runs the matrix the package claims to support, or the claim is narrowed to what CI runs   (← ci-matrix)
-- [ ] Branch coverage is measured with a `fail_under` floor   (← coverage-floor)
-
+- [ ] Branch coverage is measured with a `fail_under` floor, set AFTER the new tests land — turning on branch coverage will drop the headline below today's 80% lines, which is expected and must not be met by lowering the floor   (← coverage-floor)
+- [ ] CI runs the support surface the package claims, or the claim is narrowed to what CI runs. Sequenced last: do not multiply a red suite by eight   (← ci-matrix)
 ## CLOSE
 evidence: <one row per task>

@@ -1,12 +1,505 @@
 {
- "edges": [],
+ "edges": [
+  [
+   "/tasks/accuracy-dataset.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/arch-equivalence-in-ci.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/arch-equivalence-in-ci.md",
+   "depends_on",
+   "/tasks/pr-ci-gate.md",
+   "/tasks/pr-ci-gate.md"
+  ],
+  [
+   "/tasks/arch-equivalence-in-ci.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/artifact-cache-keys.md",
+   "depends_on",
+   "/tasks/container-aware-sizing.md",
+   "/tasks/container-aware-sizing.md"
+  ],
+  [
+   "/tasks/artifact-cache-keys.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/backend-conformance-suite.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/backend-conformance-suite.md",
+   "depends_on",
+   "/tasks/degraded-mode-correctness.md",
+   "/tasks/degraded-mode-correctness.md"
+  ],
+  [
+   "/tasks/backend-conformance-suite.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/backend-extension-contract.md",
+   "depends_on",
+   "/tasks/backend-conformance-suite.md",
+   "/tasks/backend-conformance-suite.md"
+  ],
+  [
+   "/tasks/backend-extension-contract.md",
+   "milestone",
+   "m5-declare-ga",
+   "/milestones/m5-declare-ga.md"
+  ],
+  [
+   "/tasks/benchmark-truth.md",
+   "depends_on",
+   "/tasks/backend-conformance-suite.md",
+   "/tasks/backend-conformance-suite.md"
+  ],
+  [
+   "/tasks/benchmark-truth.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/bounded-postprocess.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/capture-timeouts.md",
+   "depends_on",
+   "/tasks/rtsp-credential-redaction.md",
+   "/tasks/rtsp-credential-redaction.md"
+  ],
+  [
+   "/tasks/capture-timeouts.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/pr-ci-gate.md",
+   "/tasks/pr-ci-gate.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/backend-conformance-suite.md",
+   "/tasks/backend-conformance-suite.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/arch-equivalence-in-ci.md",
+   "/tasks/arch-equivalence-in-ci.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/export-roundtrip-parity.md",
+   "/tasks/export-roundtrip-parity.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/integration-tier-revival.md",
+   "/tasks/integration-tier-revival.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "depends_on",
+   "/tasks/coverage-floor.md",
+   "/tasks/coverage-floor.md"
+  ],
+  [
+   "/tasks/ci-matrix.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/ci-weight-fixture.md",
+   "depends_on",
+   "/tasks/weight-integrity.md",
+   "/tasks/weight-integrity.md"
+  ],
+  [
+   "/tasks/ci-weight-fixture.md",
+   "depends_on",
+   "/tasks/pr-ci-gate.md",
+   "/tasks/pr-ci-gate.md"
+  ],
+  [
+   "/tasks/ci-weight-fixture.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/cli-bounded-memory.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/config-contract-repair.md",
+   "depends_on",
+   "/tasks/bounded-postprocess.md",
+   "/tasks/bounded-postprocess.md"
+  ],
+  [
+   "/tasks/config-contract-repair.md",
+   "depends_on",
+   "/tasks/feature-cache-honesty.md",
+   "/tasks/feature-cache-honesty.md"
+  ],
+  [
+   "/tasks/config-contract-repair.md",
+   "depends_on",
+   "/tasks/precision-plumbing.md",
+   "/tasks/precision-plumbing.md"
+  ],
+  [
+   "/tasks/config-contract-repair.md",
+   "milestone",
+   "m5-declare-ga",
+   "/milestones/m5-declare-ga.md"
+  ],
+  [
+   "/tasks/container-aware-sizing.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/container-aware-sizing.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/coverage-floor.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/coverage-floor.md",
+   "depends_on",
+   "/tasks/integration-tier-revival.md",
+   "/tasks/integration-tier-revival.md"
+  ],
+  [
+   "/tasks/coverage-floor.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/degraded-mode-correctness.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/degraded-mode-correctness.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/deprecation-policy.md",
+   "milestone",
+   "m5-declare-ga",
+   "/milestones/m5-declare-ga.md"
+  ],
+  [
+   "/tasks/export-result-contract.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/export-roundtrip-parity.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/export-roundtrip-parity.md",
+   "depends_on",
+   "/tasks/real-backend-smoke.md",
+   "/tasks/real-backend-smoke.md"
+  ],
+  [
+   "/tasks/export-roundtrip-parity.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/feature-cache-honesty.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/ga-metadata.md",
+   "depends_on",
+   "/tasks/public-surface-audit.md",
+   "/tasks/public-surface-audit.md"
+  ],
+  [
+   "/tasks/ga-metadata.md",
+   "depends_on",
+   "/tasks/config-contract-repair.md",
+   "/tasks/config-contract-repair.md"
+  ],
+  [
+   "/tasks/ga-metadata.md",
+   "depends_on",
+   "/tasks/deprecation-policy.md",
+   "/tasks/deprecation-policy.md"
+  ],
+  [
+   "/tasks/ga-metadata.md",
+   "depends_on",
+   "/tasks/backend-extension-contract.md",
+   "/tasks/backend-extension-contract.md"
+  ],
+  [
+   "/tasks/ga-metadata.md",
+   "milestone",
+   "m5-declare-ga",
+   "/milestones/m5-declare-ga.md"
+  ],
+  [
+   "/tasks/int8-calibration-parity.md",
+   "depends_on",
+   "/tasks/accuracy-dataset.md",
+   "/tasks/accuracy-dataset.md"
+  ],
+  [
+   "/tasks/int8-calibration-parity.md",
+   "depends_on",
+   "/tasks/export-roundtrip-parity.md",
+   "/tasks/export-roundtrip-parity.md"
+  ],
+  [
+   "/tasks/int8-calibration-parity.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/integration-tier-revival.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/integration-tier-revival.md",
+   "depends_on",
+   "/tasks/pr-ci-gate.md",
+   "/tasks/pr-ci-gate.md"
+  ],
+  [
+   "/tasks/integration-tier-revival.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/licensing-provenance.md",
+   "depends_on",
+   "/tasks/sdist-manifest.md",
+   "/tasks/sdist-manifest.md"
+  ],
+  [
+   "/tasks/licensing-provenance.md",
+   "depends_on",
+   "/tasks/weight-integrity.md",
+   "/tasks/weight-integrity.md"
+  ],
+  [
+   "/tasks/licensing-provenance.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/map-regression-gate.md",
+   "depends_on",
+   "/tasks/accuracy-dataset.md",
+   "/tasks/accuracy-dataset.md"
+  ],
+  [
+   "/tasks/map-regression-gate.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/map-regression-gate.md",
+   "milestone",
+   "m3-prove-it",
+   "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/metrics-truth.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/onnx-external-data.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/pr-ci-gate.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/precision-plumbing.md",
+   "depends_on",
+   "/tasks/backend-conformance-suite.md",
+   "/tasks/backend-conformance-suite.md"
+  ],
+  [
+   "/tasks/precision-plumbing.md",
+   "milestone",
+   "m4-honest-deployment",
+   "/milestones/m4-honest-deployment.md"
+  ],
+  [
+   "/tasks/public-surface-audit.md",
+   "depends_on",
+   "/tasks/deprecation-policy.md",
+   "/tasks/deprecation-policy.md"
+  ],
+  [
+   "/tasks/public-surface-audit.md",
+   "depends_on",
+   "/tasks/export-result-contract.md",
+   "/tasks/export-result-contract.md"
+  ],
+  [
+   "/tasks/public-surface-audit.md",
+   "milestone",
+   "m5-declare-ga",
+   "/milestones/m5-declare-ga.md"
+  ],
+  [
+   "/tasks/pypi-trusted-publish.md",
+   "depends_on",
+   "/tasks/sdist-manifest.md",
+   "/tasks/sdist-manifest.md"
+  ],
+  [
+   "/tasks/pypi-trusted-publish.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/reader-shutdown.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/real-backend-smoke.md",
+   "depends_on",
+   "/tasks/ci-weight-fixture.md",
+   "/tasks/ci-weight-fixture.md"
+  ],
+  [
+   "/tasks/real-backend-smoke.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/rtsp-credential-redaction.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/rtsp-reconnect-correctness.md",
+   "depends_on",
+   "/tasks/rtsp-credential-redaction.md",
+   "/tasks/rtsp-credential-redaction.md"
+  ],
+  [
+   "/tasks/rtsp-reconnect-correctness.md",
+   "depends_on",
+   "/tasks/capture-timeouts.md",
+   "/tasks/capture-timeouts.md"
+  ],
+  [
+   "/tasks/rtsp-reconnect-correctness.md",
+   "milestone",
+   "m2-survive-week-two",
+   "/milestones/m2-survive-week-two.md"
+  ],
+  [
+   "/tasks/sdist-manifest.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/version-single-source.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/weight-integrity.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ]
+ ],
  "nodes": {
   "/PROJECT.md": {
    "generated": {
     "at": "2026-09-08",
     "by": "add/3.5.0"
    },
-   "goal": "<one sentence \u2014 what is true when this ships>",
+   "goal": "A YOLO inference and export library another team can pin, deploy to an edge fleet, and leave running \u2014 where every claim it makes is backed by a check that runs.",
    "profile": "code",
    "stage": "mvp",
    "title": "yowo",
@@ -23,8 +516,87 @@
    "name": "yowo",
    "okf_version": "0.2",
    "profile": "code",
-   "sensitive_paths": [],
+   "sensitive_paths": [
+    "src/yowo/models/",
+    "src/yowo/backends/",
+    "src/yowo/export/",
+    "src/yowo/__init__.py",
+    "src/yowo/errors.py",
+    "src/yowo/types.py",
+    "pyproject.toml",
+    ".github/workflows/"
+   ],
    "tooling_engine": "add/3.5.0"
+  },
+  "/milestones/m1-trust-the-ship.md": {
+   "advised_by": "milestone-planner",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "status": "direction",
+   "title": "Nothing yowo publishes is wrong, unverified, or unreproducible",
+   "type": "Milestone",
+   "verified": []
+  },
+  "/milestones/m2-survive-week-two.md": {
+   "advised_by": "milestone-planner",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "status": "direction",
+   "title": "A live deployment stays correct and bounded, unattended, and says so",
+   "type": "Milestone",
+   "verified": []
+  },
+  "/milestones/m3-prove-it.md": {
+   "advised_by": "milestone-planner",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "status": "direction",
+   "title": "Every claim yowo makes has a runnable check behind it",
+   "type": "Milestone",
+   "verified": []
+  },
+  "/milestones/m4-honest-deployment.md": {
+   "advised_by": "milestone-planner",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "status": "direction",
+   "title": "Exported and quantized artifacts do what their metadata says",
+   "type": "Milestone",
+   "verified": []
+  },
+  "/milestones/m5-declare-ga.md": {
+   "advised_by": "milestone-planner",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "status": "direction",
+   "title": "A stability contract worth pinning",
+   "type": "Milestone",
+   "verified": []
+  },
+  "/personas/artifact-integrity-steward.md": {
+   "flow": "design, verify, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Artifact Integrity Steward",
+   "not-when": "whether two runtimes agree on the answer \u2192 inference-parity-engineer; whether the process survives the night \u2192 edge-reliability-operator; a credential, a token, or an authorization boundary \u2192 security-reviewer, always HARD-STOP; sequencing a release cut \u2192 release-planner",
+   "source": "`.add/personas-teacher/engineering/engineering-data-engineer.md` (provenance and idempotency, re-aimed from tables to model artifacts) + `security/security-architect.md` (supply-chain integrity, distilled) \u2014 replaces the generic `data-steward` seeded at init, which framed this project's only real data surface as ETL",
+   "task-kinds": "infra, data, release, feature, test",
+   "title": "Artifact Integrity Steward",
+   "type": "Persona",
+   "use-when": "anything that produces, fetches, caches, stamps or ships a binary artifact \u2014 weight download and resolution, the model registry, export outputs and their sidecars, TensorRT engine and INT8 calibration caches, quantization accuracy, sdist and wheel contents, version identity, or artifact licensing and provenance",
+   "vibe": "An artifact you cannot verify is a rumour with a file extension. Know what it is, know where it came from, and key the cache on everything that would invalidate it."
   },
   "/personas/build-craftsman.md": {
    "flow": "build",
@@ -41,21 +613,6 @@
    "use-when": "executing a frozen task \u2014 writing the failing check first, making it pass, keeping the diff inside the declared scope, deciding how much of an adjacent mess to leave alone, or judging whether a green suite actually proves the rule it cites",
    "vibe": "The frozen contract is the specification and the tests are the argument. Make it red, make it green, and change nothing the contract did not ask for."
   },
-  "/personas/data-steward.md": {
-   "flow": "design, build",
-   "generated": {
-    "at": "2026-09-08",
-    "by": "add/3.5.0"
-   },
-   "name": "Data Steward",
-   "not-when": "the API in front of the data \u2192 build-craftsman; who may read a row \u2192 the security lens, always HARD-STOP; presenting the numbers on screen \u2192 the ui lens",
-   "source": "`.add/personas-teacher/engineering/engineering-data-engineer.md` (pipeline reliability and schema discipline, distilled) + `engineering/engineering-database-optimizer.md` (query and migration cost, distilled)",
-   "task-kinds": "data",
-   "title": "Data Steward",
-   "type": "Persona",
-   "use-when": "anything that moves, shapes, stores or migrates data \u2014 a schema change, an ETL or ELT step, a backfill, a migration, a retention rule, a report whose numbers someone will act on",
-   "vibe": "The pipeline that silently produces wrong numbers is worse than the one that stops. Make it fail loudly and make it idempotent."
-  },
   "/personas/docs-writer.md": {
    "flow": "build, verify",
    "generated": {
@@ -70,6 +627,21 @@
    "type": "Persona",
    "use-when": "writing or changing prose a reader acts on \u2014 a README, a getting-started walkthrough, a refusal message, a CLI help string, a release note \u2014 or judging whether a sentence still matches the thing it describes",
    "vibe": "A claim in the docs is a promise the artifact has to keep. Check it against what ships, not against what you meant."
+  },
+  "/personas/edge-reliability-operator.md": {
+   "flow": "design, verify, advisor",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "name": "Edge Reliability Operator",
+   "not-when": "whether two runtimes agree on the answer \u2192 inference-parity-engineer; whether the artifact is trustworthy \u2192 artifact-integrity-steward; credential handling or a trust edge \u2192 security-reviewer, always HARD-STOP; the shape of the public API \u2192 build-craftsman",
+   "source": "`.add/personas-teacher/engineering/engineering-sre.md` (observability and toil, distilled) + `engineering/engineering-embedded-firmware-engineer.md` (resource-constrained paranoia, re-aimed from MCUs to Jetson-class edge)",
+   "task-kinds": "feature, refactor, infra, integration, test",
+   "title": "Edge Reliability Operator",
+   "type": "Persona",
+   "use-when": "anything that runs unattended or holds a resource over time \u2014 sources and readers, threads, reconnect and retry, queues and backpressure, shutdown, memory and thread sizing, container limits, metrics, logs, health surfaces, or judging whether a long-running path degrades safely",
+   "vibe": "Day one proves nothing. The question is whether the box is boring on day nine \u2014 and whether the logs would tell you if it were not."
   },
   "/personas/explore-investigator.md": {
    "flow": "design, advisor",
@@ -86,20 +658,20 @@
    "use-when": "an unanswered question that must be investigated before anything can be contracted \u2014 reading an unfamiliar system, evaluating options, reproducing a reported behaviour, sizing an unknown",
    "vibe": "Spend the budget, cite the source, and report what you actually found \u2014 including that it was not enough."
   },
-  "/personas/interface-designer.md": {
-   "flow": "design, build",
+  "/personas/inference-parity-engineer.md": {
+   "flow": "design, build, verify",
    "generated": {
     "at": "2026-09-08",
     "by": "add/3.5.0"
    },
-   "name": "Interface Designer",
-   "not-when": "deciding what the feature should do \u2192 task-planner; the data behind the screen \u2192 the data lens; wording a message \u2192 docs-writer; anything touching who may see what \u2192 the security lens, always HARD-STOP",
-   "source": "`.add/personas-teacher/design/design-ui-designer.md` (design systems and visual hierarchy, distilled) + `design/design-ux-architect.md` (flow and state coverage, distilled)",
-   "task-kinds": "ui",
-   "title": "Interface Designer",
+   "name": "Inference Parity Engineer",
+   "not-when": "whether the process survives the night \u2192 edge-reliability-operator; whether the artifact is the one you think it is \u2192 artifact-integrity-steward; the shape of the public API around the answer \u2192 build-craftsman with the api lens; anything touching weight provenance or credentials \u2192 security-reviewer, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-ai-engineer.md` (production ML systems, distilled) + `testing/testing-reality-checker.md` (does the thing actually run, distilled) + `testing/testing-performance-benchmarker.md` (measured, not asserted)",
+   "task-kinds": "feature, refactor, test, integration",
+   "title": "Inference Parity Engineer",
    "type": "Persona",
-   "use-when": "shaping anything a person looks at or operates \u2014 a screen, a component, a layout, a design token set, an empty or error state, a keyboard path \u2014 or judging whether a new surface belongs to the system already there",
-   "vibe": "Consistency is a feature and every one-off is a debt. Design the system, then let the screen fall out of it."
+   "use-when": "anything that changes what a model computes or how a runtime computes it \u2014 adding or altering a backend, touching arch/ or postprocess/, changing preprocessing, exporting or quantizing, plumbing precision, or judging whether two runtimes actually agree",
+   "vibe": "A backend is an implementation detail, never a semantic one. Same model, same input, same answer \u2014 prove it or it is not a backend, it is a fork."
   },
   "/personas/milestone-planner.md": {
    "flow": "design, advisor",
@@ -108,7 +680,7 @@
     "by": "add/3.5.0"
    },
    "name": "Milestone Planner",
-   "not-when": "deciding the milestone's bucket, its scope, its exit criteria, or what to cut \u2192 method-product-owner (it decides WHETHER and HOW BIG; this lens decides IN WHAT ORDER once that is settled); sequencing the moves inside one task's frozen contract \u2192 task-planner; sequencing finished milestones into a release cut \u2192 release-planner",
+   "not-when": "deciding the milestone's bucket, its scope, its exit criteria, or what to cut \u2192 the human at intake (they decide WHETHER and HOW BIG; this lens decides IN WHAT ORDER once that is settled); sequencing the moves inside one task's frozen contract \u2192 task-planner; sequencing finished milestones into a release cut \u2192 release-planner",
    "source": "`.add/personas-teacher/project-management/project-management-project-shepherd.md` (+ product/product-sprint-prioritizer.md)",
    "task-kinds": "feature, integration, infra",
    "title": "Milestone Planner",
@@ -123,13 +695,13 @@
     "by": "add/3.5.0"
    },
    "name": "Release Planner",
-   "not-when": "whether a milestone belongs in this release at all, or what the release is FOR \u2192 method-product-owner; ordering tasks inside an unshipped milestone \u2192 milestone-planner; ordering moves inside one task \u2192 task-planner; the security character of a publish path (token scope, CI permissions, supply chain) \u2192 security-gatekeeper, always HARD-STOP",
-   "source": "`.add/personas-teacher/engineering/engineering-devops-automator.md`, re-aimed from cloud deploys to this project's dual npm + PyPI publish ritual and `RELEASES.md` ledger",
+   "not-when": "whether the work belongs in this release at all \u2192 the human at intake; ordering tasks inside an unshipped milestone \u2192 milestone-planner; ordering moves inside one task \u2192 task-planner; the integrity or licensing of the bytes being shipped \u2192 artifact-integrity-steward; token scope, CI permissions, or the publish credential itself \u2192 security-reviewer, always HARD-STOP",
+   "source": "`.add/personas-teacher/engineering/engineering-devops-automator.md`, re-aimed at this project's real publish path \u2014 PyPI via GitHub Actions + python-semantic-release + CHANGELOG.md. (The lens seeded at `init` described an npm+PyPI dual publish and a `RELEASES.md` ledger; neither exists here.)",
    "task-kinds": "release, infra",
    "title": "Release Planner",
    "type": "Persona",
-   "use-when": "planning or judging a cut \u2014 sequencing the publish steps, checking the version spots move in lockstep, confirming every shipped milestone is attributed in the ledger, ordering a migration against the code that assumes it, deciding what blocks a tag, or planning how a bad publish is backed out",
-   "vibe": "A release is an ordered, reversible sequence \u2014 not an event. Every version spot moves together, or the cut is already broken."
+   "use-when": "planning or judging a cut \u2014 sequencing the publish steps, checking every version spot moves together, confirming the tag and the index agree, deciding what blocks a publish, or planning how a bad publish is backed out",
+   "vibe": "A release is an ordered, reversible sequence \u2014 not a green checkmark. If the pipeline cannot publish it, you do not have a release, you have a tag."
   },
   "/personas/security-reviewer.md": {
    "flow": "verify, advisor",
@@ -138,7 +710,7 @@
     "by": "add/3.5.0"
    },
    "name": "Security Reviewer",
-   "not-when": "work with no authorization surface, however sensitive it feels \u2192 build-craftsman; deciding what the control should be \u2192 task-planner; a data-handling question with no trust edge \u2192 data-steward",
+   "not-when": "work with no authorization surface, however sensitive it feels \u2192 build-craftsman; deciding what the control should be \u2192 task-planner; an artifact-provenance question with no trust edge \u2192 artifact-integrity-steward",
    "source": "`.add/personas-teacher/security/security-appsec-engineer.md` (authorization-boundary review, distilled) + `engineering/engineering-code-reviewer.md` (regression skepticism, distilled)",
    "task-kinds": "security, test, infra",
    "title": "Security Reviewer",
@@ -153,7 +725,7 @@
     "by": "add/3.5.0"
    },
    "name": "Task Planner",
-   "not-when": "deciding WHETHER the work is worth doing, its bucket, or its exit criteria \u2192 method-product-owner; ordering TASKS into a DAG or planning a wave \u2192 milestone-planner; ordering shipped milestones into a cut \u2192 release-planner; the shape of the contract itself rather than the order it is built in \u2192 the domain build persona (methodology-engine-dev \u00b7 book-technical-writer)",
+   "not-when": "deciding WHETHER the work is worth doing, its bucket, or its exit criteria \u2192 the human at intake; ordering TASKS into a DAG or planning a wave \u2192 milestone-planner; ordering shipped milestones into a cut \u2192 release-planner; the shape of the contract itself rather than the order it is built in \u2192 the domain lens that owns it (inference-parity-engineer \u00b7 edge-reliability-operator \u00b7 artifact-integrity-steward)",
    "source": "`.add/personas-teacher/project-management/project-manager-senior.md` (spec\u2192task list, realistic scope, no background processes)",
    "task-kinds": "feature, refactor, integration",
    "title": "Task Planner",
@@ -169,8 +741,18 @@
    },
    "lens": "domain",
    "project": "yowo",
-   "sources": [],
-   "tags": [],
+   "sources": [
+    "README.md",
+    "CLAUDE.md",
+    "src/yowo/types.py",
+    "src/yowo/engine.py"
+   ],
+   "tags": [
+    "inference",
+    "detection",
+    "edge",
+    "yolo"
+   ],
    "title": "Domain",
    "type": "Spec"
   },
@@ -182,8 +764,16 @@
    },
    "lens": "experience",
    "project": "yowo",
-   "sources": [],
-   "tags": [],
+   "sources": [
+    "README.md",
+    "docs/user-guide.md",
+    "src/yowo/cli/"
+   ],
+   "tags": [
+    "dx",
+    "cli",
+    "api"
+   ],
    "title": "Experience",
    "type": "Spec"
   },
@@ -195,12 +785,20 @@
    },
    "lens": "method",
    "project": "yowo",
-   "sources": [],
-   "tags": [],
+   "sources": [
+    "CLAUDE.md",
+    ".add/index.md"
+   ],
+   "tags": [
+    "add",
+    "tdd",
+    "review"
+   ],
    "title": "Method",
    "type": "Spec"
   },
   "/specs/quality.md": {
+   "delta_seq": "1",
    "description": "what counts as proof",
    "generated": {
     "at": "2026-09-08",
@@ -208,8 +806,17 @@
    },
    "lens": "quality",
    "project": "yowo",
-   "sources": [],
-   "tags": [],
+   "sources": [
+    "docs/reviews/2026-09-08-production-readiness/",
+    ".github/workflows/release.yml",
+    "pyproject.toml"
+   ],
+   "tags": [
+    "evidence",
+    "tdd",
+    "ci",
+    "parity"
+   ],
    "title": "Quality",
    "type": "Spec"
   },
@@ -221,10 +828,871 @@
    },
    "lens": "system",
    "project": "yowo",
-   "sources": [],
-   "tags": [],
+   "sources": [
+    "pyproject.toml",
+    ".github/workflows/release.yml",
+    "src/yowo/",
+    "tests/"
+   ],
+   "tags": [
+    "python",
+    "multi-backend",
+    "packaging",
+    "ci"
+   ],
    "title": "System",
    "type": "Spec"
+  },
+  "/tasks/accuracy-dataset.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/",
+    "docs/",
+    ".github/workflows/"
+   ],
+   "sensitivity": "data",
+   "status": "direction",
+   "title": "A licensed evaluation dataset, sourced and reachable from CI",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/arch-equivalence-in-ci.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/ci-weight-fixture.md",
+    "/tasks/pr-ci-gate.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/",
+    ".github/workflows/"
+   ],
+   "status": "direction",
+   "title": "Commit the ultralytics oracle harness and gate on it",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/artifact-cache-keys.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depends_on": [
+    "/tasks/container-aware-sizing.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/export/",
+    "src/yowo/cache/",
+    "src/yowo/backends/_tensorrt.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Every cache key names its full invalidation set",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/backend-conformance-suite.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/real-backend-smoke.md",
+    "/tasks/degraded-mode-correctness.md"
+   ],
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/",
+    "src/yowo/backends/"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "One parametrized suite every backend must pass identically",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/backend-extension-contract.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/backend-conformance-suite.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m5-declare-ga",
+   "scope": [
+    "src/yowo/backends/",
+    "docs/",
+    "tests/"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Document and test the backend_instance= extension point",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/benchmark-truth.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/backend-conformance-suite.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/benchmark/",
+    "src/yowo/tune/"
+   ],
+   "status": "direction",
+   "title": "Report the backend that executed, never the one requested",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/bounded-postprocess.md": {
+   "advised_by": "edge-reliability-operator",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/postprocess/",
+    "src/yowo/config.py"
+   ],
+   "status": "direction",
+   "title": "Postprocess cost bounded independent of scene content",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/capture-timeouts.md": {
+   "advised_by": "edge-reliability-operator",
+   "depends_on": [
+    "/tasks/rtsp-credential-redaction.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/io/"
+   ],
+   "status": "direction",
+   "title": "Every blocking I/O call bounded by a stated timeout",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/ci-matrix.md": {
+   "advised_by": "release-planner",
+   "depends_on": [
+    "/tasks/pr-ci-gate.md",
+    "/tasks/real-backend-smoke.md",
+    "/tasks/backend-conformance-suite.md",
+    "/tasks/arch-equivalence-in-ci.md",
+    "/tasks/export-roundtrip-parity.md",
+    "/tasks/integration-tier-revival.md",
+    "/tasks/coverage-floor.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    ".github/workflows/",
+    "pyproject.toml"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "CI runs the support surface the package claims, or the claim narrows",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/ci-weight-fixture.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depends_on": [
+    "/tasks/weight-integrity.md",
+    "/tasks/pr-ci-gate.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "tests/",
+    ".github/workflows/",
+    "src/yowo/models/"
+   ],
+   "sensitivity": "data",
+   "status": "direction",
+   "title": "A cached, integrity-verified model weight CI can reach",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/cli-bounded-memory.md": {
+   "advised_by": "edge-reliability-operator",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/cli/_main.py"
+   ],
+   "status": "direction",
+   "title": "Live sources stream results instead of accumulating them",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/config-contract-repair.md": {
+   "advised_by": "build-craftsman",
+   "depends_on": [
+    "/tasks/bounded-postprocess.md",
+    "/tasks/feature-cache-honesty.md",
+    "/tasks/precision-plumbing.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m5-declare-ga",
+   "scope": [
+    "src/yowo/config.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Configs round-trip; no field bypasses its own validation",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/container-aware-sizing.md": {
+   "advised_by": "edge-reliability-operator",
+   "depends_on": [
+    "/tasks/real-backend-smoke.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/hardware/",
+    "src/yowo/backends/",
+    "src/yowo/engine.py"
+   ],
+   "status": "direction",
+   "title": "Read the cgroup limit, not the host; OOM ladder for non-PyTorch",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/coverage-floor.md": {
+   "advised_by": "build-craftsman",
+   "depends_on": [
+    "/tasks/real-backend-smoke.md",
+    "/tasks/integration-tier-revival.md"
+   ],
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "pyproject.toml",
+    ".github/workflows/"
+   ],
+   "status": "direction",
+   "title": "Branch coverage measured, with a floor that fails the build",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/degraded-mode-correctness.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/real-backend-smoke.md"
+   ],
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/engine.py",
+    "src/yowo/postprocess/"
+   ],
+   "status": "direction",
+   "title": "The failure sentinel is a valid empty result on every engine",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/deprecation-policy.md": {
+   "advised_by": "task-planner",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m5-declare-ga",
+   "scope": [
+    "src/yowo/",
+    "docs/"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "A deprecation mechanism, used, and a written stability policy",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/export-result-contract.md": {
+   "advised_by": "build-craftsman",
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/export/",
+    "src/yowo/__init__.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "The documented return type is the returned type",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/export-roundtrip-parity.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/ci-weight-fixture.md",
+    "/tasks/real-backend-smoke.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/"
+   ],
+   "status": "direction",
+   "title": "PyTorch to ONNX numeric agreement, asserted per variant",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/feature-cache-honesty.md": {
+   "advised_by": "inference-parity-engineer",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/cache/",
+    "src/yowo/config.py",
+    "README.md"
+   ],
+   "status": "direction",
+   "title": "Document the failure mode where users meet it; set the default to match",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/ga-metadata.md": {
+   "advised_by": "docs-writer",
+   "depends_on": [
+    "/tasks/public-surface-audit.md",
+    "/tasks/config-contract-repair.md",
+    "/tasks/deprecation-policy.md",
+    "/tasks/backend-extension-contract.md"
+   ],
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m5-declare-ga",
+   "scope": [
+    "pyproject.toml",
+    "docs/",
+    "CHANGELOG.md"
+   ],
+   "status": "direction",
+   "title": "Real maturity in metadata; a deployment and operations guide",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/int8-calibration-parity.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depends_on": [
+    "/tasks/accuracy-dataset.md",
+    "/tasks/export-roundtrip-parity.md"
+   ],
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/export/"
+   ],
+   "status": "direction",
+   "title": "Calibrate on the inference preprocessing path; measure the delta",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/integration-tier-revival.md": {
+   "advised_by": "build-craftsman",
+   "depends_on": [
+    "/tasks/ci-weight-fixture.md",
+    "/tasks/pr-ci-gate.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/integration/",
+    ".github/workflows/"
+   ],
+   "status": "direction",
+   "title": "No hardcoded personal paths; passes from a clean checkout; CI runs it",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/licensing-provenance.md": {
+   "advised_by": "docs-writer",
+   "depends_on": [
+    "/tasks/sdist-manifest.md",
+    "/tasks/weight-integrity.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "pyproject.toml"
+   ],
+   "status": "direction",
+   "title": "Weight provenance, AGPL disclosure, SECURITY.md, project URLs",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/map-regression-gate.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/accuracy-dataset.md",
+    "/tasks/ci-weight-fixture.md"
+   ],
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m3-prove-it",
+   "scope": [
+    "tests/",
+    "src/yowo/benchmark/"
+   ],
+   "status": "direction",
+   "title": "An mAP baseline on a real dataset, enforced",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/metrics-truth.md": {
+   "advised_by": "edge-reliability-operator",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/metrics/",
+    "src/yowo/engine.py",
+    "src/yowo/cli/"
+   ],
+   "status": "direction",
+   "title": "No reported value that was not measured; drops reach the operator",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/onnx-external-data.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/export/"
+   ],
+   "status": "direction",
+   "title": "A self-contained artifact, and a recorded opset that is the produced opset",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/pr-ci-gate.md": {
+   "advised_by": "release-planner",
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    ".github/workflows/"
+   ],
+   "status": "direction",
+   "title": "The quality gate runs before merge, not after",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/precision-plumbing.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/backend-conformance-suite.md"
+   ],
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m4-honest-deployment",
+   "scope": [
+    "src/yowo/backends/",
+    "src/yowo/config.py",
+    "src/yowo/engine.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Precision reaches the executing backend, or leaves the surface",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/public-surface-audit.md": {
+   "advised_by": "build-craftsman",
+   "depends_on": [
+    "/tasks/deprecation-policy.md",
+    "/tasks/export-result-contract.md"
+   ],
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m5-declare-ga",
+   "scope": [
+    "src/yowo/__init__.py",
+    "src/yowo/types.py",
+    "src/yowo/errors.py",
+    "src/yowo/arch/__init__.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Every public name deliberate, in __all__, leaking no private type",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/pypi-trusted-publish.md": {
+   "advised_by": "release-planner",
+   "depends_on": [
+    "/tasks/sdist-manifest.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    ".github/workflows/"
+   ],
+   "sensitivity": "security",
+   "status": "direction",
+   "title": "OIDC trusted publishing, every release tool pinned",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/reader-shutdown.md": {
+   "advised_by": "edge-reliability-operator",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/io/_reader.py",
+    "src/yowo/pipeline/"
+   ],
+   "status": "direction",
+   "title": "No orphaned thread, fd, or capture after a release cycle",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/real-backend-smoke.md": {
+   "advised_by": "inference-parity-engineer",
+   "depends_on": [
+    "/tasks/ci-weight-fixture.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "tests/"
+   ],
+   "status": "direction",
+   "title": "Every backend create_backend() returns is constructed and executed",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/rtsp-credential-redaction.md": {
+   "advised_by": "security-reviewer",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "src/yowo/io/_source.py",
+    "src/yowo/types.py"
+   ],
+   "sensitivity": "security",
+   "status": "direction",
+   "title": "No credential in logs, exceptions, results, or cache keys",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/rtsp-reconnect-correctness.md": {
+   "advised_by": "edge-reliability-operator",
+   "depends_on": [
+    "/tasks/rtsp-credential-redaction.md",
+    "/tasks/capture-timeouts.md"
+   ],
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m2-survive-week-two",
+   "scope": [
+    "src/yowo/io/_source.py"
+   ],
+   "status": "direction",
+   "title": "Retry arithmetic that works, asserted with a fake clock",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/sdist-manifest.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depth": "standard",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "pyproject.toml",
+    ".github/workflows/"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "Explicit sdist include list",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/version-single-source.md": {
+   "advised_by": "artifact-integrity-steward",
+   "depth": "quick",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "pyproject.toml",
+    "src/yowo/__init__.py",
+    "src/yowo/export/_exporter.py"
+   ],
+   "sensitivity": "architecture",
+   "status": "direction",
+   "title": "One version source, asserted across all stamps",
+   "type": "Task",
+   "verified": []
+  },
+  "/tasks/weight-integrity.md": {
+   "advised_by": "security-reviewer",
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "src/yowo/models/",
+    "src/yowo/arch/_weights.py"
+   ],
+   "sensitivity": "security",
+   "status": "direction",
+   "title": "Pinned SHA-256 verified on download and on cache hit; weights_only=True",
+   "type": "Task",
+   "verified": []
   }
  }
 }

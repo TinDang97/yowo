@@ -10,6 +10,14 @@ scope:
   - pyproject.toml
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/pr-ci-gate.md
+  - /tasks/real-backend-smoke.md
+  - /tasks/backend-conformance-suite.md
+  - /tasks/arch-equivalence-in-ci.md
+  - /tasks/export-roundtrip-parity.md
+  - /tasks/integration-tier-revival.md
+  - /tasks/coverage-floor.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: release-planner

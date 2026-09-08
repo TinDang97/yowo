@@ -23,13 +23,14 @@ risks:
   - Changing reconnect semantics changes how long a stream survives a camera reboot — both directions are user-visible.
 
 ## EXIT
-- [ ] Every blocking call in the I/O path — capture open, frame read, queue get, thread join — has a stated timeout, asserted by a check that a wedged source raises rather than hangs   (← capture-timeouts)
+- [ ] A structural check (lint or grep gate) fails on any bare `cap.read()`, `queue.get()` or `thread.join()` without a timeout argument in the I/O path, AND a wedged-source test raises rather than hangs   (← capture-timeouts)
 - [ ] RTSP retry bounds and the terminal error are asserted with a fake clock, and a brief camera outage recovers instead of permanently killing the stream   (← rtsp-reconnect-correctness)
 - [ ] Thread, fd and capture counts return to baseline after N acquire/release cycles   (← reader-shutdown)
-- [ ] Memory is flat over a sustained live-source run through the CLI, with the measurement recorded   (← cli-bounded-memory)
-- [ ] No metric or health surface reports a value it did not measure; every drop and degradation increments a counter the operator can reach   (← metrics-truth)
+- [ ] An iterator observes a `reconnect()` rebind — or `reconnect()` cannot be called while an iterator holds a capture. A count check cannot catch this: `_source.py:374` rebinds `self._active_cap` while `__iter__` reads its own local, so counts balance while the iterator reads a released handle   (← reader-shutdown)
+- [ ] RSS slope is below a stated threshold over a stated duration for a live source through the CLI (baseline to beat: OOM in ~2 min at 1080p/25fps, `review-runtime.md` R6), with the measurement recorded   (← cli-bounded-memory)
+- [ ] An inventory test walks the metrics snapshot and the health document and asserts every field has a named producer; every drop and degradation increments a counter the operator can reach   (← metrics-truth)
+- [ ] At least one real backend is constructed and executed by a test — no mock — giving the two non-backend-independent tasks below something to regress against   (← real-backend-smoke)
 - [ ] The backend-failure fallback produces output that postprocess accepts, for detection, classification and OBB   (← degraded-mode-correctness)
-- [ ] Thread and memory sizing reads cgroup limits where present, or declares container limits unsupported   (← container-aware-sizing)
-
+- [ ] Thread and memory sizing reads cgroup limits where present, or declares container limits unsupported. Note: this changes what "cpu count" means, and `tune/_profile.py:93` keys the tune cache on `os.cpu_count()` — the invalidation is owned downstream by `artifact-cache-keys`   (← container-aware-sizing)
 ## CLOSE
 evidence: <one row per task>

@@ -9,8 +9,12 @@ scope:
   - src/yowo/__init__.py
   - src/yowo/types.py
   - src/yowo/errors.py
+  - src/yowo/arch/__init__.py
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/deprecation-policy.md
+  - /tasks/export-result-contract.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: build-craftsman

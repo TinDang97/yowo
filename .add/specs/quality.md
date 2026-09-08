@@ -7,6 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
+delta_seq: 1
 ---
 ## Now
 
@@ -62,4 +63,5 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q1 · open · 2026-09-08] The pyright pre-commit hook fails on EVERY commit regardless of content: it runs via 'uv run', and uv 0.10.11 rewrites uv.lock from revision 2 to 3, so pre-commit sees 'files were modified by this hook' and rolls back. pyright itself reports 0 errors. A gate that fails identically on every input is not a gate — it trains the author to pass --no-verify. Same mechanism threatens CI, where 'uv sync' can re-resolve the lock the build claims to pin. (evidence: 25e907e)
   placeholder. Evidence: `docs/reviews/2026-09-08-production-readiness/` (33 P0, 64 P1, all cited).

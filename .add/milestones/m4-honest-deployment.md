@@ -24,13 +24,12 @@ risks:
 
 ## EXIT
 - [ ] Every exported artifact loads from a clean environment using only what its sidecar names, and the recorded opset is the produced opset   (← onnx-external-data)
-- [ ] `precision` reaches the backend that executes, or no longer appears in config, health or metrics   (← precision-plumbing)
-- [ ] Every artifact cache key names its full invalidation set, justified in the node   (← artifact-cache-keys)
-- [ ] INT8 calibration uses the inference preprocessing path, and every quantized artifact ships a measured accuracy delta against its source   (← int8-calibration-parity)
+- [ ] `precision` reaches the backend that executes, or no longer appears in config, health or metrics. Plumb-vs-remove is a human decision — the two differ in reversibility, not effort   (← precision-plumbing)
+- [ ] A test perturbs each element of every cache key's stated invalidation set — GPU arch, TRT version, driver, precision, shape profile, calibration set, and the cgroup-aware cpu count `container-aware-sizing` changed — and asserts the key changes   (← artifact-cache-keys)
+- [ ] INT8 calibration uses the inference preprocessing path, and every quantized artifact ships a measured accuracy delta against its source, computed on the m3 dataset   (← int8-calibration-parity)
 - [ ] Postprocess cost is bounded independent of scene content, with the bound measured   (← bounded-postprocess)
 - [ ] Benchmark and tune report the backend that actually executed, never the one requested   (← benchmark-truth)
-- [ ] The feature cache's failure mode is documented where a user meets it, and its default reflects that   (← feature-cache-honesty)
+- [ ] The feature cache's default is asserted by a test; its failure mode is documented where a user meets it (review item, not a command)   (← feature-cache-honesty)
 - [ ] The documented export return type is the one the function returns   (← export-result-contract)
-
 ## CLOSE
 evidence: <one row per task>

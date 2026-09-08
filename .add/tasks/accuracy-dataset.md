@@ -1,24 +1,24 @@
 ---
 type: Task
-title: OIDC trusted publishing, every release tool pinned
+title: A licensed evaluation dataset, sourced and reachable from CI
 status: direction
 depth: standard
-sensitivity: security
-milestone: m1-trust-the-ship
+sensitivity: data
+milestone: m3-prove-it
 scope:
+  - tests/
+  - docs/
   - .github/workflows/
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
-depends_on:
-  - /tasks/sdist-manifest.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
-advised_by: release-planner
+advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: <one line>
 why: <why this task exists — optional>
-beat: scaffold · next: author pypi-trusted-publish's RULES, ASSUMPTIONS and CHECKS, then add freeze pypi-trusted-publish
+beat: scaffold · next: author accuracy-dataset's RULES, ASSUMPTIONS and CHECKS, then add freeze accuracy-dataset
 
 ## RULES
 <must>

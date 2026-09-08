@@ -7,8 +7,14 @@ milestone: m5-declare-ga
 scope:
   - pyproject.toml
   - docs/
+  - CHANGELOG.md
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
+depends_on:
+  - /tasks/public-surface-audit.md
+  - /tasks/config-contract-repair.md
+  - /tasks/deprecation-policy.md
+  - /tasks/backend-extension-contract.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified: []
 advised_by: docs-writer
