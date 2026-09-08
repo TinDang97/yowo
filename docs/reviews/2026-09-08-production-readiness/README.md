@@ -71,3 +71,50 @@ Each is standalone and triaged P0 (blocks launch) / P1 (before GA) / P2 (later),
 the production-readiness roadmap tracked in `.add/` — run `python3 .add/tooling/cli.py status`.
 
 **Scope note:** this was a diagnostic pass. No source file was modified by any lane.
+
+---
+
+## Addendum — 2026-09-08, found during Direction, not by this review
+
+A P0 that all six lanes missed, surfaced while grounding the `weight-integrity` task:
+
+### yowo cannot load its own default weights on a clean install
+
+```
+pip install yowo[pytorch]     # torch only — ultralytics is NOT a dependency
+yowo detect image.jpg         # downloads yolo11n.pt from the ultralytics assets URL
+  → ModuleNotFoundError: No module named 'ultralytics.nn.tasks'
+```
+
+`src/yowo/arch/_weights.py:86` calls `torch.load(..., weights_only=False)`. The checkpoint's
+`ema`/`model` value is a pickled **`ultralytics.nn.tasks.DetectionModel`**, and unpickling requires
+that class to be importable. No shim exists — `sys.modules`, `Unpickler` and `add_safe_globals`
+return no hits across `src/yowo/`.
+
+**Probes that establish it** (run against the tracked `yolo11n.pt`, 2026-09-08):
+
+| Probe | Result |
+|---|---|
+| `torch.load(p, weights_only=True)` | `UnpicklingError` — the obvious security fix is unavailable |
+| `type(ckpt["ema"] or ckpt["model"])` | `ultralytics.nn.tasks.DetectionModel` |
+| `yowo.arch._weights.load_weights(model, "yolo11n.pt")` with `ultralytics` import blocked | `ModuleNotFoundError: No module named 'ultralytics.nn.tasks'` |
+| `sha256(yolo11n.pt)` | `0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1` |
+
+### Why the review missed it, which is the more useful finding
+
+`ultralytics` is a dev dependency, so it is importable on the maintainer's machine and on every CI
+runner. The release lane verified that a clean-environment install *imports* correctly and that a
+missing backend raises a typed `DependencyError` — both true. Neither establishes that the documented
+first-run command works, because **no test in the repository executes a real backend forward pass**
+(`review-tests.md` T1). The gap between "the package imports" and "the package works" is exactly the
+width of the missing evidence this roadmap's `m3-prove-it` exists to close.
+
+### What it changes
+
+1. `CONTRIBUTING.md:27`'s "intentionally ultralytics-free (Apache-2.0 clean)" is false in a second,
+   deeper way than the AGPL sdist: an **undeclared runtime dependency** the package cannot satisfy.
+2. `weight-integrity`'s planned fix — set `weights_only=True` — is impossible as written.
+3. A restrictive `pickle.Unpickler.find_class` that stubs `ultralytics.*` and extracts only the
+   `state_dict` resolves both: it removes the hidden dependency and is strictly safer than
+   `weights_only=False`. Tracked as `m1/checkpoint-loader`, which `weight-integrity` and
+   `ci-weight-fixture` now depend on.

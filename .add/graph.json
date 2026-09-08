@@ -109,6 +109,12 @@
    "/milestones/m1-trust-the-ship.md"
   ],
   [
+   "/tasks/checkpoint-loader.md",
+   "milestone",
+   "m1-trust-the-ship",
+   "/milestones/m1-trust-the-ship.md"
+  ],
+  [
    "/tasks/ci-matrix.md",
    "depends_on",
    "/tasks/pr-ci-gate.md",
@@ -155,6 +161,12 @@
    "milestone",
    "m3-prove-it",
    "/milestones/m3-prove-it.md"
+  ],
+  [
+   "/tasks/ci-weight-fixture.md",
+   "depends_on",
+   "/tasks/checkpoint-loader.md",
+   "/tasks/checkpoint-loader.md"
   ],
   [
    "/tasks/ci-weight-fixture.md",
@@ -527,6 +539,12 @@
    "milestone",
    "m1-trust-the-ship",
    "/milestones/m1-trust-the-ship.md"
+  ],
+  [
+   "/tasks/weight-integrity.md",
+   "depends_on",
+   "/tasks/checkpoint-loader.md",
+   "/tasks/checkpoint-loader.md"
   ],
   [
    "/tasks/weight-integrity.md",
@@ -1096,6 +1114,27 @@
    "type": "Task",
    "verified": []
   },
+  "/tasks/checkpoint-loader.md": {
+   "advised_by": "security-reviewer",
+   "depth": "deep",
+   "generated": {
+    "at": "2026-09-08",
+    "by": "add/3.5.0"
+   },
+   "gives": [
+    "S1 <the surface this publishes \u2014 an endpoint, function, or section>"
+   ],
+   "milestone": "m1-trust-the-ship",
+   "scope": [
+    "src/yowo/arch/_weights.py",
+    "tests/unit/test_checkpoint_loader.py"
+   ],
+   "sensitivity": "security",
+   "status": "direction",
+   "title": "Load an ultralytics .pt without ultralytics, and without unpickling foreign code",
+   "type": "Task",
+   "verified": []
+  },
   "/tasks/ci-matrix.md": {
    "advised_by": "release-planner",
    "depends_on": [
@@ -1129,6 +1168,7 @@
   "/tasks/ci-weight-fixture.md": {
    "advised_by": "artifact-integrity-steward",
    "depends_on": [
+    "/tasks/checkpoint-loader.md",
     "/tasks/weight-integrity.md",
     "/tasks/pr-ci-gate.md"
    ],
@@ -1908,6 +1948,9 @@
   },
   "/tasks/weight-integrity.md": {
    "advised_by": "security-reviewer",
+   "depends_on": [
+    "/tasks/checkpoint-loader.md"
+   ],
    "depth": "deep",
    "generated": {
     "at": "2026-09-08",

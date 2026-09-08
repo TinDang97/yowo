@@ -52,6 +52,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 - [Postprocess cost bounded independent of scene content](tasks/bounded-postprocess.md) — `direction` · `standard`
 - [Every blocking I/O call bounded by a stated timeout](tasks/capture-timeouts.md) — `direction` · `standard`
 - [One check-run name per workflow, so the required context is unambiguous](tasks/check-name-collision.md) — `direction` · `quick`
+- [Load an ultralytics .pt without ultralytics, and without unpickling foreign code](tasks/checkpoint-loader.md) — `direction` · `deep` · `security`
 - [CI runs the support surface the package claims, or the claim narrows](tasks/ci-matrix.md) — `direction` · `standard` · `architecture`
 - [A cached, integrity-verified model weight CI can reach](tasks/ci-weight-fixture.md) — `direction` · `standard` · `data`
 - [Live sources stream results instead of accumulating them](tasks/cli-bounded-memory.md) — `direction` · `standard`

@@ -12,6 +12,7 @@ scope:
 gives:
   - S1 <the surface this publishes — an endpoint, function, or section>
 depends_on:
+  - /tasks/checkpoint-loader.md
   - /tasks/weight-integrity.md
   - /tasks/pr-ci-gate.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
