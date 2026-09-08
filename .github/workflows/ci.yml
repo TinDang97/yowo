@@ -63,3 +63,24 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit/ -x -q --tb=short --timeout=60
         timeout-minutes: 15
+
+  # Appended by ADD task `sdist-manifest`. Independent of `quality` by contract (A14).
+  # Not (yet) a required status check — promoting it is `pypi-trusted-publish`'s call (A7).
+  sdist:
+    name: Source Distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Verify the built distributions contain only what we publish
+        run: python scripts/verify_sdist_contents.py
+        timeout-minutes: 10
