@@ -1,0 +1,65 @@
+# Pre-merge quality gate.
+#
+# CONTRACT (frozen by ADD task `pr-ci-gate` — see .add/tasks/pr-ci-gate.md):
+#
+#   * Job ids here are a frozen set. Six later tasks append a job to this file:
+#     sdist-manifest, pypi-trusted-publish, arch-equivalence-in-ci,
+#     integration-tier-revival, coverage-floor, ci-matrix.
+#   * APPEND a new job id. Never rename, reuse, or restructure an existing one —
+#     a reused id silently changes what an already-configured required status
+#     check asserts (A11).
+#   * When you add a job, add its id to FROZEN_JOB_IDS in
+#     tests/unit/test_ci_contract.py in the SAME commit. That assertion exists so
+#     an append is a deliberate edit rather than a silent drift.
+#   * Do not add `needs:` between appended jobs unless your task declares the
+#     dependency — the appenders are independent by default (A14).
+#   * The steps below must stay identical to release.yml's `quality` job. A PR
+#     must not be able to pass a weaker gate than the one `main` runs
+#     (R:DIVERGENCE, asserted by test_ci_runs_the_same_four_quality_commands_as_release).
+#
+# The required status check configured on `main` is the job NAME, "Quality Gate".
+# See docs/ci-required-checks.md before changing it.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check src/ tests/ --quiet
+
+      - name: Format check
+        run: uv run ruff format src/ tests/ --check --quiet
+
+      - name: Type check
+        run: uv run pyright src/yowo/
+
+      - name: Unit tests
+        run: uv run pytest tests/unit/ -x -q --tb=short --timeout=60
+        timeout-minutes: 15
