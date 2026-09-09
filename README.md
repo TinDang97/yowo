@@ -798,6 +798,32 @@ Architecture and module contracts are documented in:
 
 ---
 
+## Model weights and licensing
+
+yowo's **code** is Apache-2.0. Its **default model weights are not** — every built-in
+model variant this package can load by name (all 10 pinned `yolo11`/`yolo26` detection
+weights, the `-cls` classification weights, and the `-obb` oriented-bounding-box
+weights) is an Ultralytics release asset licensed under AGPL-3.0, not Apache-2.0.
+
+- **The code is Apache-2.0.** See [LICENSE](LICENSE).
+- **Default weights are AGPL-3.0, fetched at runtime, not bundled.** `yowo detect`,
+  `yowo classify`, and `yowo detect-obb` download the matching `.pt` file from
+  `github.com/ultralytics/assets` into `~/.cache/yowo/weights/` on first use — see
+  [NOTICE](NOTICE) and [`src/yowo/models/_registry.py`](src/yowo/models/_registry.py)
+  for the exact URL each variant resolves to.
+- **yowo redistributes no weights.** No `.pt`, `.onnx`, `.engine`, or other exported
+  artifact ships in this package's sdist or wheel — enforced by
+  [`scripts/verify_sdist_contents.py`](scripts/verify_sdist_contents.py) in CI.
+- **Need a weight that isn't an Ultralytics AGPL-3.0 asset?** Supply your own with
+  `--weights path/to.pt` on the CLI or `weights_path=` in the Python API
+  (`detect(..., weights_path=...)`, `ClassificationConfig(weights_path=...)`, etc.).
+  yowo does not require an Ultralytics-derived weight to run — any compatible
+  checkpoint works, and an explicit `weights_path` is never fetched from the network.
+
+---
+
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0 for the code — see [LICENSE](LICENSE). The default model weights are a
+separate, AGPL-3.0 concern — see [Model weights and licensing](#model-weights-and-licensing)
+above and [NOTICE](NOTICE).

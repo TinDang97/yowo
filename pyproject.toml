@@ -28,6 +28,12 @@ dependencies = [
     "tqdm>=4.66",
 ]
 
+[project.urls]
+Homepage = "https://github.com/TinDang97/yowo"
+Source = "https://github.com/TinDang97/yowo"
+Issues = "https://github.com/TinDang97/yowo/issues"
+Changelog = "https://github.com/TinDang97/yowo/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 pytorch = ["torch>=2.0"]
 export = ["torch>=2.0", "onnx>=1.12,<2.0", "onnxslim>=0.1"]
@@ -94,11 +100,14 @@ packages = ["src/yowo"]
 # sdist target existed at all; both are yanked.
 # `tests` is deliberately absent: the sdist is a build input, not a test bundle.
 # Asserted by scripts/verify_sdist_contents.py, run by the `sdist` job in ci.yml.
+# `NOTICE` was added by `licensing-provenance`: Apache-2.0 4(d) requires a
+# redistribution to carry it, so an absent NOTICE is a defect in the grant.
 [tool.hatch.build.targets.sdist]
 only-include = [
     "src/yowo",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "CHANGELOG.md",
     "pyproject.toml",
 ]

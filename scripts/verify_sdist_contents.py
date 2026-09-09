@@ -28,7 +28,12 @@ from xml.etree import ElementTree as ET
 # Both are admitted but never required of the source tree.
 # `tests` is deliberately absent: the sdist is a build input, not a test bundle (A6,
 # reversed by human decision). Adding it back is a one-line change to `only-include`.
-REQUIRED_ENTRIES = frozenset({"src", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"})
+# `NOTICE` was added by `licensing-provenance`: Apache-2.0 4(d) requires a
+# redistribution to carry it, so it is REQUIRED, not merely allowed -- named
+# here rather than the allowlist being relaxed to admit it.
+REQUIRED_ENTRIES = frozenset(
+    {"src", "README.md", "LICENSE", "NOTICE", "CHANGELOG.md", "pyproject.toml"}
+)
 GENERATED_ENTRIES = frozenset({"PKG-INFO", ".gitignore"})
 ALLOWED_ENTRIES = REQUIRED_ENTRIES | GENERATED_ENTRIES
 
