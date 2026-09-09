@@ -314,3 +314,85 @@ def test_load_verified_state_dict_signature_is_unchanged() -> None:
     params = inspect.signature(load_verified_state_dict).parameters
     assert list(params) == ["checkpoint_path", "raw_digest"]
     assert params["raw_digest"].default is None
+
+
+# ---------------------------------------------------------------------------
+# M2 / A5 / R:CONVERTFIRST -- coverage the frozen CHECKS declared and the first
+# build did not write. Authored by the orchestrator at review, against the
+# already-merged implementation, so each was proven red by reverting the change
+# it binds rather than by being written before it (see the commit).
+# ---------------------------------------------------------------------------
+
+
+def test_export_resolve_weights_signature_unchanged() -> None:
+    """covers: M2 -- the ~60 mock sites and three real callers stay valid.
+
+    The parent node refused to change this signature; this node must not either.
+    A previous check bound `load_verified_state_dict`'s signature, which is a
+    different function and leaves M2 unproven.
+    """
+    from yowo.models._weights import resolve_weights
+
+    sig = inspect.signature(resolve_weights)
+    assert list(sig.parameters) == ["spec", "cache_dir"], (
+        "resolve_weights grew or lost a parameter; every "
+        "patch(..., return_value=Path(...)) site is now lying about its shape"
+    )
+    assert sig.return_annotation == "Path", "resolve_weights must still return a bare Path"
+
+
+def test_export_reuses_the_meta_it_already_fetched(tmp_path: Path) -> None:
+    """covers: A5 -- one registry lookup per export, not two.
+
+    `classify` and `obb` already hold a `meta`; reading the pin must not add a
+    second lookup, because two lookups in one export can observe a re-pin
+    inconsistently.
+    """
+    spec = ModelSpec(family=ModelFamily.YOLO11, size=ModelSize.NANO, task="classify")
+    with (
+        patch("yowo.arch.build_classify_model", return_value=_make_mock_model()),
+        patch("yowo.arch._weights.load_classify_weights"),
+        patch("yowo.models._registry.get_cls", return_value=_meta(None)) as get_cls,
+    ):
+        _run_export(spec, tmp_path)
+    assert get_cls.call_count == 1, (
+        f"classify export made {get_cls.call_count} registry lookups; the pin must "
+        "come from the meta the branch already fetched (A5)"
+    )
+
+
+def test_export_never_converts_before_the_pin_is_compared(tmp_path: Path) -> None:
+    """covers: R:CONVERTFIRST, E1 -- a swapped file fails before it is unpickled.
+
+    `_extract_state_dict` is the unpickling conversion. On a pin mismatch it must
+    never be reached: converting first would run the payload the comparison
+    exists to reject. Does not use `_run_export`, because that helper resolves to
+    a path that does not exist and `load_weights` rejects a missing file before
+    the gate is ever consulted -- which would pass for the wrong reason.
+    """
+    from yowo.export._exporter import export_model
+    from yowo.models._weights import WeightIntegrityError
+
+    planted = tmp_path / "weights.pt"
+    planted.write_bytes(b"\x00" * 64)
+    spec = ModelSpec(family=ModelFamily.YOLO11, size=ModelSize.NANO)
+
+    def _write_fake_onnx(_m: object, _d: object, onnx_path: Path, **_kw: object) -> None:
+        onnx_path.write_bytes(b"fake")
+
+    with (
+        patch("yowo.export._exporter.resolve_weights", return_value=planted),
+        patch("yowo.export._exporter._export_onnx", side_effect=_write_fake_onnx),
+        patch("yowo.export._exporter.get_hardware_profile"),
+        patch("yowo.arch._weights._extract_state_dict") as extract,
+        patch(
+            "yowo.arch._weights.verify_digest",
+            side_effect=WeightIntegrityError(f"Weight failed integrity check: {planted}"),
+        ),
+        patch("yowo.models._registry.get", return_value=_meta("a" * 64)),
+        patch("yowo.arch.build_model", return_value=_make_mock_model()),
+        pytest.raises(WeightIntegrityError),
+    ):
+        export_model(spec, ExportFormat.ONNX, tmp_path, precision=Precision.FP32)
+
+    extract.assert_not_called()
