@@ -3,7 +3,8 @@ type: Milestone
 title: Nothing yowo publishes is wrong, unverified, or unreproducible
 status: direction
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-10, act: check, authority: process, via: process, boxes: "EXIT:8" }
 advised_by: milestone-planner
 ---
 ## CARD
@@ -31,6 +32,6 @@ risks:
 - [ ] No downloaded weight is deserialized before its pinned SHA-256 is verified — on first download and on every cache hit — and `torch.load` runs with `weights_only=True`. The cache-migration policy for already-cached weights is decided by a human and recorded   (← weight-integrity)
 - [ ] No credential reaches a log, an exception message, a result payload, or a cache key, asserted by a check using a credentialed RTSP URL   (← rtsp-credential-redaction)
 - [ ] CI can obtain a real model weight whose SHA-256 is verified before use, without a network fetch per job, and without committing the weight to the repository   (← ci-weight-fixture)
-- [ ] The licence of every shipped byte is declared, weight provenance and its AGPL implications are documented, and SECURITY.md exists. Checkable only once the sdist include list exists — depends on box 1   (← licensing-provenance)
+- [x] The licence of every shipped byte is declared, weight provenance and its AGPL implications are documented, and SECURITY.md exists. Checkable only once the sdist include list exists — depends on box 1   (← licensing-provenance)
 ## CLOSE
 evidence: <one row per task>
