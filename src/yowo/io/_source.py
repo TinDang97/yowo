@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from yowo.errors import SourceError, SourceTimeoutError
+from yowo.io._redact import redact_url
 from yowo.types import IMAGE_EXTS, RTSP_SCHEMES, VIDEO_EXTS, Frame
 
 
@@ -282,11 +283,20 @@ class RTSPStreamSource:
         max_frames: int | None = None,
         frame_skip: int = 0,
     ) -> None:
+        # The connectable URL stays private and is never interpolated into a
+        # message or published as an identifier. `safe_url` is what everything
+        # else reads, so a surface added later inherits redaction (M2).
         self._url = url
+        self._safe_url = redact_url(url)
         self._reconnect_timeout_s = reconnect_timeout_s
         self._max_frames = max_frames
         self._frame_skip = frame_skip
         self._active_cap: cv2.VideoCapture | None = None
+
+    @property
+    def safe_url(self) -> str:
+        """The stream URL with any credential removed — safe to emit anywhere."""
+        return self._safe_url
 
     @property
     def is_live(self) -> bool:
@@ -309,7 +319,7 @@ class RTSPStreamSource:
     def _open_cap(self) -> cv2.VideoCapture:
         cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
         if not cap.isOpened():
-            raise SourceError(f"Cannot open RTSP stream: {self._url}")
+            raise SourceError(f"Cannot open RTSP stream: {self._safe_url}")
         return cap
 
     def __iter__(self) -> Iterator[Frame]:
@@ -333,7 +343,7 @@ class RTSPStreamSource:
                     if frame_index % skip_mod == 0:
                         yield Frame(
                             pixels=np.asarray(bgr, dtype=np.uint8),
-                            source_id=self._url,
+                            source_id=self._safe_url,
                             frame_index=frame_index,
                             timestamp_ms=0.0,
                         )
@@ -347,7 +357,8 @@ class RTSPStreamSource:
                     wait = min(2**retry_count, 10)
                     if time.monotonic() + wait > deadline:
                         raise SourceTimeoutError(
-                            f"RTSP stream {self._url} timed out after {self._reconnect_timeout_s}s"
+                            f"RTSP stream {self._safe_url} timed out after "
+                            f"{self._reconnect_timeout_s}s"
                         )
                     time.sleep(wait)
                     retry_count += 1

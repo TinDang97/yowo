@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 4
+delta_seq: 5
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M5 · open · 2026-09-09] Bind every Must and Reject to a covers: key as you write CHECKS, not at gate time. Two rules went unbound here and the gate caught it after the freeze, forcing a refreeze+rebrief cycle for what was pure bookkeeping. (evidence: /tasks/rtsp-credential-redaction.md)
 - [ADD · M4 · open · 2026-09-09] Building several frozen tasks in one working tree defeats the gate's scope check: each node's gate sees the others' edits as undeclared sensitive changes. Committing them together makes the refusal vanish without fixing anything — the honest replay is one task alone in the tree, gated, then committed. (evidence: /tasks/version-single-source.md)
 - [ADD · M3 · open · 2026-09-08] A check that asserts a workflow's shape cannot see whether the workflow WORKS. `publish` was gated on a step output that nothing wrote — every check green, PyPI publish silently never running. Static config assertions need a companion claim about what they cannot prove. (evidence: /tasks/pypi-trusted-publish.md)
 - [ADD · M2 · open · 2026-09-08] hatchling's sdist `include` ADDS to a whole-repo sweep; only `only-include` restricts it. A probe before freeze caught this — the contract would have frozen the wrong key and shipped green checks over a still-broken artifact. (evidence: /tasks/sdist-manifest.md)

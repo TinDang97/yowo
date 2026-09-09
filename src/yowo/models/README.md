@@ -64,8 +64,21 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
 Download behavior:
 - Retries: 3 attempts with exponential backoff (2s, 4s, 8s).
 - Progress: `tqdm` progress bar to stderr (suppressed when `CI=true`).
-- Hash verification: SHA-256 digest checked against `ModelMeta.default_weights_url` sidecar `.sha256` file.
-- Atomic write: download to `.tmp` file, verify hash, then `os.replace()` to final path.
+- Hash verification: SHA-256 checked against `ModelMeta.sha256`, a digest pinned in the
+  registry beside the URL it verifies. Checked on first download **and on every cache
+  hit** — a file swapped after download would otherwise stay trusted forever.
+- Atomic write: download to `.tmp`, verify the digest, then `os.replace()`. A mismatch
+  leaves nothing behind: not the bad file, not a partial. It is never retried (the same
+  wrong bytes would return) and never downgraded to a warning.
+- Pre-existing cache entries: a cached weight that fails verification is re-downloaded
+  once and replaced, with a warning. Not a hard failure — that would break working and
+  air-gapped installs on upgrade — and not grandfathered.
+- Unpinned models: a user-registered `ModelMeta` may set `sha256=None`. Its weights load
+  with a warning rather than a refusal, since a private bucket has no digest we could know.
+- Deserialisation: after verification a checkpoint is converted once to a tensor-only
+  `state_dict` sidecar. Every later load reads that with `torch.load(weights_only=True)`
+  and executes nothing. The sidecar is keyed to the raw file's digest, so a re-fetched or
+  re-pinned weight regenerates it instead of serving stale tensors.
 
 ---
 

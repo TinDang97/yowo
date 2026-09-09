@@ -14,6 +14,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -248,6 +249,81 @@ def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     )
 
 
+def _sidecar_path(checkpoint_path: Path) -> Path:
+    """Where the converted, tensor-only state_dict lives for this checkpoint."""
+    return checkpoint_path.with_suffix(".state_dict.pt")
+
+
+def _raw_digest(path: Path) -> str:
+    """SHA-256 of the raw checkpoint, used only to key its converted sidecar.
+
+    This is not the security check — `models._weights.verify_digest` already ran
+    against the pinned value before anything here saw the file. This keys the
+    sidecar to the exact bytes it was derived from, so a re-fetched or re-pinned
+    weight regenerates it instead of silently serving old tensors.
+    """
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_verified_state_dict(
+    checkpoint_path: Path, raw_digest: str | None = None
+) -> dict[str, _torch.Tensor]:
+    """Return the checkpoint's state_dict, unpickling at most once, ever.
+
+    m1 requires ``torch.load(weights_only=True)``, which cannot read an
+    ultralytics checkpoint at all — it refuses the ``nn.Module`` the weights live
+    inside. So the dangerous read happens exactly once, against bytes whose
+    SHA-256 already matched the pin, and its output is re-serialised as a plain
+    tensor mapping. Every later load reads that sidecar with
+    ``weights_only=True`` and executes nothing.
+
+    The sidecar stores the raw file's digest alongside the tensors and is only
+    trusted when that digest matches. A re-pinned or re-fetched weight therefore
+    regenerates it automatically, and a stale sidecar from an earlier version can
+    never serve old weights under a new pin. A missing or mismatched sidecar
+    falls back to verify-and-reconvert — never to loading it unchecked.
+
+    Args:
+        checkpoint_path: The raw ``.pt``, already digest-verified by the caller.
+        raw_digest: That verified digest. ``None`` means unpinned, in which case
+            the sidecar is still used but keyed on ``None``.
+    """
+    import torch
+
+    if raw_digest is None:
+        raw_digest = _raw_digest(checkpoint_path)
+    sidecar = _sidecar_path(checkpoint_path)
+    if sidecar.exists():
+        try:
+            blob = torch.load(sidecar, map_location="cpu", weights_only=True)
+        except Exception:
+            blob = None  # unreadable or written by an older torch — reconvert
+        if isinstance(blob, dict) and blob.get("raw_sha256") == raw_digest:
+            tensors = blob.get("tensors")
+            if isinstance(tensors, dict):
+                return tensors
+
+    # First load for these bytes: the one and only unpickle, on verified input.
+    state = _extract_state_dict(checkpoint_path)
+    logger.info(
+        "Converted %s to a tensor-only state_dict; later loads skip the unpickler.",
+        checkpoint_path.name,
+    )
+    try:
+        tmp = sidecar.with_suffix(".tmp")
+        torch.save({"raw_sha256": raw_digest, "tensors": state}, tmp)
+        tmp.replace(sidecar)
+    except OSError:
+        # A read-only or full cache directory must not break loading; the only
+        # cost is that the next load converts again.
+        logger.debug("Could not write %s; will reconvert next time.", sidecar)
+    return state
+
+
 def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
     """Load ultralytics checkpoint weights into a native YOLOModel.
 
@@ -264,7 +340,7 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = _extract_state_dict(path)
+    src_state = load_verified_state_dict(path)
 
     # Remap keys
     mapped: dict[str, _torch.Tensor] = {}
@@ -396,7 +472,7 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = _extract_state_dict(path)
+    src_state = load_verified_state_dict(path)
 
     # Remap keys
     mapped: dict[str, _torch.Tensor] = {}
@@ -480,7 +556,7 @@ def load_obb_weights(model: OBBModel, weights_path: str | Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = _extract_state_dict(path)
+    src_state = load_verified_state_dict(path)
 
     # Remap keys using the same _LAYER_MAP as detection loading
     mapped: dict[str, _torch.Tensor] = {}
