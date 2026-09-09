@@ -8,6 +8,9 @@ Quick start::
             print(f"{box.class_name}: {box.confidence:.2f}")
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as metadata_version
+
 from yowo._convenience import classify, detect, detect_obb, parse_model_name
 from yowo.backends import ModelBuilder
 from yowo.classify_engine import ClassificationEngine
@@ -120,7 +123,25 @@ from yowo.types import (
     SourceCategory as SourceCategory,
 )
 
-__version__ = "2.4.1"
+
+def _resolve_version() -> str:
+    """The version from distribution metadata — never a second declaration.
+
+    `pyproject.toml:project.version` is the single source; it is what
+    semantic-release bumps and what PyPI serves. A literal here would be a
+    second writer, and it already drifted: this module said 2.4.1 while the
+    package was 2.5.0, so every export sidecar stamped a yanked version.
+
+    An uninstalled tree yields a sentinel rather than a plausible-looking
+    number, because a stale fallback literal re-creates exactly that drift.
+    """
+    try:
+        return metadata_version("yowo")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+__version__ = _resolve_version()
 
 __all__ = [
     "BackendError",

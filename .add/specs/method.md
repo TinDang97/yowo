@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 3
+delta_seq: 4
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M4 · open · 2026-09-09] Building several frozen tasks in one working tree defeats the gate's scope check: each node's gate sees the others' edits as undeclared sensitive changes. Committing them together makes the refusal vanish without fixing anything — the honest replay is one task alone in the tree, gated, then committed. (evidence: /tasks/version-single-source.md)
 - [ADD · M3 · open · 2026-09-08] A check that asserts a workflow's shape cannot see whether the workflow WORKS. `publish` was gated on a step output that nothing wrote — every check green, PyPI publish silently never running. Static config assertions need a companion claim about what they cannot prove. (evidence: /tasks/pypi-trusted-publish.md)
 - [ADD · M2 · open · 2026-09-08] hatchling's sdist `include` ADDS to a whole-repo sweep; only `only-include` restricts it. A probe before freeze caught this — the contract would have frozen the wrong key and shipped green checks over a still-broken artifact. (evidence: /tasks/sdist-manifest.md)
 - [ADD · M1 · open · 2026-09-08] A roadmap drafted as milestones + tasks with dependencies written in prose is a partition, not a DAG. 'milestone:' is the ONE edge key that accepts a bare slug (add.py:452); every other key — depends_on: included — needs a full '/tasks/<slug>.md' cid or the value stays silently unresolved and yields no edge. Symptom: graph.json shows only milestone edges, and 'add status' walks slug order, so the resume point lands in a late milestone on a task whose real prerequisites do not exist yet. Draw depends_on edges when the tasks are created, then confirm with 'add wave <milestone>' that the levels match the intended order. (evidence: 25e907e)

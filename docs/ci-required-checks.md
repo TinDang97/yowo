@@ -14,6 +14,28 @@ Frozen by ADD task `pr-ci-gate`. Change this file and
 |---|---|---|
 | Branch | `main` | the only protected branch; releases cut from it |
 | Required status check | **`Quality Gate`** | the `name:` of the `quality` job in `ci.yml` — GitHub exposes the job *name*, not its id |
+
+## Check-run names, and which workflow owns each
+
+A required status check is configured by **name**, not by workflow. If two workflows
+publish the same check-run name, GitHub cannot tell which one satisfied the requirement —
+a gate meant to prove a pull request passed can be satisfied by a push-to-`main` run
+instead. Both workflows once published `Quality Gate` *and* `Source Distribution`; the
+release path is now suffixed so every name resolves to exactly one job.
+
+| Check-run name | Workflow | Job id | Required on `main`? |
+|---|---|---|---|
+| `Quality Gate` | `ci.yml` | `quality` | **yes** |
+| `Source Distribution` | `ci.yml` | `sdist` | no — see `pypi-trusted-publish` |
+| `Quality Gate (release)` | `release.yml` | `quality` | no |
+| `Source Distribution (release)` | `release.yml` | `sdist` | no |
+| `Semantic Release` | `release.yml` | `release` | no |
+| `Publish to PyPI` | `release.yml` | `publish` | no |
+
+**Never rename a name in the left column that is marked required.** Branch protection
+stores the string; renaming the job leaves protection referencing a context nothing
+publishes, which never blocks anything and still looks configured.
+`tests/unit/test_check_name_uniqueness.py` asserts both halves.
 | Strict (require branches up to date) | `false` | a solo maintainer rebasing every PR before merge is friction without a corresponding risk here |
 | `enforce_admins` | **`true`** | decided 2026-09-08. Nobody bypasses a failing check, repository owner included — an advisory gate is the state this task exists to change |
 | Required approving reviews | none | single maintainer; the gate is automated, not social |
