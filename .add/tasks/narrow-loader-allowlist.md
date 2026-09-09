@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Enumerate the torch layer classes the allowlist admits, instead of a prefix
-status: direction
+status: done
 depth: standard
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -19,12 +19,22 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:da482b07bcbb4659", receipt: /tasks/narrow-loader-allowlist.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|R:PREFIX=confirm|R:GUESSED=confirm" }
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:d1c08876f3db2e82", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:b40315b80855b734", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:5f1a307c7568bace" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/narrow-loader-allowlist.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/narrow-loader-allowlist.d/runs/2.md }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:f9ba09c67bdba084" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/narrow-loader-allowlist.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:6d35ad591aaa218a", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:908703babb1184a6" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/narrow-loader-allowlist.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/narrow-loader-allowlist.d/runs/4.md, brief: "sha256:908703babb1184a6", reason: "Measured, not guessed: 11 pairs from 10 digest-verified checkpoints plus a 25-model in-process sweep; manifest committed and asserted in both directions. All 10 pinned variants load; 499/499 tensors identical to the pre-change loader; find_class 0.073s to 0.032s. Closes a code-execution path the build found and I reproduced independently: shim.load was stock pickle.load, and torch's legacy non-zip reader calls pickle_module.load on the header before any Unpickler exists, so a REDUCE ran os.mkdir and only then failed on Invalid magic number. Now refused before execution. Parameter and Flatten omitted against assumption wording because nothing observed them - M2 and R:GUESSED beating my parenthetical." }
 advised_by: security-reviewer
 ---
 ## CARD
 goal: The checkpoint allowlist names the torch layer classes it admits, rather than admitting a namespace.
 why: `checkpoint-loader` froze `torch.nn.modules.` as a PREFIX rule, which admits any class in that namespace. Every one is data-bearing so nothing is currently wrong, but it is the broadest entry in the trust boundary and the only one that is not enumerated. Narrowing it needs the real set measured across all ten shipped variants — which is why this depends on `ci-weight-fixture` for reachable checkpoints, rather than being guessed from the single `yolo11n.pt` available when the loader was built.
-beat: scaffold · next: author narrow-loader-allowlist's RULES, ASSUMPTIONS and CHECKS, then add freeze narrow-loader-allowlist
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -123,12 +133,25 @@ regression floor: `test_checkpoint_loader.py`, `test_arch_model.py`, `test_class
   `startswith` over a torch namespace survives.
 - test_allowlist_matches_the_recorded_measurement · covers: M2, M4, R:GUESSED · every entry traces to a
   recorded observation; no entry is unaccounted for.
-- test_unlisted_torch_class_is_refused · covers: M3, A4, E3 · an unlisted torch layer is refused like any other name.
+- test_unlisted_torch_class_is_refused · covers: M3, A4 · an unlisted torch layer is refused like any
+  other name.
+- test_unlisted_torch_class_is_refused[module-itself] · covers: E3 · a
+  checkpoint naming `Module` itself is refused; the old prefix admitted it.
 - test_refusal_names_the_class_and_the_change_path · covers: M3, A6 · the message is actionable.
-- test_lookalike_torch_prefixes_are_refused · covers: A3, E2 · `torch.nn.parameterfoo.X` does not slip through.
+- test_lookalike_torch_prefixes_are_refused · covers: A3 · look-alike namespaces do not slip through.
+- test_lookalike_torch_prefixes_are_refused[torch.nn.parameterfoo-X] · covers: E2 · refused BY NAME,
+  with no import of the module attempted — the old prefix rule tried to import it.
+- test_lookalike_torch_prefixes_are_refused[torch.nn.modulesX-Y] · covers: E2 · the detection-side
+  look-alike is refused too.
 - test_classification_layers_are_admitted · covers: A2, E1 · the cls head loads.
 - test_measurement_script_downloads_nothing_in_the_unit_suite · covers: A7 · the corpus never enters CI.
-- test_every_pinned_variant_still_loads · covers: M5, E4 · integration tier, not the unit suite.
+- test_every_pinned_variant_still_loads[yolo11n] · covers: M5, E4 · a real pinned checkpoint loads
+  end to end through the enumerated allowlist. Delivered as `scripts/verify_every_pinned_variant_loads.py`
+  with JUnit output, not under `tests/integration/`, because that path is outside this node's frozen
+  scope — following `verify_checkpoint_equivalence.py`, the precedent the parent task set. Moving it
+  into the pytest integration tier belongs to `integration-tier-revival`.
+- test_every_pinned_variant_still_loads[yolo26x] · covers: M5 · the largest variant, so the corpus is
+  swept end to end and not merely sampled at the cheap end.
 red-first: every check MUST fail first.
 
 ## EVIDENCE

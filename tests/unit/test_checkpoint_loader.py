@@ -303,6 +303,9 @@ def test_allowlist_matches_the_recorded_measurement() -> None:
         # A data-bearing torch layer that no shipped variant uses.
         ("torch.nn.modules.rnn", "LSTM", lambda: torch.nn.LSTM(2, 2)),
     ],
+    # Explicit ids: the generated ones embed "<lambda>" for the factory, which
+    # reads as an unfilled template placeholder anywhere a check name is quoted.
+    ids=["module-itself", "unused-layer"],
 )
 def test_unlisted_torch_class_is_refused(
     tmp_path: Path, module: str, name: str, make: object

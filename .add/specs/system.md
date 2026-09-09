@@ -7,7 +7,7 @@ description: how it is built, and what that forecloses
 tags: [python, multi-backend, packaging, ci]
 sources: [pyproject.toml, .github/workflows/release.yml, src/yowo/, tests/]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 1
+delta_seq: 2
 ---
 ## Now
 
@@ -64,5 +64,6 @@ run by one workflow — `.github/workflows/release.yml` — on push to `main`, o
 
 ## Deltas
 - 2026-09-08 · bundle initialised; system authored from `pyproject.toml`, the single workflow, and
+- [SDD · S2 · open · 2026-09-09] A pickle_module shim has four read entry points, not one: Unpickler, load, loads, and torch's legacy non-zip reader, which calls pickle_module.load on the file header three times BEFORE any Unpickler exists. Restricting only Unpickler leaves that header read unrestricted, so a non-zip .pt whose first object is a REDUCE executes it and only then fails on 'Invalid magic number'. Reproduced against the shipped loader: os.mkdir ran. Restrict every entry point the module exposes, not the one the happy path uses. (evidence: /tasks/narrow-loader-allowlist.d/runs/4.md)
 - [SDD · S1 · open · 2026-09-09] A milestone exit box can hold more clauses than the task pointed at it. Author RULES from the BOX, not from the task title, or the gate goes green on a contract that covers a third of what was asked. (evidence: /tasks/reproducible-sdist.md)
   the module tree as they stand at v2.5.0.
