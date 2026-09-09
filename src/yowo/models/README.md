@@ -134,6 +134,12 @@ register(ModelMeta(
 ))
 ```
 
+If your bucket requires a credential, put it in `default_weights_url` as normal userinfo
+(`https://KEY:SECRET@my-bucket.s3.amazonaws.com/yolo_custom_n.pt`) — the registry stores it
+intact so the download can authenticate. It is never displayed: `yowo.io.redact_url()` strips
+the credential everywhere `default_weights_url` is shown, including `yowo models` output and
+download-failure messages.
+
 ---
 
 ## Cache Layout
