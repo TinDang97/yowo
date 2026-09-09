@@ -21,6 +21,11 @@ verified:
   - { by: "cli", at: 2026-09-08, act: brief, authority: process, brief: "sha256:0c05949e3f580ecf" }
   - { by: "process:run", at: 2026-09-08, act: run, authority: process, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/1.md }
   - { by: "Tin Dang", at: 2026-09-08, act: gate, authority: human, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/1.md, brief: "sha256:0c901e22456a9ae0" }
+  - { by: loop, at: 2026-09-09, act: reopen, to: direction, reason: "M2 and R:ARBITRARY_IMPORT were breached by the shipped loader and are now repaired. The restricted unpickler guarded find_class only, but a pickle_module shim has four read entry points: Unpickler, load, loads, and torch's legacy non-zip reader, which calls pickle_module.load on the file header three times BEFORE it builds any Unpickler. shim.load was stock pickle.load, so a non-zip .pt whose first object is a REDUCE executed it and only then failed on 'Invalid magic number'. Reproduced against the shipped tree: os.mkdir ran, and the loader then raised ModelLoadError after the payload had already executed. Found by narrow-loader-allowlist's build, fixed in that node's commit (all four entry points now route through _RestrictedUnpickler), and reopened here because the rule it breaks is this task's, not that one's." }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:355b6ddb618a29c6", binding: "sha256:5e828bdea5ba3705" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:05937d827459935b" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/checkpoint-loader.d/runs/2.md, brief: "sha256:05937d827459935b", reason: "Re-gated after a breach of its own M2/R:ARBITRARY_IMPORT was found and repaired. The restricted unpickler guarded find_class only; torch's legacy non-zip reader calls pickle_module.load on the header three times before any Unpickler exists, and shim.load was stock pickle.load, so a non-zip .pt whose first object is a REDUCE executed before anything consulted the allowlist. Reproduced independently against the shipped tree - os.mkdir ran, then ModelLoadError was raised after the fact. All four entry points the shim exposes now route through _RestrictedUnpickler; the same probe is refused before execution. Bound by test_legacy_format_file_runs_nothing_before_find_class, with 499/499 tensor equivalence unchanged." }
 advised_by: security-reviewer
 ---
 ## CARD
@@ -81,6 +86,12 @@ regression floor: the full unit suite stays green; no public signature changes; 
 - test_refuses_a_foreign_global_by_name · covers: M2, R:ARBITRARY_IMPORT, E2 · builds a checkpoint naming a non-torch, non-ultralytics global and asserts the load is refused, that the message quotes the global, and that the module was never imported.
 - verify_checkpoint_equivalence · covers: M3, E1, E3 · `scripts/verify_checkpoint_equivalence.py <ckpt>` compares the new loader's state_dict against a reference digest captured from the CURRENT loader before the change — same keys, same dtypes, same per-tensor sha256 — and emits JUnit XML. It is a script, not a unit test, because it needs a real multi-megabyte checkpoint that CI cannot obtain until `ci-weight-fixture` lands, and a `skipif`-green unit test would prove nothing.
 - test_ema_weights_win_over_model_weights · covers: M4 · asserts EMA preference survives the refactor.
+- test_legacy_format_file_runs_nothing_before_find_class · covers: M2, R:ARBITRARY_IMPORT · added
+  2026-09-09, after this task had shipped. `find_class` was the only guarded entry point, but torch's
+  legacy non-zip reader calls `pickle_module.load` on the file header three times before an
+  `Unpickler` exists, and `shim.load` was stock `pickle.load` — so a non-zip `.pt` whose first object
+  is a REDUCE ran it and only then failed on "Invalid magic number". The check builds exactly that
+  file and asserts the side effect never happens.
 - test_unreadable_checkpoint_raises_a_typed_yowo_error · covers: M5, A6, R:SILENT_PARTIAL · asserts the error is importable from `yowo.errors`, names the offending global, and that no partially-populated model is returned.
 
 red-first: every check MUST fail first.
