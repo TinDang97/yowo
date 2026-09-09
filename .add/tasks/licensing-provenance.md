@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Weight provenance, AGPL disclosure, SECURITY.md, project URLs
-status: direction
+status: done
 depth: standard
 sensitivity: legal
 milestone: m1-trust-the-ship
@@ -26,6 +26,8 @@ verified:
   - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:fe68556923c0b6d1", receipt: /tasks/licensing-provenance.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|R:OVERCLAIM=confirm|R:UNSHIPPED=confirm" }
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:1c57db0a27fbb11e", binding: "sha256:e9a79d98e3503d91" }
   - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:6909f64581d1d336" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/licensing-provenance.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/licensing-provenance.d/runs/1.md, brief: "sha256:b0c050cd8b3fdbae", reason: "12 checks green on a bound receipt. NOTICE verified present in a REAL built sdist, not asserted against only-include: it is in REQUIRED_ENTRIES, so a build that omits it fails rather than shipping (R:UNSHIPPED). No overclaim survives - the disclosure states facts, names the escape hatch, and nowhere tells an adopter their deployment is AGPL-free; CONTRIBUTING's clean claim is qualified to the code rather than deleted. Copyright holder is the human's answer, not an inference. The out-of-scope regression the build refused to touch - its own .gitignore hazard fix breaking sdist-manifest's planted fixture - was repaired against the task that owns it, which was reopened and re-gated." }
 advised_by: docs-writer
 ---
 ## CARD
@@ -60,7 +62,7 @@ BLOCKED on one human decision, deliberately not guessed: the copyright holder fo
   unanswered: how far the AGPL boundary goes (document / also warn at first download / also gate
   behind explicit consent), how much of the m1 trust boundary SECURITY.md documents, and whether the
   misleading v2.5.0 GitHub release note and the missing project URLs fall inside this node.
-beat: scaffold · next: answer the interview, then author licensing-provenance's RULES, ASSUMPTIONS and CHECKS
+beat: done · next: add status
 
 ## RULES
 <must>
