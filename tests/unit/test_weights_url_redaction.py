@@ -18,6 +18,7 @@ from __future__ import annotations
 from unittest import mock
 
 import pytest
+import requests
 
 from yowo.errors import ModelNotFoundError
 from yowo.models._registry import ModelMeta, get, register
@@ -159,6 +160,88 @@ class TestDownloadDiagnosticsRedaction:
         _no_credential(message)
         assert "<unparseable url>" in message
         assert UNPARSEABLE_URL not in message
+
+
+class TestLastExcCredentialLeak:
+    """`_download`'s retries-exhausted message interpolates `{last_exc}` directly.
+
+    `requests` does NOT strip userinfo from `PreparedRequest.url` -- it sets the
+    `Authorization` header AND leaves the credential in `.url` -- so `HTTPError`,
+    `InvalidSchema` and `InvalidURL` all carry the raw credentialed URL in their
+    own `str()`. Every one of those is caught by `_download`'s
+    `except Exception as exc: last_exc = exc` and then interpolated into the
+    message a user sees, bypassing the `redact_url(url)` substitution entirely.
+    """
+
+    def test_download_failure_scrubs_credential_from_http_error(self, tmp_path) -> None:
+        """covers: M1, R:USERINFO -- a real `requests.Response.raise_for_status()`
+        HTTPError, the most likely path in practice (a private bucket returning
+        401/403)."""
+        response = requests.Response()
+        response.status_code = 401
+        response.url = CREDENTIALED_URL
+        response.reason = "Unauthorized"
+
+        dest = tmp_path / "custom_n.pt"
+        with (
+            mock.patch("yowo.models._weights.requests.get", return_value=response),
+            mock.patch("yowo.models._weights.time.sleep"),
+            pytest.raises(ModelNotFoundError) as excinfo,
+        ):
+            _download(CREDENTIALED_URL, dest)
+
+        message = str(excinfo.value)
+        assert "401" in message and "Unauthorized" in message, (
+            "the operator still needs to know why the download failed"
+        )
+        _no_credential(message)
+
+    def test_download_failure_scrubs_credential_from_invalid_url_error(self, tmp_path) -> None:
+        """covers: M1, R:USERINFO -- `requests.get` itself raises `InvalidURL`
+        synchronously (no network) for a malformed authority, and the raw
+        credentialed URL is embedded verbatim in that exception's message."""
+        dest = tmp_path / "custom_n.pt"
+        with (
+            mock.patch("yowo.models._weights.time.sleep"),
+            pytest.raises(ModelNotFoundError) as excinfo,
+        ):
+            # Real requests.get, unmocked: a bad port raises InvalidURL before
+            # any connection is attempted -- no network access happens here.
+            _download(UNPARSEABLE_URL, dest)
+
+        message = str(excinfo.value)
+        _no_credential(message)
+
+    def test_download_failure_scrubs_requoted_credential(self, tmp_path) -> None:
+        """covers: M1, R:USERINFO -- `requests` re-quotes special characters
+        before embedding the URL in `PreparedRequest.url` (a raw space becomes
+        `%20`), so the leaked rendering is not byte-identical to `url`. Build
+        the requoted form the same way `requests` does, with no network call."""
+        password_with_space = "sec ret value"
+        url_with_space = f"https://{USER}:{password_with_space}@{HOST}{PATH}"
+
+        prepared = requests.models.PreparedRequest()
+        prepared.prepare_url(url_with_space, None)
+        requoted_url = prepared.url
+        assert requoted_url != url_with_space, "sanity: requests must have actually requoted this"
+        assert password_with_space not in requoted_url, "sanity: the raw space is gone"
+
+        response = requests.Response()
+        response.status_code = 403
+        response.url = requoted_url
+        response.reason = "Forbidden"
+
+        dest = tmp_path / "custom_n.pt"
+        with (
+            mock.patch("yowo.models._weights.requests.get", return_value=response),
+            mock.patch("yowo.models._weights.time.sleep"),
+            pytest.raises(ModelNotFoundError) as excinfo,
+        ):
+            _download(url_with_space, dest)
+
+        message = str(excinfo.value)
+        assert password_with_space not in message, f"raw password leaked: {message!r}"
+        assert "sec%20ret%20value" not in message, f"requoted password leaked: {message!r}"
 
 
 class TestRegistryUnaffected:
