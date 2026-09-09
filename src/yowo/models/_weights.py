@@ -6,8 +6,10 @@ Downloads with retry and progress bar if not cached.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,39 @@ _CACHE_DIR = Path.home() / ".cache" / "yowo" / "weights"
 _MAX_RETRIES = 3
 _BACKOFF_SECONDS = (2, 4, 8)
 _CHUNK_SIZE = 8192
+
+
+class WeightIntegrityError(ModelNotFoundError):
+    """A weight's bytes do not match the digest pinned for it."""
+
+
+def file_digest(path: Path) -> str:
+    """SHA-256 of a file, streamed so a 110 MB weight is not held in memory."""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_digest(path: Path, expected: str) -> None:
+    """Raise unless ``path`` hashes to ``expected``.
+
+    The message carries the model path, the expected digest and the actual one,
+    so a reader can tell "corrupt download" from "upstream republished" without
+    re-deriving either. There is deliberately no non-raising variant: a
+    verification failure must never be downgraded to a warning or a fallback to
+    the unverified file (R:SILENT), and offering a soft mode is how that happens.
+    """
+    actual = file_digest(path)
+    if actual != expected:
+        raise WeightIntegrityError(
+            f"Weight failed integrity check: {path}\n"
+            f"  expected sha256: {expected}\n"
+            f"  actual   sha256: {actual}\n"
+            "The file was not used. If upstream republished this release, the "
+            "pinned digest in yowo.models._registry must be updated deliberately."
+        )
 
 
 def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
@@ -56,13 +91,44 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
     dest = root / spec.family.value / spec.size.value / f"{meta.weight_stem}.pt"
 
     if dest.exists():
-        return dest
+        if meta.sha256 is None:
+            _warn_unpinned(meta.weight_stem)
+            return dest
+        try:
+            # Every load, not once per process: a file swapped mid-run would
+            # otherwise stay trusted for the process lifetime (A9).
+            verify_digest(dest, meta.sha256)
+            return dest
+        except WeightIntegrityError:
+            # Warn and re-fetch (human decision, 2026-09-08). A weight cached
+            # before verification existed is not trusted, but neither is it a
+            # hard failure — that would break working and air-gapped installs on
+            # upgrade. It is replaced once, and the replacement is verified.
+            warnings.warn(
+                f"Cached weight for {meta.weight_stem} does not match its pinned "
+                "digest. It predates integrity checking or has been modified; "
+                "re-downloading once and replacing it.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            dest.unlink(missing_ok=True)
 
-    _download(meta.default_weights_url, dest)
+    if meta.sha256 is None:
+        _warn_unpinned(meta.weight_stem)
+    _download(meta.default_weights_url, dest, meta.sha256)
     return dest
 
 
-def _download(url: str, dest: Path) -> None:
+def _warn_unpinned(stem: str) -> None:
+    """A user-registered model has no digest we could know — warn, do not refuse."""
+    warnings.warn(
+        f"Model {stem!r} has no pinned sha256; its weights cannot be verified.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+
+def _download(url: str, dest: Path, expected_sha256: str | None = None) -> None:
     """Download *url* to *dest* with a tqdm progress bar and 3 retries.
 
     Uses atomic write: downloads to a ``.tmp`` sibling then renames.
@@ -83,8 +149,17 @@ def _download(url: str, dest: Path) -> None:
     for attempt in range(_MAX_RETRIES):
         try:
             _attempt_download(url, tmp_path, suppress_progress=suppress_progress)
+            # Verify before the file becomes reachable. A mismatch leaves
+            # nothing behind — not the bad file, not a partial (E1).
+            if expected_sha256 is not None:
+                verify_digest(tmp_path, expected_sha256)
             os.replace(tmp_path, dest)
             return
+        except WeightIntegrityError:
+            # Never retried and never swallowed: retrying a digest mismatch just
+            # re-downloads the same wrong bytes, and swallowing it is R:SILENT.
+            tmp_path.unlink(missing_ok=True)
+            raise
         except Exception as exc:
             last_exc = exc
             if attempt < _MAX_RETRIES - 1:

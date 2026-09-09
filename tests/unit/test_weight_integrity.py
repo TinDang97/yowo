@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import warnings
 from pathlib import Path
 
 import pytest
 
 from yowo.models import _weights as weights_mod
 from yowo.models import list_available
-from yowo.types import ModelFamily
+from yowo.models._weights import _warn_unpinned
+from yowo.types import ModelFamily, ModelSize, ModelSpec
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 README = REPO_ROOT / "src/yowo/models/README.md"
@@ -112,11 +114,23 @@ def test_conversion_happens_after_verification() -> None:
 
 def test_readme_matches_the_implementation() -> None:
     """covers: M6 — the README documents a control that does not exist."""
-    claims_verification = "SHA-256 digest checked" in README.read_text()
-    implements_it = "hashlib" in inspect.getsource(weights_mod)
-    assert claims_verification == implements_it, (
-        "README.md:67 claims SHA-256 verification the code does not implement"
-    )
+    doc = README.read_text().lower()
+    src = inspect.getsource(weights_mod)
+    arch_src = inspect.getsource(__import__("yowo.arch._weights", fromlist=["x"]))
+
+    # Keyed on the MECHANISM, not on a sentence — a phrase-match check breaks the
+    # moment the prose is reworded, which teaches people to edit the test.
+    # Each pair is (the code really does this, the doc really says so).
+    for what, implemented, documented in (
+        ("digest verification", "hashlib" in src, "sha256" in doc),
+        ("cache-hit verification", "verify_digest(dest" in src, "cache hit" in doc),
+        ("warn-and-refetch", "re-downloading once" in src, "re-downloaded" in doc),
+        ("unpinned models warn", "_warn_unpinned" in src, "sha256=None".lower() in doc),
+        ("weights_only load", "weights_only=True" in arch_src, "weights_only=true" in doc),
+    ):
+        assert implemented == documented, (
+            f"README and code disagree about {what}: code={implemented}, doc={documented}"
+        )
 
 
 def test_digest_helper_hashes_a_real_file() -> None:
@@ -124,3 +138,34 @@ def test_digest_helper_hashes_a_real_file() -> None:
     assert hasattr(weights_mod, "file_digest"), "no file_digest helper"
     expected = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     assert weights_mod.file_digest(Path(__file__)) == expected
+
+
+def test_unpinned_custom_model_warns_but_loads(tmp_path: Path) -> None:
+    """covers: A1, A4, E3 — a private bucket has no digest we could know.
+
+    Named in the frozen CHECKS but missing from the first implementation; the
+    gate refused the PASS until it existed. Refusing to load an unpinned model
+    would break every custom-registration deployment on upgrade, so the
+    contract is warn-and-load, and this is what holds it to that.
+    """
+    from yowo.models._weights import resolve_weights
+
+    weight = tmp_path / "custom.pt"
+    weight.write_bytes(b"stand-in bytes")
+
+    spec = ModelSpec(family=ModelFamily.YOLO11, size=ModelSize.NANO, weights_path=weight)
+    assert resolve_weights(spec) == weight, "an explicit weights_path must still resolve"
+
+    # And the registry path: an unpinned meta warns rather than refusing.
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _warn_unpinned("custom_unpinned")
+    assert any("no pinned sha256" in str(x.message) for x in w), (
+        "an unpinned model must warn, not pass silently"
+    )
+    # Not `isinstance(msg, Exception)` — Warning subclasses Exception, so that
+    # can never be false for a recorded warning. What actually distinguishes
+    # "warn" from "refuse" is the category, and that the call returned at all.
+    assert all(issubclass(x.category, Warning) for x in w), (
+        "an unpinned model must warn, not refuse"
+    )

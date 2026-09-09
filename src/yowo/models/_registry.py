@@ -26,6 +26,10 @@ class ModelMeta:
         num_classes: Number of output classes (80 for COCO).
         weight_stem: Name stem for weight files (e.g. ``"yolo11n"``).
         default_weights_url: HTTPS URL to the canonical ``.pt`` weights file.
+        sha256: Pinned digest of the canonical file, verified on first download
+            AND on every cache hit. ``None`` means unpinned — permitted for
+            user-registered models, which load with a warning rather than a
+            refusal, since a private bucket has no digest we could know.
     """
 
     family: ModelFamily
@@ -35,6 +39,7 @@ class ModelMeta:
     num_classes: int
     weight_stem: str
     default_weights_url: str
+    sha256: str | None = None
 
 
 _REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
@@ -109,8 +114,33 @@ _ASSETS_V83 = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 _ASSETS_V84 = "https://github.com/ultralytics/assets/releases/download/v8.4.0/"
 
 
+# Pinned SHA-256 of each canonical release asset, captured from the upstream
+# files themselves. yolo11n's value was cross-checked against a real cache
+# entry and matched byte for byte, confirming a pin validates a cache hit and
+# not merely a fresh download. Upstream republishing a tag with new bytes must
+# FAIL loudly here and be re-pinned deliberately — auto-accepting new bytes
+# under an old pin would make the pin decorative.
+_PINS: dict[str, str] = {
+    "yolo11l": "9ebd0e09d59811db4b1d61e2bc6730649608b1ac47f8dd01e2da6bca7c20023f",
+    "yolo11m": "d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95",
+    "yolo11n": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+    "yolo11s": "85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5",
+    "yolo11x": "7bc158aa95c0ebfdd87f70f01653c1131b93e92522dbe15c228bcd742e773a24",
+    "yolo26l": "9fe3c544f2b19bebad7ea41e76d7ad3d88b7c2f10d11d24430c5311f6b32db26",
+    "yolo26m": "401cea9ab23ad19246ff7744859816bc599f350e93c9dd30367b6f0a0745d0b7",
+    "yolo26n": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
+    "yolo26s": "646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b",
+    "yolo26x": "9fdd44a31c504547ffb81d2c6d9e6dac3493c8eaa8b0398d3f43bae6c7003e92",
+}
+
+
 def _make_meta(family: ModelFamily, size: ModelSize) -> ModelMeta:
     name = f"{family.value}{size.value}"
+    # YOLO26 assets live in the v8.4.0 release; YOLO11's in v8.3.0. This used a
+    # single base for both, so every YOLO26 detection weight 404'd — half the
+    # advertised models were undownloadable. _make_cls_meta always chose
+    # correctly; only this path was wrong.
+    base = _ASSETS_V83 if family == ModelFamily.YOLO11 else _ASSETS_V84
     return ModelMeta(
         family=family,
         size=size,
@@ -118,7 +148,8 @@ def _make_meta(family: ModelFamily, size: ModelSize) -> ModelMeta:
         input_width=640,
         num_classes=80,
         weight_stem=name,
-        default_weights_url=f"{_ASSETS_BASE}{name}.pt",
+        default_weights_url=f"{base}{name}.pt",
+        sha256=_PINS.get(name),
     )
 
 

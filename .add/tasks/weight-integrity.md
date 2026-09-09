@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Pinned SHA-256 verified on download and on cache hit; weights_only=True
-status: direction
+status: done
 depth: deep
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -15,7 +15,14 @@ gives:
 depends_on:
   - /tasks/checkpoint-loader.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:d61a2113a7cd9ca5", receipt: /tasks/weight-integrity.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:UNVERIFIED=confirm|R:SILENT=confirm" }
+  - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:989efb8d155bccc0", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:d40cbf0e820dab14" }
+  - { by: "builder", at: 2026-09-09, act: replan, authority: process, note: "Two checks were STRENGTHENED during Build after passing for the wrong reason; recorded because editing a check mid-build is the shape of a real violation and only the direction of the edit distinguishes it. (1) test_routine_load_uses_weights_only matched the string 'weights_only=True' inside the comment at arch/_weights.py:86 explaining why it cannot be used — it now strips comments. (2) test_conversion_happens_after_verification asserted only that load_verified_state_dict EXISTS; it was dead code, with all three real load paths still calling _extract_state_dict and still unpickling on every load. It now asserts zero direct callers remain and all three route through the verified conversion. (3) test_readme_matches_the_implementation keyed on an exact sentence and broke when the prose was corrected; it now checks five code/doc mechanism pairs. No check was loosened, no covers: key or rule changed, no frozen gives: moved." }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/weight-integrity.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/weight-integrity.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/weight-integrity.d/runs/2.md, brief: "sha256:c8325c5ddaf9cb8d" }
 advised_by: security-reviewer
 ---
 ## CARD
@@ -42,7 +49,7 @@ pinned for a file that cannot be fetched: `_registry.py:121` builds EVERY detect
 `v8.3.0/yolo26n.pt -> 404`, `v8.4.0/yolo26n.pt -> 200`. `_ASSETS_V84` already exists and
 `_make_cls_meta:151` picks it correctly; only the detection path is wrong. Half the models yowo
 advertises are undownloadable today.
-beat: scaffold · next: author weight-integrity's RULES, ASSUMPTIONS and CHECKS, then add freeze weight-integrity
+beat: done · next: add status
 
 ## RULES
 <must>
