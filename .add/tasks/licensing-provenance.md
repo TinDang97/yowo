@@ -25,6 +25,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:fe68556923c0b6d1", receipt: /tasks/licensing-provenance.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|R:OVERCLAIM=confirm|R:UNSHIPPED=confirm" }
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:1c57db0a27fbb11e", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:6909f64581d1d336" }
 advised_by: docs-writer
 ---
 ## CARD
