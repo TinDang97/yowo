@@ -1,19 +1,29 @@
 ---
 type: Task
 title: No credential in logs, exceptions, results, or cache keys
-status: direction
+status: done
 depth: standard
 sensitivity: security
 milestone: m1-trust-the-ship
 scope:
-  - src/yowo/io/_source.py
+  - src/yowo/io/
   - src/yowo/types.py
+  - tests/unit/
 gives:
   - S1 `Frame.source_id` as published for an RTSP source
   - S2 the exception messages `RTSPStreamSource` raises on open failure and on reconnect timeout
   - S3 the feature-cache key, which is `source_id` (cache/__init__.py:102)
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:e0fa142be1103f04", receipt: /tasks/rtsp-credential-redaction.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:LEAK=confirm" }
+  - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:fbc65a2b936c45ac", binding: "sha256:b85b43f28c97dd59" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:f18f5d7971c1131c" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/rtsp-credential-redaction.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:791ef4f9bb8e4fd6", binding: "sha256:b85b43f28c97dd59" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/rtsp-credential-redaction.d/runs/2.md }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:c41b531490c5e82a" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/rtsp-credential-redaction.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/rtsp-credential-redaction.d/runs/3.md, brief: "sha256:c41b531490c5e82a" }
 advised_by: security-reviewer
 ---
 ## CARD
@@ -28,7 +38,7 @@ why: it leaks today, verbatim, on all four surfaces the exit box names. Demonstr
   - `cache/__init__.py:102` — `source_id` IS the feature-cache key, so the password becomes a dict key
     held in memory for the process lifetime.
 RTSP credentials are usually long-lived, shared across an estate of cameras, and rarely rotated.
-beat: scaffold · next: author rtsp-credential-redaction's RULES, ASSUMPTIONS and CHECKS, then add freeze rtsp-credential-redaction
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -111,17 +121,29 @@ regression floor: `tests/unit/test_source.py`, `test_cache.py` and `test_streami
   a bare username is identifying and is half a credential.
 
 ## CHECKS
-- test_source_id_carries_no_credential · covers: M1, A2 · neither user nor password survives.
-- test_open_failure_exception_carries_no_credential · covers: M1, A8 · the `:312` message.
-- test_reconnect_timeout_message_carries_no_credential · covers: M1, A8 · the `:350` message.
-- test_cache_key_carries_no_credential · covers: M1, A14 · the key the cache actually stores.
+- test_source_id_carries_no_credential · covers: M1, R:LEAK, A2 · neither user nor password survives
+  in the identifier that reaches result JSON — the `returned` half of R:LEAK.
+- test_open_failure_exception_carries_no_credential · covers: M1, R:LEAK, A8 · the `:312` message —
+  the `raised` half of R:LEAK.
+- test_reconnect_timeout_message_carries_no_credential · covers: M1, M2, A8 · asserts no emitted string
+  interpolates `self._url` AT ALL, which is what makes M2 structural rather than per-call-site: a
+  message added later cannot reintroduce the leak without failing this.
+- test_cache_key_carries_no_credential · covers: M1, R:LEAK, A14 · the key the cache actually stores —
+  the `used as a key` half of R:LEAK.
 - test_redacted_url_still_identifies_the_stream · covers: M3, A6 · host, port and path survive.
 - test_connectable_url_is_retained_privately · covers: A9 · the object can still connect.
 - test_clean_url_is_returned_unchanged · covers: A4 · no gratuitous rewriting.
 - test_username_without_password_is_still_removed · covers: E2 · half a credential is a credential.
 - test_malformed_url_emits_nothing_of_it · covers: E1, A10 · the parse-failure path does not leak.
 - test_non_rtsp_scheme_with_userinfo_is_redacted · covers: A3 · HTTP camera URLs too.
-red-first: every check MUST fail first.
+red-first: 9 of 10 failed before the build. The 10th is a guard — the object must retain a connectable
+  URL, since redacting the URL used to connect would break every RTSP stream.
+
+BINDING CORRECTION (post-freeze, pre-gate): the first freeze left M2 and R:LEAK named by no `covers:`
+  key, and `add gate` refused. The checks proving them already existed — I had simply not named the
+  rules. Nothing was weakened and no check changed; four `covers:` keys gained the rule ids they always
+  asserted. Recorded because "the gate refused, so I edited the node" is the shape of a real method
+  violation, and the distinction is only visible if the edit is written down.
 
 ## EVIDENCE
 receipt: <runs/<n>.md>

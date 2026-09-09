@@ -23,6 +23,7 @@ from yowo.io._decode import (
     preprocess_into,
 )
 from yowo.io._reader import PreparedItem, ThreadedFrameReader
+from yowo.io._redact import redact_url
 from yowo.io._sink import write_annotated_frame, write_annotated_frames, write_json
 from yowo.io._source import FrameSource, open_source
 
@@ -37,6 +38,7 @@ __all__ = [
     "open_source",
     "preprocess",
     "preprocess_into",
+    "redact_url",
     "write_annotated_frame",
     "write_annotated_frames",
     "write_json",
