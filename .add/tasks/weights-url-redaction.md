@@ -1,7 +1,7 @@
 ---
 type: Task
 title: A credentialed weights URL is not echoed or logged
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -17,6 +17,12 @@ verified:
   - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:3330953313f255ca", receipt: /tasks/weights-url-redaction.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:USERINFO=confirm|R:RAWFALLBACK=confirm" }
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:d8d9a64964eb4441", binding: "sha256:f0152cc85f9b363a" }
   - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:781cb938966bd2d4" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/weights-url-redaction.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:19bb77f36414f87e", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/weights-url-redaction.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:c71619a834a4718a", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/weights-url-redaction.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/weights-url-redaction.d/runs/3.md, brief: "sha256:25b4d7dcb732ab08", reason: "11 checks green on a bound receipt. Review returned one R:USERINFO defect the first build missed: _download interpolated (last_exc) unscrubbed, and requests keeps userinfo in PreparedRequest.url, so HTTPError/InvalidSchema/InvalidURL carried the credential. Verified empirically, fixed with _scrub_credential, covered by three tests built from real requests exceptions." }
 advised_by: edge-reliability-operator
 ---
 ## CARD
@@ -34,7 +40,7 @@ to apply it at the emit points — not to build anything new.
 NOT a HARD-STOP on rtsp-credential-redaction's gate, and the reasoning is recorded so it can be
 challenged: that task's change introduces no leak and removes four. Blocking its gate over an adjacent
 pre-existing issue would leave the RTSP credentials leaking in order to punish a fix.
-beat: scaffold · next: author weights-url-redaction's RULES, ASSUMPTIONS and CHECKS, then add freeze weights-url-redaction
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -102,9 +108,9 @@ regression floor: `test_registry.py`, `test_weight_integrity.py`, `test_cli.py` 
 - test_download_failure_message_redacts_the_url · covers: M1, A2, E3 · retries exhausted, no userinfo,
   host and path still present.
 - test_stalled_download_message_redacts_the_url · covers: M1, A2 · the chunk-deadline path.
-- test_unparseable_url_never_falls_back_to_raw · covers: R:RAWFALLBACK, A4, E2.
+- test_unparseable_url_never_falls_back_to_raw · covers: R:RAWFALLBACK, A4, E2 · a malformed authority emits `<unparseable url>`, never the raw string.
 - test_registry_still_stores_the_credential · covers: M3 · redaction did not damage the fetchable URL.
-- test_readme_example_registers_no_credentialed_url · covers: M4.
+- test_readme_example_registers_no_credentialed_url · covers: M4 · the doc no longer models a credentialed URL, and states the rule.
 red-first: every check MUST fail first.
 
 ## EVIDENCE

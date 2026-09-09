@@ -1,7 +1,7 @@
 ---
 type: Task
 title: The verified digest reaches the loader, closing the resolve-to-load window
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -17,6 +17,14 @@ generated: { by: add/3.5.0, at: 2026-09-09 }
 verified:
   - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:d95d0e07955acb10", receipt: /tasks/verified-digest-threading.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|R:SELFKEYED=confirm|R:CONVERTFIRST=confirm" }
   - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:e136f32b8ab54b7e", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:ada354e1b0ee85f3", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:73d5bdd5024446dc", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:0a9800393106e820", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/4.md, brief: "sha256:f43440757ce221d0", reason: "16 checks green on a bound receipt. R:SELFKEYED made structural: pin (registry-only, authenticates) and sidecar_key (may be computed, addresses the cache) never merge. M5 confirmed on the real cached yolo11n - sidecar hit 0.025s no rehash, substitution after resolution refused. Backend.load byte-identical across five backends; resolve_weights unchanged so the ~60 mock sites stand. Residue carried not swallowed: export/_exporter.py resolves then loads with no digest, opened as export-digest-threading." }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
@@ -37,7 +45,7 @@ bounded, and the bound is why this was not a HARD-STOP on weight-integrity's gat
     worst case is substituted model weights, not RCE;
   - before `weight-integrity` there was no verification at any point, so the window is a narrowing of an
     open door, not a new one. Blocking that gate would have kept the door fully open to punish a fix.
-beat: scaffold · next: author verified-digest-threading's RULES, ASSUMPTIONS and CHECKS, then add freeze verified-digest-threading
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -118,16 +126,34 @@ regression floor: `test_weight_integrity.py`, `test_checkpoint_loader.py`, `test
 - E4 The cls and obb paths must pass through the same gate as detection (A2).
 
 ## CHECKS
-- test_file_swapped_after_resolution_is_refused · covers: M1, R:CONVERTFIRST, E1.
-- test_computed_digest_never_satisfies_verification · covers: M2, R:SELFKEYED, A4 · the tautology this
-  node exists to remove.
-- test_verification_precedes_conversion · covers: M1, A5, R:CONVERTFIRST · `_extract_state_dict` is
-  never reached on a mismatch.
-- test_sidecar_hit_on_the_pin_skips_rehashing · covers: M5, A3, E2.
-- test_unpinned_model_still_loads · covers: M3, A4, E3.
-- test_all_three_load_paths_forward_the_digest · covers: M2, A2, E4.
-- test_backend_load_protocol_is_unchanged · covers: M4, A7 · all five `load` signatures identical.
-- test_mismatch_message_is_the_resolution_message · covers: A6.
+names reconciled to the tests actually built, 2026-09-09. The builder worked from a worktree cut
+before this node's direction was committed, so it never saw the names authored here and chose its
+own — and split several declared checks into finer ones. The rules each check covers are unchanged;
+only the labels moved, and they moved toward what is on disk.
+- test_swapped_file_after_resolution_is_refused · covers: M1, R:CONVERTFIRST, E1 · a file substituted after resolution, with no sidecar, fails instead of converting.
+- test_computed_digest_never_satisfies_verification · covers: M2, R:SELFKEYED, A4 · the tautology
+  this node exists to remove.
+- test_conversion_is_never_reached_on_a_mismatch · covers: M1, A5, R:CONVERTFIRST ·
+  `_extract_state_dict` is never reached on a mismatch.
+- test_stale_sidecar_falls_through_to_the_pin_comparison · covers: R:CONVERTFIRST, A3 · a sidecar
+  miss must land on the comparison, not on the conversion.
+- test_sidecar_hit_on_the_pin_does_not_rehash_the_raw_file · covers: M5, A3, E2 · the steady-state fast path is not taxed.
+- test_unpinned_load_converts_without_claiming_verification · covers: M3, A4, E3 · an unpinned model still loads.
+- test_unpinned_sidecar_is_still_keyed_on_the_computed_digest · covers: M3, A4 · the cache key survives when there is no pin.
+- test_every_load_path_forwards_the_pin · covers: M2, A2 · parametrised over all three loaders.
+- test_every_load_path_forwards_the_pin[load_classify_weights] · covers: E4 · the classification
+  loader forwards the pin, so cls passes the same gate as detection.
+- test_every_load_path_forwards_the_pin[load_obb_weights] · covers: E4 · the OBB loader likewise.
+- test_backend_threads_the_registry_pin_for_detection · covers: M2, A1, A7 · the pin reaches the loader for a pinned spec.
+- test_backend_threads_the_registry_pin_for_cls_and_obb · covers: A2, E4 · cls and obb pass the same gate as detection.
+- test_backend_sends_no_pin_for_an_explicit_weights_path · covers: M3, A1 · a user's own checkpoint
+  is not compared to the official digest.
+- test_backend_load_signatures_stay_identical · covers: M4, A7 · all five backends.
+- test_resolve_weights_signature_is_unchanged · covers: M4, A7 · the ~60 mock sites stay valid.
+- test_load_verified_state_dict_signature_is_unchanged · covers: M4 · the argument already existed; nothing widened.
+- test_no_second_integrity_message_was_authored · covers: A6 · one event, one message, whatever caught it.
+- test_integrity_failure_keeps_its_type_through_the_backend · covers: A6, A8 · a substitution
+  surfaces as one event with one type, not two depending on timing.
 red-first: every check MUST fail first.
 
 ## EVIDENCE

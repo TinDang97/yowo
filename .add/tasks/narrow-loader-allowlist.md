@@ -123,11 +123,11 @@ regression floor: `test_checkpoint_loader.py`, `test_arch_model.py`, `test_class
   `startswith` over a torch namespace survives.
 - test_allowlist_matches_the_recorded_measurement · covers: M2, M4, R:GUESSED · every entry traces to a
   recorded observation; no entry is unaccounted for.
-- test_unlisted_torch_class_is_refused · covers: M3, A4, E3.
-- test_refusal_names_the_class_and_the_change_path · covers: M3, A6.
-- test_lookalike_torch_prefixes_are_refused · covers: A3, E2.
+- test_unlisted_torch_class_is_refused · covers: M3, A4, E3 · an unlisted torch layer is refused like any other name.
+- test_refusal_names_the_class_and_the_change_path · covers: M3, A6 · the message is actionable.
+- test_lookalike_torch_prefixes_are_refused · covers: A3, E2 · `torch.nn.parameterfoo.X` does not slip through.
 - test_classification_layers_are_admitted · covers: A2, E1 · the cls head loads.
-- test_measurement_script_downloads_nothing_in_the_unit_suite · covers: A7.
+- test_measurement_script_downloads_nothing_in_the_unit_suite · covers: A7 · the corpus never enters CI.
 - test_every_pinned_variant_still_loads · covers: M5, E4 · integration tier, not the unit suite.
 red-first: every check MUST fail first.
 
