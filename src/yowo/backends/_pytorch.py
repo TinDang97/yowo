@@ -11,14 +11,20 @@ from __future__ import annotations
 import contextlib
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from yowo.errors import BackendLoadError, DependencyError, DeviceError, InferenceError
 from yowo.hardware import HardwareProfile
+from yowo.models._weights import WeightIntegrityError
 from yowo.types import BackendType, ModelSpec, PreprocessedTensor
+
+if TYPE_CHECKING:
+    # Type-only: the registry is imported inside load() to keep it off the
+    # module import path, matching how get/get_cls/get_obb are already reached.
+    from yowo.models._registry import ModelMeta
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +90,31 @@ class PyTorchBackend:
     # ------------------------------------------------------------------
     # Protocol methods
     # ------------------------------------------------------------------
+
+    def _registry_pin(self, meta: ModelMeta) -> str | None:
+        """The SHA-256 the registry pins for this backend's spec, if any.
+
+        Read here rather than threaded down from the engine on purpose. The
+        obvious alternative — returning the digest from ``resolve_weights``, or
+        adding a parameter to ``Backend.load`` — would widen a Protocol that five
+        backends share to carry a value only this one can use, and would break
+        every ``resolve_weights`` mock in the suite. ``load()`` already holds
+        ``self._spec`` and already reaches into the registry, so the pin costs
+        nothing extra to look up here.
+
+        Returns ``None`` when there is genuinely nothing pinned to compare
+        against: an explicit ``spec.weights_path`` is a file the registry never
+        described — comparing a user's fine-tuned checkpoint to the official
+        yolo11n digest would refuse every custom deployment — and ``-cls`` /
+        ``-obb`` entries carry ``sha256=None`` today.
+        """
+        if self._spec is None or self._spec.weights_path is not None:
+            return None
+        # Returned as-is. `ModelMeta.sha256` is already `str | None`, so there is
+        # no defensive coercion to make here — and adding one would turn a
+        # malformed registry entry into a silent downgrade to unpinned, which is
+        # the one direction this function must never fail in.
+        return meta.sha256
 
     def load(self, model_path: str | Path, *, device: str = "auto") -> None:
         """Load ``.pt`` weights via native architecture.
@@ -156,7 +187,7 @@ class PyTorchBackend:
                 spec_nc = self._spec.num_classes
                 nc = spec_nc if spec_nc is not None else meta.num_classes
                 cls_model = build_classify_model(self._spec.family, self._spec.size, num_classes=nc)
-                load_classify_weights(cls_model, model_path)
+                load_classify_weights(cls_model, model_path, raw_digest=self._registry_pin(meta))
                 cls_model = cls_model.fuse()
                 cls_model.eval()
                 cls_model.to(resolved)
@@ -174,7 +205,7 @@ class PyTorchBackend:
                 spec_nc = self._spec.num_classes
                 nc = spec_nc if spec_nc is not None else meta.num_classes
                 obb_model = build_obb_model(self._spec.family, self._spec.size, num_classes=nc)
-                load_obb_weights(obb_model, model_path)
+                load_obb_weights(obb_model, model_path, raw_digest=self._registry_pin(meta))
                 obb_model = obb_model.fuse()
                 obb_model.eval()
                 obb_model.to(resolved)
@@ -186,10 +217,12 @@ class PyTorchBackend:
             else:
                 from yowo.arch import build_model
                 from yowo.arch._weights import load_weights
+                from yowo.models._registry import get
 
                 nc = self._spec.num_classes if self._spec.num_classes is not None else 80
                 det_model = build_model(self._spec.family, self._spec.size, num_classes=nc)
-                load_weights(det_model, model_path)
+                det_meta = get(self._spec.family, self._spec.size)
+                load_weights(det_model, model_path, raw_digest=self._registry_pin(det_meta))
                 det_model = det_model.fuse()
                 det_model.eval()
                 det_model.to(resolved)
@@ -231,6 +264,15 @@ class PyTorchBackend:
             if resolved.startswith("cuda"):
                 torch.backends.cudnn.benchmark = True  # type: ignore[attr-defined]
             self._device_str = resolved
+        except WeightIntegrityError:
+            # Deliberately ahead of the blanket handlers below. A substituted
+            # weight is the same event whether it is caught during resolution or
+            # here, and re-wrapping it as a BackendLoadError would give it two
+            # types and two meanings depending only on timing — leaving a reader
+            # unable to tell an integrity refusal from a backend that failed to
+            # deserialise. The message from verify_digest passes through intact.
+            self._model = None
+            raise
         except RuntimeError as exc:
             self._model = None
             msg = str(exc).lower()
