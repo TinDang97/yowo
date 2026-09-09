@@ -25,8 +25,11 @@ to get a change merged: environment setup, code rules, testing requirements, and
   Describe the problem and your proposed approach. This avoids wasted effort.
 - **Small PRs only.** One logical change per PR. A PR that touches 10 unrelated files will
   be closed without review.
-- **No ultralytics dependency.** yowo is intentionally ultralytics-free (Apache-2.0 clean).
-  Do not reintroduce it for any reason.
+- **No ultralytics dependency in the code.** yowo's code is intentionally ultralytics-free
+  (Apache-2.0 clean code — no `ultralytics` import anywhere in `src/`). Do not reintroduce
+  it for any reason. This claim is about the code only: the default model weights are a
+  separate concern, Ultralytics AGPL-3.0 assets fetched at runtime — see
+  [Model weights and licensing](README.md#model-weights-and-licensing).
 
 ---
 
