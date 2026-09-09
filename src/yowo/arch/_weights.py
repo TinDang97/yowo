@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any
 
 from yowo.models._weights import verify_digest
 
@@ -93,8 +93,10 @@ def _remap_key(key: str) -> str | None:
 # to the tensors it carries, and anything else is refused BY NAME without importing
 # the module it came from.
 #
-# Frozen by ADD task `checkpoint-loader`. Widening `_ALLOWED_*` is a change-request,
-# not a build detail — each entry carries why it is here.
+# Frozen by ADD task `checkpoint-loader`; the torch layer set enumerated by
+# `narrow-loader-allowlist`. Widening `_ALLOWED_*` is a change-request, not a build
+# detail — each entry carries why it is here, and each torch entry carries the
+# observation that put it here.
 
 _ALLOWED_EXACT: frozenset[tuple[str, str]] = frozenset(
     {
@@ -121,9 +123,53 @@ _ALLOWED_EXACT: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
-# Real torch layers (Conv2d, BatchNorm2d, Sequential, SiLU, …). They are the actual
-# modules the weights hang off; refusing them would refuse every checkpoint.
-_ALLOWED_PREFIXES: tuple[str, ...] = ("torch.nn.modules.", "torch.nn.parameter")
+# Real torch layers — the modules the weights hang off. ENUMERATED, not a
+# namespace: `torch.nn.modules.` as a prefix admitted every class under it, and a
+# prefix is a rule about a namespace where the boundary should name a class.
+# Every pair below was OBSERVED, never reasoned into place — named either by one
+# of the 10 digest-pinned detection checkpoints, or by a serialised `YOLOModel` /
+# `ClassifyModel` / `OBBModel` of our own, walked in process. The observation
+# behind each entry is recorded in `scripts/checkpoint_globals_manifest.json`,
+# written by `scripts/measure_checkpoint_globals.py`; the unit suite holds this
+# set to that manifest in both directions, so an entry cannot appear here without
+# a measurement behind it.
+#
+# Absent on purpose, because nothing named them: `torch.nn.parameter.Parameter`
+# (parameters travel as `torch._utils._rebuild_parameter`, so the old
+# `torch.nn.parameter` prefix admitted a namespace no checkpoint ever used) and
+# `torch.nn.modules.module.Module` itself. An unlisted torch class is refused
+# exactly like any other unlisted name — a new upstream layer type fails loudly
+# and is re-measured and re-pinned deliberately.
+_ALLOWED_TORCH: frozenset[tuple[str, str]] = frozenset(
+    {
+        # Named by every detection checkpoint and every model we build: the
+        # Conv → BatchNorm → SiLU block, its containers, and the `Identity` that
+        # stands in for an absent activation or shortcut.
+        ("torch.nn.modules.activation", "SiLU"),
+        ("torch.nn.modules.batchnorm", "BatchNorm2d"),
+        ("torch.nn.modules.container", "ModuleList"),
+        ("torch.nn.modules.container", "Sequential"),
+        ("torch.nn.modules.conv", "Conv2d"),
+        ("torch.nn.modules.linear", "Identity"),
+        # Named by every detection checkpoint: SPPF's pooling and the neck's
+        # upsampling. Parameterless, so `.state_dict()` never sees them, but the
+        # stream constructs them on the way to the tensors.
+        ("torch.nn.modules.pooling", "MaxPool2d"),
+        ("torch.nn.modules.upsampling", "Upsample"),
+        # The classification head: Conv → AdaptiveAvgPool2d → Dropout → Linear.
+        # No detection checkpoint names these; the in-process sweep of
+        # `ClassifyModel` does, at every size. Without them every `-cls`
+        # checkpoint would be refused at its pooling layer (E1).
+        ("torch.nn.modules.dropout", "Dropout"),
+        ("torch.nn.modules.linear", "Linear"),
+        ("torch.nn.modules.pooling", "AdaptiveAvgPool2d"),
+    }
+)
+
+# One membership test at `find_class` time. `_ALLOWED_EXACT` and `_ALLOWED_TORCH`
+# are kept apart so each carries its own reasons, and joined here so the check
+# stays a single set lookup — no slower than the prefix scan it replaced.
+_ALLOWED: frozenset[tuple[str, str]] = _ALLOWED_EXACT | _ALLOWED_TORCH
 
 # Typed storages live directly on `torch` (torch.FloatStorage, torch.HalfStorage, …).
 _ALLOWED_STORAGE_SUFFIX = "Storage"
@@ -153,6 +199,7 @@ def _inert_module_cls() -> type:
 
 def _restricted_unpickler_module(checkpoint_path: Path):
     """A `pickle_module` for `torch.load` whose `find_class` enforces the allowlist."""
+    import io
     import pickle
     import types
 
@@ -162,9 +209,7 @@ def _restricted_unpickler_module(checkpoint_path: Path):
 
     class _RestrictedUnpickler(pickle.Unpickler):
         def find_class(self, module: str, name: str) -> object:
-            if (module, name) in _ALLOWED_EXACT:
-                return super().find_class(module, name)
-            if module.startswith(_ALLOWED_PREFIXES):
+            if (module, name) in _ALLOWED:
                 return super().find_class(module, name)
             if module == "torch" and name.endswith(_ALLOWED_STORAGE_SUFFIX):
                 return super().find_class(module, name)
@@ -172,18 +217,33 @@ def _restricted_unpickler_module(checkpoint_path: Path):
                 return inert
             raise ModelLoadError(
                 f"Refusing to load {checkpoint_path}: the checkpoint asks for "
-                f"'{module}.{name}', which is not a weights primitive. A checkpoint "
-                f"that names arbitrary code is not just weights — treat this file as "
-                f"untrusted rather than looking for a flag to disable this check."
+                f"'{module}.{name}', which is not in the loader's allowlist of "
+                f"weights primitives. A checkpoint that names arbitrary code is not "
+                f"just weights — treat this file as untrusted rather than looking for "
+                f"a flag to disable this check. If this is a genuine new upstream "
+                f"layer type, the allowlist is widened by a change-request carrying a "
+                f"recorded observation: see .add/tasks/narrow-loader-allowlist.md and "
+                f"scripts/measure_checkpoint_globals.py."
             )
+
+    # torch's legacy (non-zip) reader calls `load` on the file header three times
+    # BEFORE it builds an `Unpickler` — so a stock `load` here would be an
+    # unrestricted read of attacker bytes, and a non-zip file whose first object
+    # is a REDUCE would run it and only then fail on "Invalid magic number".
+    # Every read of the file, header included, goes through the same find_class.
+    def _restricted_load(file: IO[bytes], **kwargs: Any) -> object:
+        return _RestrictedUnpickler(file, **kwargs).load()
+
+    def _restricted_loads(data: bytes, **kwargs: Any) -> object:
+        return _RestrictedUnpickler(io.BytesIO(data), **kwargs).load()
 
     shim = types.ModuleType("yowo_restricted_pickle")
     shim.Unpickler = _RestrictedUnpickler  # type: ignore[attr-defined]
-    shim.load = pickle.load  # type: ignore[attr-defined]
+    shim.load = _restricted_load  # type: ignore[attr-defined]
+    shim.loads = _restricted_loads  # type: ignore[attr-defined]
     shim.Pickler = pickle.Pickler  # type: ignore[attr-defined]
     shim.dump = pickle.dump  # type: ignore[attr-defined]
     shim.dumps = pickle.dumps  # type: ignore[attr-defined]
-    shim.loads = pickle.loads  # type: ignore[attr-defined]
     return shim
 
 
