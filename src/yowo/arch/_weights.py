@@ -19,6 +19,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from yowo.models._weights import verify_digest
+
 if TYPE_CHECKING:
     import torch as _torch
 
@@ -255,12 +257,17 @@ def _sidecar_path(checkpoint_path: Path) -> Path:
 
 
 def _raw_digest(path: Path) -> str:
-    """SHA-256 of the raw checkpoint, used only to key its converted sidecar.
+    """SHA-256 of the raw checkpoint, used ONLY to key its converted sidecar.
 
-    This is not the security check — `models._weights.verify_digest` already ran
-    against the pinned value before anything here saw the file. This keys the
-    sidecar to the exact bytes it was derived from, so a re-fetched or re-pinned
-    weight regenerates it instead of silently serving old tensors.
+    This is never the security check, and it structurally cannot be one: a digest
+    computed from the file under test matches that file by construction, so
+    comparing the two proves only that SHA-256 is deterministic. The value exists
+    to key the sidecar to the exact bytes it was derived from, so a re-fetched or
+    re-pinned weight regenerates it instead of silently serving old tensors.
+
+    Authentication is `verify_digest` against a value that came from the
+    REGISTRY, and the two must never be allowed to meet — see
+    :func:`load_verified_state_dict`.
     """
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -287,27 +294,55 @@ def load_verified_state_dict(
     never serve old weights under a new pin. A missing or mismatched sidecar
     falls back to verify-and-reconvert — never to loading it unchecked.
 
+    ``resolve_weights`` verified this path against the pin before returning it,
+    but that was a separate open at a separate moment. Anything with write access
+    to the weight cache in between can substitute the file, and the substitution
+    is self-concealing: the new bytes key to a different sidecar, so the sidecar
+    misses and the attacker's checkpoint goes straight to the reader that can
+    execute. So when a pin is supplied, it is compared again here — immediately
+    before the conversion, and only on the calls that would actually convert.
+
     Args:
         checkpoint_path: The raw ``.pt``, already digest-verified by the caller.
-        raw_digest: That verified digest. ``None`` means unpinned, in which case
-            the sidecar is still used but keyed on ``None``.
+        raw_digest: The digest the REGISTRY pins for this model. ``None`` means
+            genuinely unpinned — an explicit ``spec.weights_path``, or a registry
+            entry carrying ``sha256=None`` — in which case there is nothing to
+            authenticate against and the sidecar is keyed on the file's own bytes.
     """
     import torch
 
-    if raw_digest is None:
-        raw_digest = _raw_digest(checkpoint_path)
+    # Two values, deliberately never merged. `pin` authenticates and may only
+    # ever come from the caller's registry lookup; `sidecar_key` addresses a
+    # cache entry and may be computed from the file. Collapsing them into one
+    # variable is exactly how this function came to "verify" a file against
+    # itself, so the separation is the control, not a style choice.
+    pin = raw_digest
+    sidecar_key = pin if pin is not None else _raw_digest(checkpoint_path)
+
     sidecar = _sidecar_path(checkpoint_path)
     if sidecar.exists():
         try:
             blob = torch.load(sidecar, map_location="cpu", weights_only=True)
         except Exception:
             blob = None  # unreadable or written by an older torch — reconvert
-        if isinstance(blob, dict) and blob.get("raw_sha256") == raw_digest:
+        if isinstance(blob, dict) and blob.get("raw_sha256") == sidecar_key:
             tensors = blob.get("tensors")
             if isinstance(tensors, dict):
+                # Served without touching the raw file. A sidecar keyed on the
+                # pin was produced from bytes that hashed to the pin, and it
+                # loads with weights_only=True, so there is nothing left to
+                # authenticate — and re-hashing 5-110 MB on every steady-state
+                # load would tax the exact fast path this sidecar exists to be.
                 return tensors
 
-    # First load for these bytes: the one and only unpickle, on verified input.
+    # Past this point the raw file WILL be read by the executing reader, so this
+    # is the last moment a substitution can still be refused. Order is the whole
+    # control: converting first would run the payload the comparison exists to
+    # reject. Reuses verify_digest so a mismatch reads identically whether it was
+    # caught during resolution or here — one event, one message.
+    if pin is not None:
+        verify_digest(checkpoint_path, pin)
+
     state = _extract_state_dict(checkpoint_path)
     logger.info(
         "Converted %s to a tensor-only state_dict; later loads skip the unpickler.",
@@ -315,7 +350,7 @@ def load_verified_state_dict(
     )
     try:
         tmp = sidecar.with_suffix(".tmp")
-        torch.save({"raw_sha256": raw_digest, "tensors": state}, tmp)
+        torch.save({"raw_sha256": sidecar_key, "tensors": state}, tmp)
         tmp.replace(sidecar)
     except OSError:
         # A read-only or full cache directory must not break loading; the only
@@ -324,15 +359,19 @@ def load_verified_state_dict(
     return state
 
 
-def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
+def load_weights(model: YOLOModel, weights_path: str | Path, raw_digest: str | None = None) -> None:
     """Load ultralytics checkpoint weights into a native YOLOModel.
 
     Args:
         model: An initialised ``YOLOModel`` (from ``build_model()``).
         weights_path: Path to an ultralytics ``.pt`` checkpoint file.
+        raw_digest: The SHA-256 the registry pins for this model, re-compared
+            against the file immediately before conversion. ``None`` for an
+            unpinned model — see :func:`load_verified_state_dict`.
 
     Raises:
         FileNotFoundError: If the weights file does not exist.
+        WeightIntegrityError: If the file no longer matches ``raw_digest``.
         ValueError: If the checkpoint format is unrecognised.
         RuntimeError: If weight shapes do not match the model architecture.
     """
@@ -340,7 +379,7 @@ def load_weights(model: YOLOModel, weights_path: str | Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = load_verified_state_dict(path)
+    src_state = load_verified_state_dict(path, raw_digest=raw_digest)
 
     # Remap keys
     mapped: dict[str, _torch.Tensor] = {}
@@ -456,15 +495,21 @@ def _remap_cls_key(key: str) -> str | None:
     return None
 
 
-def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> None:
+def load_classify_weights(
+    model: ClassifyModel, weights_path: str | Path, raw_digest: str | None = None
+) -> None:
     """Load an ultralytics classification checkpoint into a ClassifyModel.
 
     Args:
         model: An initialised ``ClassifyModel`` (from ``build_classify_model()``).
         weights_path: Path to an ultralytics ``-cls.pt`` checkpoint file.
+        raw_digest: The SHA-256 the registry pins for this model. Every ``-cls``
+            entry carries ``sha256=None`` today, so this is normally ``None`` —
+            but the gate is wired regardless, and closes the day one is pinned.
 
     Raises:
         FileNotFoundError: If the weights file does not exist.
+        WeightIntegrityError: If the file no longer matches ``raw_digest``.
         ValueError: If the checkpoint format is unrecognised.
         RuntimeError: If weight shapes do not match the model architecture.
     """
@@ -472,7 +517,7 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = load_verified_state_dict(path)
+    src_state = load_verified_state_dict(path, raw_digest=raw_digest)
 
     # Remap keys
     mapped: dict[str, _torch.Tensor] = {}
@@ -536,7 +581,9 @@ def load_classify_weights(model: ClassifyModel, weights_path: str | Path) -> Non
 # ``model.23.`` → ``head.`` so we reuse _remap_key directly.
 
 
-def load_obb_weights(model: OBBModel, weights_path: str | Path) -> None:
+def load_obb_weights(
+    model: OBBModel, weights_path: str | Path, raw_digest: str | None = None
+) -> None:
     """Load an ultralytics OBB checkpoint into a native OBBModel.
 
     Uses the same ``_LAYER_MAP`` as :func:`load_weights`.  The OBB head's
@@ -546,9 +593,13 @@ def load_obb_weights(model: OBBModel, weights_path: str | Path) -> None:
     Args:
         model: An initialised ``OBBModel`` (from ``build_obb_model()``).
         weights_path: Path to an ultralytics ``-obb.pt`` checkpoint file.
+        raw_digest: The SHA-256 the registry pins for this model. Every ``-obb``
+            entry carries ``sha256=None`` today, so this is normally ``None`` —
+            but the gate is wired regardless, and closes the day one is pinned.
 
     Raises:
         FileNotFoundError: If the weights file does not exist.
+        WeightIntegrityError: If the file no longer matches ``raw_digest``.
         ValueError: If the checkpoint format is unrecognised.
         RuntimeError: If weight shapes do not match the model architecture.
     """
@@ -556,7 +607,7 @@ def load_obb_weights(model: OBBModel, weights_path: str | Path) -> None:
     if not path.exists():
         raise FileNotFoundError(f"Weights file not found: {path}")
 
-    src_state = load_verified_state_dict(path)
+    src_state = load_verified_state_dict(path, raw_digest=raw_digest)
 
     # Remap keys using the same _LAYER_MAP as detection loading
     mapped: dict[str, _torch.Tensor] = {}
