@@ -18,6 +18,26 @@ from yowo.types import ExportFormat, ModelSpec, Precision
 logger = logging.getLogger(__name__)
 
 
+def _registry_pin(spec: ModelSpec, meta: Any) -> str | None:
+    """The SHA-256 the registry pins for this export's spec, if any.
+
+    Mirrors ``PyTorchBackend._registry_pin`` exactly -- same shape, same
+    ``None`` conditions -- because this is the same trust decision made at the
+    same distance from the registry, just on the export path instead of the
+    inference one. Not imported from ``_pytorch.py`` (out of scope for this
+    node); duplicated in shape only, not in the comparison it feeds.
+
+    Returns ``None`` when there is genuinely nothing pinned to compare
+    against: an explicit ``spec.weights_path`` is a file the registry never
+    described -- comparing a user's fine-tuned checkpoint to the official
+    digest would refuse every custom export -- and ``-cls`` / ``-obb``
+    entries carry ``sha256=None`` today.
+    """
+    if spec.weights_path is not None:
+        return None
+    return meta.sha256
+
+
 def export_model(
     spec: ModelSpec,
     target_format: ExportFormat,
@@ -77,7 +97,7 @@ def export_model(
 
         meta = get_cls(spec.family, spec.size)
         model = build_classify_model(spec.family, spec.size, num_classes=meta.num_classes)
-        load_classify_weights(model, weights_path)
+        load_classify_weights(model, weights_path, raw_digest=_registry_pin(spec, meta))
         model = model.fuse().eval()
         input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
     elif spec.task == "obb":
@@ -88,15 +108,17 @@ def export_model(
         meta = get_obb(spec.family, spec.size)
         nc = spec.num_classes if spec.num_classes is not None else meta.num_classes
         model = build_obb_model(spec.family, spec.size, num_classes=nc)
-        load_obb_weights(model, weights_path)
+        load_obb_weights(model, weights_path, raw_digest=_registry_pin(spec, meta))
         model = model.fuse().eval()
         input_tensor = torch.zeros(1, 3, meta.input_height, meta.input_width)
     else:
         from yowo.arch import build_model
         from yowo.arch._weights import load_weights
+        from yowo.models._registry import get
 
+        meta = get(spec.family, spec.size)
         model = build_model(spec.family, spec.size)
-        load_weights(model, weights_path)
+        load_weights(model, weights_path, raw_digest=_registry_pin(spec, meta))
         model = model.fuse().eval()
         input_tensor = torch.zeros(1, 3, imgsz, imgsz)
 
