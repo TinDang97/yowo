@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from yowo.errors import ConfigError, DependencyError, ExportError
 from yowo.export._calibration import resolve_calibration_images
@@ -15,10 +15,15 @@ from yowo.hardware import get_hardware_profile
 from yowo.models import resolve_weights
 from yowo.types import ExportFormat, ModelSpec, Precision
 
+if TYPE_CHECKING:
+    # Type-only: the registry is imported inside each branch to keep it off the
+    # module import path, matching how get/get_cls/get_obb are already reached.
+    from yowo.models._registry import ModelMeta
+
 logger = logging.getLogger(__name__)
 
 
-def _registry_pin(spec: ModelSpec, meta: Any) -> str | None:
+def _registry_pin(spec: ModelSpec, meta: ModelMeta) -> str | None:
     """The SHA-256 the registry pins for this export's spec, if any.
 
     Mirrors ``PyTorchBackend._registry_pin`` exactly -- same shape, same
