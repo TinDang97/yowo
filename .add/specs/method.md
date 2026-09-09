@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 6
+delta_seq: 7
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M7 · open · 2026-09-10] A subagent worktree branches from main, not from the orchestrator's checked-out branch, so a frozen node committed only on a feature branch is INVISIBLE inside it. Three builds in a row read a stale scaffold and worked from their spawn prompt instead. Carrying the frozen decisions inline in the prompt is the fix and it works; asserting 'this worktree's copy IS current' is the error, and it was still wrong the second time after being corrected once. Either merge the direction to main before spawning, or tell the builder plainly that its bundle copy is stale and the prompt is authoritative. (evidence: /tasks/export-digest-threading.d)
 - [ADD · M6 · open · 2026-09-09] When an ASSUMPTION's parenthetical names concrete entries and a MUST says 'observed only', the MUST wins and the delta is reported at the gate. narrow-loader-allowlist's A3 and A2 named torch.nn.parameter.Parameter and nn.Flatten; neither is ever constructed - parameters travel as torch._utils._rebuild_parameter, and both our Classify and upstream's call .flatten(1). Authoring from the measurement rather than from the assumption's wording kept two unobserved entries out of a trust boundary. (evidence: /tasks/narrow-loader-allowlist.d/runs/4.md)
 - [ADD · M5 · open · 2026-09-09] Bind every Must and Reject to a covers: key as you write CHECKS, not at gate time. Two rules went unbound here and the gate caught it after the freeze, forcing a refreeze+rebrief cycle for what was pure bookkeeping. (evidence: /tasks/rtsp-credential-redaction.md)
 - [ADD · M4 · open · 2026-09-09] Building several frozen tasks in one working tree defeats the gate's scope check: each node's gate sees the others' edits as undeclared sensitive changes. Committing them together makes the refusal vanish without fixing anything — the honest replay is one task alone in the tree, gated, then committed. (evidence: /tasks/version-single-source.md)

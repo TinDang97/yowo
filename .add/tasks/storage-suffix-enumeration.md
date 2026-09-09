@@ -1,7 +1,7 @@
 ---
 type: Task
 title: The storage rule names its classes, like every other entry in the boundary
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -15,6 +15,13 @@ verified:
   - { by: "Tin Dang", at: 2026-09-10, act: interview, authority: human, interview: "sha256:3c7c166f078112a2", receipt: /tasks/storage-suffix-enumeration.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:SUFFIX=confirm|R:DEADRULE=confirm" }
   - { by: "Tin Dang", at: 2026-09-10, act: freeze, authority: human, direction: "sha256:f751d2c951f0cc0c", binding: "sha256:f0152cc85f9b363a" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:187b7b694542c9bc" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:20267e5c1c1841b0" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/storage-suffix-enumeration.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:00a38d0ca2cd11c0", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:a41683f9b0ca9495" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/storage-suffix-enumeration.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/storage-suffix-enumeration.d/runs/2.md, brief: "sha256:a41683f9b0ca9495", reason: "The last shape-based rule is gone; find_class is exact set, then stub prefixes, then refuse. The evidence is the regression floor rather than the new checks: 53 passed, all 10 pinned variants load, 499/499 tensors identical to the pre-change loader, and the legacy code-execution probe is still refused before execution. The build verified the manifest's no-storage claim itself - 53 observations, zero storage classes - and went further, establishing empirically that torch's zip reader intercepts typed-storage names before find_class sees them, so the rule was only ever reachable on the legacy non-zip path. That refines A3 rather than contradicting it. It also caught its own false-red from a zip-format fixture and rebuilt it on raw pickle before finalizing." }
+advised_by: security-reviewer
 ---
 ## CARD
 goal: `torch.<X>Storage` is admitted by an enumerated list of storage classes, not by a name suffix.
@@ -40,7 +47,7 @@ the measurement that would enumerate it already exists: `scripts/measure_checkpo
   records every global the corpus names, and reported that no storage class reached our `find_class`
   at all across the 10 pinned variants. So the enumerated list is likely to be small or empty, and
   the honest question this node answers is whether the rule can simply be deleted.
-beat: scaffold · next: author storage-suffix-enumeration's RULES, ASSUMPTIONS and CHECKS, then add freeze storage-suffix-enumeration
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -102,8 +109,14 @@ regression floor: `test_checkpoint_loader.py`, `test_arch_model.py`, `test_class
 ## CHECKS
 - test_no_suffix_rule_survives_in_find_class · covers: M1, R:SUFFIX, R:DEADRULE · no `endswith` over a
   torch name remains anywhere in the boundary.
-- test_a_storage_name_is_refused_by_name · covers: M1, A4, E1, E2 · refused without `getattr` being
+- test_a_storage_name_is_refused_by_name · covers: M1, A4 · refused without `getattr` being
   attempted on the torch module.
+- test_a_storage_name_is_refused_by_name[real-storage-class] · covers: E1 · a checkpoint naming
+  `torch.FloatStorage` through our `find_class` is refused. Only reachable on the LEGACY non-zip
+  path: torch's zip reader intercepts typed-storage names first, established empirically by the
+  build — a refinement of A3, not a contradiction of it.
+- test_a_storage_name_is_refused_by_name[fictitious-lookalike] · covers: E2 · `torch.NotAStorage`
+  is refused by name with no `getattr` attempted on the torch module.
 - test_allowlist_is_unchanged_by_the_removal · covers: M3, A2 · the exact set gained nothing; a
   deletion must not smuggle an addition.
 - test_every_pinned_variant_still_loads[yolo11n] · covers: M2, E3 · the regression floor, which is the

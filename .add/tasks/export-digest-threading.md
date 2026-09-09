@@ -1,7 +1,7 @@
 ---
 type: Task
 title: The export path verifies its weights the way the inference path does
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -15,6 +15,14 @@ verified:
   - { by: "Tin Dang", at: 2026-09-10, act: interview, authority: human, interview: "sha256:904200940e8be217", receipt: /tasks/export-digest-threading.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:CONVERTFIRST=confirm|R:PARTIALCLAIM=confirm" }
   - { by: "Tin Dang", at: 2026-09-10, act: freeze, authority: human, direction: "sha256:a471590593bace96", binding: "sha256:f0152cc85f9b363a" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:7e391f9397751efe" }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:f9126ad828ac39d1", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:0b35298571e01cb8" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:09e74b1cdcf1d88d", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:ff6cf7e91e1a654d" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/2.md, brief: "sha256:ff6cf7e91e1a654d", reason: "13 checks green on a bound receipt. All three export branches thread the registry pin; the detection branch gained the lookup it never made, which is exactly the branch a partial fix skips. No new comparison logic - the exporter supplies the value and load_verified_state_dict still owns the single check. R:PARTIALCLAIM discharged: the resolve-to-load window is now shut on the export path as well as inference, so the parent's claim is true of the system rather than of one path. Three rules the build left unbound (M2, A5, R:CONVERTFIRST) were bound at review, with red evidence obtained by reverting the exporter to df02f7f." }
+advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: The export path re-compares a weight against its pin before conversion, exactly as the
@@ -42,7 +50,7 @@ bounded the same way its sibling was: it requires local write access to the weig
   is a model exported from substituted weights — not RCE. That is worse here than at inference, in one
   specific way: an exported artifact is a FILE that outlives the process and gets shipped somewhere
   else.
-beat: scaffold · next: author export-digest-threading's RULES, ASSUMPTIONS and CHECKS, then add freeze export-digest-threading
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -98,17 +106,36 @@ regression floor: `test_obb_export.py`, `test_export.py` and the INT8/CoreML exp
 - E3 All three branches, not only the two that already hold `meta` (A2).
 
 ## CHECKS
-- test_export_detection_threads_the_registry_pin · covers: M1, A1, A5 · the branch that needed a new
-  lookup actually makes it.
-- test_export_classify_and_obb_thread_the_pin · covers: M1, A2, E3 · the two branches that already
-  hold meta.
-- test_export_refuses_a_file_swapped_after_resolution · covers: M1, R:CONVERTFIRST, E1 · conversion is
-  never reached.
-- test_export_unpinned_model_still_exports · covers: M3, A4, E2 · the common case for cls and obb.
-- test_export_writes_no_new_comparison_logic · covers: M4, A3 · the export path calls the parent's
-  gate rather than reimplementing it.
+names reconciled to the tests actually built, 2026-09-10. The builder's worktree was cut from `main`
+and never saw the names authored here, so it chose its own — see specs/method M7. Three rules the
+build left genuinely unbound (M2, A5, R:CONVERTFIRST) were bound at review; their red evidence came
+from reverting the exporter, and is recorded in the commit.
+- test_export_detection_branch_makes_a_registry_lookup · covers: A2 · the branch that made no
+  registry call now makes one.
+- test_export_threads_the_registry_pin_for_detection · covers: M1, A1 · the digest reaching the
+  loader is the registry's own.
+- test_export_threads_the_registry_pin_for_cls_and_obb · covers: A2 · both non-detection branches.
+- test_export_threads_the_registry_pin_for_cls_and_obb[classify] · covers: E3 · the classification
+  branch passes the same gate as detection.
+- test_export_threads_the_registry_pin_for_cls_and_obb[obb] · covers: E3 · the OBB branch likewise.
+- test_export_sends_no_pin_for_an_explicit_weights_path · covers: A1, A4 · a user's own checkpoint is
+  not compared to the official digest.
+- test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision · covers: A4 · an
+  unpinned entry yields an explicit no-pin decision, not an omission.
+- test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[classify] · covers: M3,
+  E2 · an unpinned model still exports — the common case, since every -cls entry is sha256=None.
+- test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[obb] · covers: M3, E2 ·
+  likewise for OBB.
+- test_no_new_comparison_logic_was_authored_in_exporter · covers: M4, A3 · the exporter supplies the
+  value and never re-implements the check.
+- test_integrity_failure_passes_through_export_unwrapped · covers: A6, R:PARTIALCLAIM · one event,
+  one message, on either path.
+- test_load_verified_state_dict_signature_is_unchanged · covers: M4 · this node adds a caller, not a
+  parameter.
 - test_export_resolve_weights_signature_unchanged · covers: M2 · the mock sites stay valid.
-- test_export_mismatch_uses_the_resolution_message · covers: A6 · one event, one message.
+- test_export_reuses_the_meta_it_already_fetched · covers: A5 · one registry lookup, not two.
+- test_export_never_converts_before_the_pin_is_compared · covers: R:CONVERTFIRST, E1 · conversion is
+  never reached on a mismatch.
 red-first: every check MUST fail first.
 
 ## EVIDENCE
