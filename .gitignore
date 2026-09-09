@@ -372,3 +372,11 @@ tmp/*
 
 # ONNX Runtime profiling artifacts
 onnxruntime_profile__*.json
+# Model weights — AGPL-3.0 ultralytics artifacts in an Apache-2.0 tree.
+# yowo 2.4.0 and 2.4.1 shipped a 5.6 MB yolo11n.pt to PyPI under an Apache-2.0
+# declaration and were yanked for it. `[tool.hatch.build.targets.sdist]`
+# only-include stops a weight reaching an artifact; this stops one reaching a
+# COMMIT, which nothing did before. Weights belong in ~/.cache/yowo/weights/,
+# fetched and digest-verified at runtime.
+*.pt
+*.state_dict.pt
