@@ -171,8 +171,16 @@ _ALLOWED_TORCH: frozenset[tuple[str, str]] = frozenset(
 # stays a single set lookup — no slower than the prefix scan it replaced.
 _ALLOWED: frozenset[tuple[str, str]] = _ALLOWED_EXACT | _ALLOWED_TORCH
 
-# Typed storages live directly on `torch` (torch.FloatStorage, torch.HalfStorage, …).
-_ALLOWED_STORAGE_SUFFIX = "Storage"
+# Typed storages live directly on `torch` (torch.FloatStorage, torch.HalfStorage, …)
+# and used to be admitted here by a suffix rule — the last entry in this boundary
+# that admitted by the SHAPE of a name rather than by the name. Removed by ADD task
+# `storage-suffix-enumeration`: `scripts/checkpoint_globals_manifest.json` records
+# 53 globals observed across the 10 digest-pinned checkpoints and the 25-model
+# in-process sweep, and not one is a storage class — torch's own unpickler wrapper
+# intercepts `*Storage` names before this `find_class` ever sees them for a real
+# checkpoint. A storage class is now refused exactly like any other unlisted name;
+# if one is ever genuinely needed, it joins `_ALLOWED_EXACT` carrying the
+# observation that put it there, the same change-request path as every other entry.
 
 # Third-party model classes. Never constructed — stubbed, see `_InertModule`.
 _STUBBED_PREFIXES: tuple[str, ...] = ("ultralytics.", "models.")
@@ -210,8 +218,6 @@ def _restricted_unpickler_module(checkpoint_path: Path):
     class _RestrictedUnpickler(pickle.Unpickler):
         def find_class(self, module: str, name: str) -> object:
             if (module, name) in _ALLOWED:
-                return super().find_class(module, name)
-            if module == "torch" and name.endswith(_ALLOWED_STORAGE_SUFFIX):
                 return super().find_class(module, name)
             if module.startswith(_STUBBED_PREFIXES):
                 return inert
