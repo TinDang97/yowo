@@ -868,6 +868,7 @@ def info_command(compat: bool) -> None:
 @click.option("--family", default=None)
 def models_command(family: str | None) -> None:
     """List registered model variants."""
+    from yowo.io._redact import redact_url
     from yowo.models import list_available
 
     models = list_available()
@@ -880,7 +881,7 @@ def models_command(family: str | None) -> None:
         name = f"{m.family.value}{m.size.value}"
         click.echo(
             f"{name:<12} {m.input_height}x{m.input_width:<5} "
-            f"{m.num_classes:<10} {m.default_weights_url}"
+            f"{m.num_classes:<10} {redact_url(m.default_weights_url)}"
         )
 
 

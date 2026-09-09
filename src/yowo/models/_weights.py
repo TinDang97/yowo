@@ -16,6 +16,7 @@ from typing import Any
 import requests
 
 from yowo.errors import ModelNotFoundError
+from yowo.io._redact import redact_url
 from yowo.models._registry import get
 from yowo.types import ModelSpec
 
@@ -169,7 +170,7 @@ def _download(url: str, dest: Path, expected_sha256: str | None = None) -> None:
                 tmp_path.unlink(missing_ok=True)
 
     raise ModelNotFoundError(
-        f"Failed to download weights from {url} after {_MAX_RETRIES} attempts. "
+        f"Failed to download weights from {redact_url(url)} after {_MAX_RETRIES} attempts. "
         f"Last error: {last_exc}"
     )
 
@@ -213,7 +214,8 @@ def _attempt_download(url: str, tmp_path: Path, *, suppress_progress: bool) -> N
             for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
                 if time.monotonic() > chunk_deadline:
                     raise ModelNotFoundError(
-                        f"Download of {url} stalled: no progress within {_CHUNK_STREAM_TIMEOUT_S}s"
+                        f"Download of {redact_url(url)} stalled: no progress within "
+                        f"{_CHUNK_STREAM_TIMEOUT_S}s"
                     )
                 if chunk:
                     fh.write(chunk)
