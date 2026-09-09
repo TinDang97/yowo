@@ -1,0 +1,22 @@
+yowo
+Copyright 2026 Tin Dang
+
+This NOTICE ships with every distribution of this package, as required by
+section 4(d) of the Apache License, Version 2.0 under which the code in this
+repository is licensed (see LICENSE). It records third-party provenance for
+an artifact yowo does not include but does download at runtime.
+
+Third-party weight provenance
+------------------------------
+Project:         Ultralytics YOLO release assets (github.com/ultralytics/assets)
+License:         AGPL-3.0
+License URL:     https://ultralytics.com/license
+Redistribution:  None. Every built-in model variant this package can load by
+                 name -- detection, classification (`-cls`), and oriented
+                 bounding box (`-obb`) -- is fetched at runtime into
+                 ~/.cache/yowo/weights/ on first use. No weight file is
+                 included in this package's source distribution or wheel.
+
+See README.md -- "Model weights and licensing" for what this means for an
+adopter, and src/yowo/models/_registry.py for the exact URLs each built-in
+variant resolves to.

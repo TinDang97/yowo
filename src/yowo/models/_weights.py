@@ -12,10 +12,12 @@ import time
 import warnings
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 import requests
 
 from yowo.errors import ModelNotFoundError
+from yowo.io._redact import redact_url
 from yowo.models._registry import get
 from yowo.types import ModelSpec
 
@@ -23,6 +25,40 @@ _CACHE_DIR = Path.home() / ".cache" / "yowo" / "weights"
 _MAX_RETRIES = 3
 _BACKOFF_SECONDS = (2, 4, 8)
 _CHUNK_SIZE = 8192
+
+_CREDENTIAL_PLACEHOLDER = "<redacted>"
+
+
+def _scrub_credential(text: str, url: str) -> str:
+    """Strip *url*'s userinfo from arbitrary text, not just from *url* itself.
+
+    `redact_url()` only handles the case where the whole string IS a URL. It is
+    not enough here: `requests` embeds the credentialed URL in strings it does
+    not let us control -- `PreparedRequest.url`, and the messages of
+    `HTTPError`, `InvalidSchema` and `InvalidURL` -- and any of those can end
+    up interpolated into a caught exception's ``str()``. Regex-hunting for
+    URL-shaped tokens in that prose is fragile; we already know the exact
+    credential from *url*, so strip that value wherever it recurs instead.
+
+    `requests` also re-quotes special characters before embedding a URL (a raw
+    space becomes ``%20``), so the leaked rendering is not always byte-identical
+    to *url*. Both the raw and the percent-encoded form of each credential
+    component are scrubbed to cover that.
+    """
+    try:
+        parts = urlsplit(url)
+        username, password = parts.username, parts.password
+    except ValueError:
+        username = password = None
+
+    scrubbed = text
+    for credential in (username, password):
+        if not credential:
+            continue
+        variants = {credential, quote(credential, safe="")}
+        for variant in variants:
+            scrubbed = scrubbed.replace(variant, _CREDENTIAL_PLACEHOLDER)
+    return scrubbed
 
 
 class WeightIntegrityError(ModelNotFoundError):
@@ -169,8 +205,8 @@ def _download(url: str, dest: Path, expected_sha256: str | None = None) -> None:
                 tmp_path.unlink(missing_ok=True)
 
     raise ModelNotFoundError(
-        f"Failed to download weights from {url} after {_MAX_RETRIES} attempts. "
-        f"Last error: {last_exc}"
+        f"Failed to download weights from {redact_url(url)} after {_MAX_RETRIES} attempts. "
+        f"Last error: {_scrub_credential(str(last_exc), url)}"
     )
 
 
@@ -213,7 +249,8 @@ def _attempt_download(url: str, tmp_path: Path, *, suppress_progress: bool) -> N
             for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
                 if time.monotonic() > chunk_deadline:
                     raise ModelNotFoundError(
-                        f"Download of {url} stalled: no progress within {_CHUNK_STREAM_TIMEOUT_S}s"
+                        f"Download of {redact_url(url)} stalled: no progress within "
+                        f"{_CHUNK_STREAM_TIMEOUT_S}s"
                     )
                 if chunk:
                     fh.write(chunk)

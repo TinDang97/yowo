@@ -66,8 +66,15 @@ def test_sdist_and_wheel_ship_the_same_package_payload(
 def test_untracked_unignored_file_does_not_enter_the_sdist(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """covers: M3, E1 — the live defect: `?? yolo11n.pt`, neither tracked nor ignored."""
-    planted = REPO_ROOT / "test_sdist_manifest_planted.pt"
+    """covers: M3, E1 — an untracked, unignored file must not enter the sdist.
+
+    The original vehicle was `?? yolo11n.pt`, the live defect this task was written
+    against. `licensing-provenance` then added `*.pt` to `.gitignore`, so a planted
+    `.pt` is now ignored and can no longer produce the scenario — the fixture said so
+    itself rather than passing vacuously. `.onnx` is on the same `FORBIDDEN_SUFFIXES`
+    list, is covered by no ignore rule, and reproduces the identical defect class.
+    """
+    planted = REPO_ROOT / "test_sdist_manifest_planted.onnx"
     planted.write_bytes(b"\x00" * 64)
     try:
         assert (
