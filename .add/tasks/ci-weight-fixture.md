@@ -1,7 +1,7 @@
 ---
 type: Task
 title: A cached, integrity-verified model weight CI can reach
-status: direction
+status: done
 depth: standard
 sensitivity: data
 milestone: m1-trust-the-ship
@@ -18,7 +18,13 @@ depends_on:
   - /tasks/weight-integrity.md
   - /tasks/pr-ci-gate.md
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-09, act: interview, authority: human, interview: "sha256:363410a04f73fc5e", receipt: /tasks/ci-weight-fixture.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|R:LOCALPATH=confirm|R:UNVERIFIEDFIXTURE=confirm" }
+  - { by: "Tin Dang", at: 2026-09-09, act: freeze, authority: human, direction: "sha256:eb69775c0eaddc4d", binding: "sha256:b85b43f28c97dd59" }
+  - { by: "cli", at: 2026-09-09, act: brief, authority: process, brief: "sha256:f60ac746ccda1517" }
+  - { by: "builder", at: 2026-09-09, act: replan, authority: process, note: "A2 named yolo11n as 'the smallest pinned weight'. That fact was wrong: yolo26n is 5.29 MB against yolo11n's 5.35 MB. The fixture now resolves yolo26n, which follows A2's stated rationale rather than contradicting it, and additionally matches the model these tests were written for — feeding them YOLO11 weights produced 64-vs-16 channel mismatches. No rule, covers: key or frozen gives: changed." }
+  - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/ci-weight-fixture.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/ci-weight-fixture.d/runs/1.md, brief: "sha256:d328b6ca107628f1" }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
@@ -39,7 +45,7 @@ why: the integration tier is not merely unrun — it is unrunnable, and it repor
 
 not this task: turning the whole tier on in CI belongs to `integration-tier-revival` (m3). This task
   supplies the fixture and the cache; that one decides what runs and when.
-beat: scaffold · next: author ci-weight-fixture's RULES, ASSUMPTIONS and CHECKS, then add freeze ci-weight-fixture
+beat: done · next: add status
 
 ## RULES
 <must>

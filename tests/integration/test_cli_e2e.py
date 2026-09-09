@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+import yowo
 from yowo.cli._main import cli
 from yowo.postprocess._nms import COCO_CLASSES
 
@@ -73,7 +74,10 @@ class TestCLIHelp:
     def test_version_flag(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        # Not a literal. This asserted "0.1.0" while the project shipped 2.5.0 —
+        # it never ran, so it never said so. The version has one source now
+        # (task version-single-source); assert against that.
+        assert yowo.__version__ in result.output
 
     def test_detect_help_shows_weights(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["detect", "--help"])

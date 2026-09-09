@@ -105,3 +105,45 @@ jobs:
       - name: Build twice and compare digests
         run: python scripts/verify_reproducible_build.py
         timeout-minutes: 15
+
+  # Appended by ADD task `ci-weight-fixture`. Proves CI can obtain a real,
+  # digest-verified weight without a per-job download and without the weight
+  # entering the repository. Which integration tests actually run, and when, is
+  # `integration-tier-revival`'s call — not this job's.
+  weights:
+    name: Weight Fixture
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      # Keyed on the PINNED DIGESTS, not on a model name. A name-keyed cache
+      # would serve the old bytes forever after a re-pin, defeating the whole
+      # point of weight-integrity.
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          # Both stores, named explicitly rather than cached as one opaque
+          # parent: a reader should be able to tell from the workflow what is
+          # kept between runs and why.
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+
+      - name: CI can obtain a digest-verified weight
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_engine_integration.py -q --tb=short
+        timeout-minutes: 15

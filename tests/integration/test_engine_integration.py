@@ -22,14 +22,11 @@ from yowo.types import BackendType, Frame, HealthStatus
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_WEIGHTS = Path("tmp/weights/yolo26n_statedict.pt")
-
 
 @pytest.fixture(scope="module")
-def weights_path() -> Path:
-    if not _WEIGHTS.exists():
-        pytest.skip(f"yolo26n weights not found at {_WEIGHTS}")
-    return _WEIGHTS
+def weights_path(verified_weight: Path) -> Path:
+    """The digest-verified weight from conftest, not a path on one machine."""
+    return verified_weight
 
 
 @pytest.fixture(scope="module")
