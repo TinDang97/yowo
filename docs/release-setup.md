@@ -134,6 +134,50 @@ the `publish` job to the `release` environment and `id-token: write`, and
 `pypa/gh-action-pypi-publish@v1.14.2` takes no `password:` — there is no
 credential to fall back on if this is misconfigured.
 
+## 7b. TestPyPI trusted publisher — do this one FIRST
+
+This is m1 box 2 clause (ii), and it is the clause that would have caught
+everything else on this page. `release.yml` has failed on every push since
+2026-08-26, `Publish to PyPI` has never executed once, and `v2.5.0` is tagged but
+absent from PyPI — while every check in `tests/unit/test_release_contract.py`
+stayed green throughout, because they assert the shape of a job that cannot start.
+
+`.github/workflows/release-dry-run.yml` exercises the identical OIDC mechanism
+against TestPyPI, where a mistake costs nothing. Configure this **before** section
+7, so the first thing you learn about trusted publishing is learned somewhere
+harmless.
+
+**test.pypi.org → Account settings → Publishing → Add a new PENDING publisher →
+GitHub**
+
+Pending, not "add to an existing project": `yowo` does not exist on TestPyPI
+(verified 2026-09-10, `test.pypi.org/pypi/yowo/json` → 404). A pending publisher
+creates the project on first successful upload.
+
+| Field | Value |
+|---|---|
+| PyPI Project Name | `yowo` |
+| Owner | `TinDang97` |
+| Repository name | `yowo` |
+| Workflow name | `release-dry-run.yml` |
+| Environment name | `testpypi` |
+
+All five must match exactly and the OIDC refusal does not say which one is wrong,
+which is why the workflow prints them itself on failure. Note the workflow filename
+and environment differ from section 7 on purpose: this publisher can mint a token
+only for `release-dry-run.yml` running in `testpypi`, and the PyPI one only for
+`release.yml` running in `release`. Neither can stand in for the other.
+
+You also need the `testpypi` environment to exist:
+**Settings → Environments → New environment → `testpypi`**. No secrets, no
+protection rules — it is a name the publisher binds to, nothing more.
+
+Then run it: **Actions → Release Dry Run → Run workflow**. It needs no tag.
+
+**What "done" means here.** The box closes on a run that actually publishes, not
+on the workflow file existing — the file is the part that has been proving nothing
+for three weeks. Check `test.pypi.org/project/yowo/` shows a version afterwards.
+
 ## 8. Revoke every PyPI API token — and record it
 
 This is m1 box 2 clause (iv), and it is currently **unsatisfied**. The milestone
@@ -152,13 +196,16 @@ Tell me what the token page shows and I will write the attestation.
 
 ## 9. What is still missing in the repo, not in your settings
 
-Clause (ii) — *a TestPyPI dry-run publishes from a tag* — has never existed.
-TestPyPI returns `404` for `yowo`, the string appears nowhere in this repository,
-and `release.yml:3-5` is `on: push: branches: [main]` with no `tags:` trigger at
-all, so nothing here can be triggered by a tag.
+Clause (ii) — *a TestPyPI dry-run publishes from a tag* — had never existed. As of
+2026-09-10 the **mechanism** ships: `.github/workflows/release-dry-run.yml`,
+triggered by a `v*` tag or on demand, built and gated by ADD task
+`testpypi-dry-run`.
 
-That is code, not configuration, and it is the one clause that would have caught
-the failure at the top of this page. It needs its own task.
+What still does not exist is a **run**. The clause asks that a dry run *publishes*,
+and thirteen checks asserting the shape of that workflow prove exactly as much as
+the eleven that have been green over a release job which cannot start. Section 7b
+is the part only you can do, and until a run appears on
+`test.pypi.org/project/yowo/` this box stays open.
 
 ## 10. Verifying it actually worked
 

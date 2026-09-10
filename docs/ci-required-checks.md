@@ -24,7 +24,10 @@ A required status check is configured by **name**, not by workflow. If two workf
 publish the same check-run name, GitHub cannot tell which one satisfied the requirement —
 a gate meant to prove a pull request passed can be satisfied by a push-to-`main` run
 instead. Both workflows once published `Quality Gate` *and* `Source Distribution`; the
-release path is now suffixed so every name resolves to exactly one job.
+release path is now suffixed so every name resolves to exactly one job. The
+TestPyPI dry run takes a name of its own for the same reason: it publishes on every
+`v*` tag, and a required check it could satisfy would be a gate proving the wrong
+run passed.
 
 | Check-run name | Workflow | Job id | Required on `main`? |
 |---|---|---|---|
@@ -36,6 +39,7 @@ release path is now suffixed so every name resolves to exactly one job.
 | `Source Distribution (release)` | `release.yml` | `sdist` | no |
 | `Semantic Release` | `release.yml` | `release` | no |
 | `Publish to PyPI` | `release.yml` | `publish` | no |
+| `Publish to TestPyPI` | `release-dry-run.yml` | `testpypi` | no |
 
 **Never rename a name in the left column that is marked required.** Branch protection
 stores the string; renaming the job leaves protection referencing a context nothing

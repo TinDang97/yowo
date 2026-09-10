@@ -1,0 +1,97 @@
+name: Release Dry Run
+
+# m1 box 2 clause (ii). The publish MECHANISM is proved somewhere harmless before
+# it is trusted with PyPI.
+#
+# Why this exists at all: `release.yml` has failed on every push since 2026-08-26
+# at `Mint a scoped App token`. `Publish to PyPI` has never executed once. `v2.5.0`
+# is tagged and absent from PyPI. Throughout, every check in
+# `tests/unit/test_release_contract.py` stayed green — because they assert the
+# shape of a YAML file describing a job that cannot start. A workflow nobody has
+# ever seen succeed is a hypothesis; this makes the hypothesis testable without
+# risking the real index.
+#
+# Frozen by ADD task `testpypi-dry-run`. Change this file and
+# `tests/unit/test_testpypi_dry_run.py` together.
+
+on:
+  # A2 — `v*` matches `tag_format = "v{version}"` in [tool.semantic_release], so
+  # the tags this repo actually produces are the ones exercised.
+  push:
+    tags:
+      - "v*"
+  # A1 — configuring a trusted publisher is a trial-and-error loop against four
+  # fields that must all match. Requiring a tag per attempt costs a tag each time.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testpypi:
+    # M6 — a name published by nothing else. Branch protection stores the NAME,
+    # so a required check meant to prove a pull request passed must never be
+    # satisfiable by this workflow instead.
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+
+    # M4 — `testpypi`, deliberately NOT `release`. The PyPI trusted publisher is
+    # bound to the `release` environment and to `release.yml`; nothing here
+    # matches either, so no branch of this workflow can mint a PyPI token.
+    environment: testpypi
+    permissions:
+      # M2 — the same mechanism the real publish uses. A dry run over a different
+      # mechanism proves nothing about the one that matters.
+      id-token: write
+
+    steps:
+      # M3 — the tagged commit itself. A dry run of different source proves the
+      # wrong thing.
+      - uses: actions/checkout@v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3.2.4
+
+      # M3 — `uv build` is `build_command` in [tool.semantic_release]. The real
+      # release path builds with exactly this.
+      - name: Build the distributions
+        run: uv build
+        timeout-minutes: 10
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          # R:REALINDEX — an OMITTED `repository-url` defaults to PyPI. The
+          # dangerous case is the absent value, not a wrong one.
+          repository-url: https://test.pypi.org/legacy/
+          # A5 — a re-run on an already-published version is a no-op. A red job on
+          # a successful run is how the last five release failures went unread.
+          skip-existing: true
+
+      # M7, A4 — an unconfigured publisher fails with an unreadable OIDC refusal.
+      # This does not swallow the failure (no `continue-on-error` anywhere): the
+      # job stays red and gains a message that says where to look.
+      - name: What to check when this fails
+        if: failure()
+        run: |
+          echo "::error title=TestPyPI dry run failed::If the upload step refused, the"
+          echo "TestPyPI trusted publisher is probably missing or mismatched."
+          echo
+          echo "All four fields must match EXACTLY, and the OIDC refusal does not say"
+          echo "which one is wrong:"
+          echo "  PyPI Project Name  yowo"
+          echo "  Owner              TinDang97"
+          echo "  Repository name    yowo"
+          echo "  Workflow name      release-dry-run.yml"
+          echo "  Environment name   testpypi"
+          echo
+          echo "Create it at https://test.pypi.org/manage/account/publishing/"
+          echo "as a PENDING publisher — the project does not exist on TestPyPI yet."
+          echo
+          echo "Full runbook: docs/release-setup.md"
+          exit 1
