@@ -847,3 +847,123 @@ def test_the_parent_redaction_checks_are_untouched() -> None:
     body = PARENT_CHECKS.read_text(encoding="utf-8")
     names = re.findall(r"^def (test_\w+)", body, flags=re.MULTILINE)
     assert len(names) == 10, f"expected the parent node's ten checks, found {names!r}"
+
+
+# ---------------------------------------------------------------------------
+# The node's own rejects, bound.
+#
+# These four read this file and the milestone rather than production code. That is
+# deliberate and it is not the M9 defect: M3 forbids proving a GUARANTEE ABOUT
+# PRODUCTION BEHAVIOUR by reading source text. Asserting that a test file keeps to a
+# discipline, and that a milestone box stays unticked, can only be done by reading
+# those files — they are the subject, not a proxy for it.
+# ---------------------------------------------------------------------------
+
+_THIS_FILE = Path(__file__)
+_REPO_ROOT = _THIS_FILE.parent.parent.parent
+
+
+def _assertion_lines() -> list[tuple[int, str]]:
+    """Every `assert` line in this file, with its line number."""
+    return [
+        (n, line)
+        for n, line in enumerate(_THIS_FILE.read_text().splitlines(), 1)
+        if line.lstrip().startswith("assert ")
+    ]
+
+
+def test_no_check_here_proves_a_guarantee_from_source_text() -> None:
+    """covers: M3, R:SOURCESCAN — no check leans on how something is spelled.
+
+    `assert "<token>" in inspect.getsource(...)` proves a token appears somewhere,
+    not that behaviour happens. Four of five checks in `test_weight_integrity.py`
+    survive deleting what they name; that is method M9. This node's guarantees are
+    all behavioural, so none of them may be established this way.
+    """
+    offenders = [f"{_THIS_FILE.name}:{n}" for n, line in _assertion_lines() if "getsource" in line]
+    assert not offenders, (
+        f"an assertion establishes a guarantee from source text: {offenders}. Rewrite "
+        "it to drive the code path and assert on what came out (M3, R:SOURCESCAN)"
+    )
+
+
+def test_no_check_here_asserts_on_the_redacting_attribute() -> None:
+    """covers: R:UPSTREAM — no check reads `safe_url` instead of a sink.
+
+    This is the exact defect the node exists to fix. `test_source_id_carries_no_credential`
+    and `test_cache_key_carries_no_credential` in `test_rtsp_redaction.py` have
+    byte-identical bodies — both read `source.safe_url`, the attribute that does the
+    redacting, and neither touches the payload emitted or the key the cache stored.
+    It must not come back here under a new name.
+    """
+    offenders = [f"{_THIS_FILE.name}:{n}" for n, line in _assertion_lines() if "safe_url" in line]
+    assert not offenders, (
+        f"an assertion reads the redacting attribute rather than a sink: {offenders}. "
+        "Assert on what the log emitted, what the exception carried, what the result "
+        "identified, or what the cache keyed on (R:UPSTREAM)"
+    )
+
+
+def test_no_check_here_answers_its_own_question() -> None:
+    """covers: R:SELFANSWER — nothing asserts a credential is absent from a string it redacted.
+
+    `assert PASSWORD not in redact_url(url)` is a tautology dressed as a test: it
+    proves `redact_url` works, which is already asserted elsewhere, while appearing
+    to prove that a sink is safe.
+    """
+    # The tautology shape specifically: a containment assertion over a value this
+    # test just redacted. `assert redact_url(x) == "..."` is a legitimate assertion
+    # ABOUT redact_url and is not what this forbids.
+    offenders = [
+        f"{_THIS_FILE.name}:{n}"
+        for n, line in _assertion_lines()
+        if "redact_url(" in line and (" not in " in line or " in " in line)
+    ]
+    assert not offenders, (
+        f"an assertion is made against a value this test redacted itself: {offenders}. "
+        "The value must come back out of the sink (R:SELFANSWER)"
+    )
+
+
+def test_box_6_is_not_ticked() -> None:
+    """covers: R:TICKBOX — box 6 stays open, and there is a live reason.
+
+    This node binds the four sinks against the `user:password@` credential form. It
+    does not close box 6, because `redact_url` preserves the query string:
+
+        rtsp://cam/s?token=SUPERSECRET   ->   rtsp://cam/s?token=SUPERSECRET
+        rtsp://u:p@cam/s?auth=SECRET     ->   rtsp://cam/s?auth=SECRET
+
+    A signed-URL camera — HLS, `?auth=`, `?sig=` — therefore reaches all four sinks
+    with its secret intact. A query token is a credential. Pre-existing and outside
+    this node's frozen scope, but box 6 says "no credential", and it means it.
+    """
+    milestone = (_REPO_ROOT / ".add/milestones/m1-trust-the-ship.md").read_text()
+    box = [
+        line
+        for line in milestone.splitlines()
+        if line.startswith("- [") and "No credential reaches a log" in line
+    ]
+    assert len(box) == 1, f"m1 box 6 is not where it was ({len(box)} matches)"
+    assert box[0].startswith("- [ ]"), (
+        "m1 box 6 is ticked. This node binds the four sinks against `user:password@` "
+        "only — `redact_url` still preserves the query string, so a signed-URL camera "
+        "reaches every one of those sinks with its secret intact. Tick it when that is "
+        "fixed too, not because these fifteen checks are green (R:TICKBOX)"
+    )
+
+    # And the leak is real, not a worry. If this stops holding, the follow-up node
+    # landed and this check should be revisited rather than left asserting a fiction.
+    #
+    # The mixed form is the damning one. The userinfo IS stripped, so the `@` is gone
+    # and the string wears the visual signature of a redacted URL — while carrying the
+    # literal password in the query. That defeats eyeball review of a log, and defeats
+    # a reviewer diffing before against after, because the diff shows redaction
+    # happening.
+    from yowo.pipeline._ids import safe_stream_id
+
+    leaked = safe_stream_id("rtsp://camop:hunter2@10.0.0.5:554/s?token=SECRET&password=hunter2")
+    assert "hunter2" in leaked and "@" not in leaked, (
+        f"the query-string leak no longer reproduces ({leaked!r}). The reason box 6 is "
+        "held open has changed — re-derive it rather than trusting this check"
+    )
