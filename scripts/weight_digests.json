@@ -1,0 +1,202 @@
+[
+  {
+    "bytes": 5790624,
+    "measured": "2026-09-10",
+    "sha256": "c62d41bf9625777760018bf914d2e6cd472420ccd01706d97a61cb6c82502bd7",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.pt",
+    "weight_stem": "yolo11n-cls"
+  },
+  {
+    "bytes": 13630112,
+    "measured": "2026-09-10",
+    "sha256": "e2b605d1c8c212b434a75a32759a6f7adf1d2b29c35f76bdccd4c794cb653cf2",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s-cls.pt",
+    "weight_stem": "yolo11s-cls"
+  },
+  {
+    "bytes": 23487128,
+    "measured": "2026-09-10",
+    "sha256": "80583b974e44292d56fc5ba4d26cd0bb04e77edc8bbf4317f7ce678147156dd5",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m-cls.pt",
+    "weight_stem": "yolo11m-cls"
+  },
+  {
+    "bytes": 28553700,
+    "measured": "2026-09-10",
+    "sha256": "6b56513a5d8bdae6b8f0a36dacaf01b26d5a522ba1b34197c3bac9fa6463366c",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l-cls.pt",
+    "weight_stem": "yolo11l-cls"
+  },
+  {
+    "bytes": 59624868,
+    "measured": "2026-09-10",
+    "sha256": "5b99af0f075efcd88349746fad4ff0a88cd591712b578a887286790544bd449c",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x-cls.pt",
+    "weight_stem": "yolo11x-cls"
+  },
+  {
+    "bytes": 5786434,
+    "measured": "2026-09-10",
+    "sha256": "0dd6f8dbc448870ac98a3cbb7156f923f7ce21fed3755d4019169ffffd279e81",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n-cls.pt",
+    "weight_stem": "yolo26n-cls"
+  },
+  {
+    "bytes": 13622082,
+    "measured": "2026-09-10",
+    "sha256": "816790029d5df3fef358f03c8144b96339d8824ee25577aeda8be0963e5c5f09",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-cls.pt",
+    "weight_stem": "yolo26s-cls"
+  },
+  {
+    "bytes": 23477398,
+    "measured": "2026-09-10",
+    "sha256": "9f6546f33a70d910e2cd6dcca5265c4617b5670b19a1f287c39e99258bade01a",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26m-cls.pt",
+    "weight_stem": "yolo26m-cls"
+  },
+  {
+    "bytes": 28535928,
+    "measured": "2026-09-10",
+    "sha256": "7a3aebb7de6f5d79f0153da627a5f68bd3d7df30e648c0fdb7f9217986ee129e",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l-cls.pt",
+    "weight_stem": "yolo26l-cls"
+  },
+  {
+    "bytes": 59610168,
+    "measured": "2026-09-10",
+    "sha256": "ee88a0c71e9596cdfdbb71892725929cb4489b874d24fb581d20bffe79724386",
+    "task": "classify",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x-cls.pt",
+    "weight_stem": "yolo26x-cls"
+  },
+  {
+    "bytes": 5613764,
+    "measured": "2026-09-10",
+    "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt",
+    "weight_stem": "yolo11n"
+  },
+  {
+    "bytes": 19313732,
+    "measured": "2026-09-10",
+    "sha256": "85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt",
+    "weight_stem": "yolo11s"
+  },
+  {
+    "bytes": 40684120,
+    "measured": "2026-09-10",
+    "sha256": "d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt",
+    "weight_stem": "yolo11m"
+  },
+  {
+    "bytes": 51387343,
+    "measured": "2026-09-10",
+    "sha256": "9ebd0e09d59811db4b1d61e2bc6730649608b1ac47f8dd01e2da6bca7c20023f",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt",
+    "weight_stem": "yolo11l"
+  },
+  {
+    "bytes": 114636239,
+    "measured": "2026-09-10",
+    "sha256": "7bc158aa95c0ebfdd87f70f01653c1131b93e92522dbe15c228bcd742e773a24",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt",
+    "weight_stem": "yolo11x"
+  },
+  {
+    "bytes": 5544453,
+    "measured": "2026-09-10",
+    "sha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26n.pt",
+    "weight_stem": "yolo26n"
+  },
+  {
+    "bytes": 20422725,
+    "measured": "2026-09-10",
+    "sha256": "646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt",
+    "weight_stem": "yolo26s"
+  },
+  {
+    "bytes": 44255705,
+    "measured": "2026-09-10",
+    "sha256": "401cea9ab23ad19246ff7744859816bc599f350e93c9dd30367b6f0a0745d0b7",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26m.pt",
+    "weight_stem": "yolo26m"
+  },
+  {
+    "bytes": 53211173,
+    "measured": "2026-09-10",
+    "sha256": "9fe3c544f2b19bebad7ea41e76d7ad3d88b7c2f10d11d24430c5311f6b32db26",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26l.pt",
+    "weight_stem": "yolo26l"
+  },
+  {
+    "bytes": 118667365,
+    "measured": "2026-09-10",
+    "sha256": "9fdd44a31c504547ffb81d2c6d9e6dac3493c8eaa8b0398d3f43bae6c7003e92",
+    "task": "detect",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x.pt",
+    "weight_stem": "yolo26x"
+  },
+  {
+    "bytes": 5795654,
+    "measured": "2026-09-10",
+    "sha256": "b62898ebf38940ca4df323863e45ee9d84a1a46d5d11ebdde529fb33aa9f3a32",
+    "task": "obb",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-obb.pt",
+    "weight_stem": "yolo11n-obb"
+  },
+  {
+    "bytes": 19934534,
+    "measured": "2026-09-10",
+    "sha256": "43fa63102922e0701501241b307420d24fc55e080816888b18bf8c6f96b1a45a",
+    "task": "obb",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s-obb.pt",
+    "weight_stem": "yolo11s-obb"
+  },
+  {
+    "bytes": 42415346,
+    "measured": "2026-09-10",
+    "sha256": "41832a4349c08190335bbc11a8e64726750702eb49cf09abb262bc394a13498c",
+    "task": "obb",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m-obb.pt",
+    "weight_stem": "yolo11m-obb"
+  },
+  {
+    "bytes": 53120908,
+    "measured": "2026-09-10",
+    "sha256": "92dcf9face59a821cd4ee93828f4c19b51f6dee9b842b23c1dacab7aa89039fc",
+    "task": "obb",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l-obb.pt",
+    "weight_stem": "yolo11l-obb"
+  },
+  {
+    "bytes": 118438668,
+    "measured": "2026-09-10",
+    "sha256": "1461342db1ce0f35c755278303febd1174604ccc375110076fa0ac155231b6a0",
+    "task": "obb",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x-obb.pt",
+    "weight_stem": "yolo11x-obb"
+  }
+]
