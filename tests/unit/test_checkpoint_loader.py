@@ -519,3 +519,144 @@ def test_legacy_format_file_runs_nothing_before_find_class(tmp_path: Path) -> No
     assert not marker.exists(), "the first object ran before the allowlist was consulted"
     assert "Refusing to load" in str(excinfo.value), f"not refused by name: {excinfo.value}"
     assert "mkdir" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# The storage suffix rule is deleted, not enumerated — ADD task
+# `storage-suffix-enumeration`
+# ---------------------------------------------------------------------------
+#
+# `_ALLOWED_STORAGE_SUFFIX = "Storage"` admitted any `torch` attribute whose
+# name ended in "Storage" via `getattr(torch, name)` — the last entry in the
+# boundary that admitted by the SHAPE of a name rather than by the name.
+# `scripts/checkpoint_globals_manifest.json` records 53 globals observed
+# across the 10 digest-verified checkpoints and the 25-model in-process
+# sweep; none is a storage class, so the rule is removed outright rather
+# than enumerated.
+#
+# Authored red under `.add/tasks/storage-suffix-enumeration.md`.
+
+
+def _checkpoint_naming_torch_attr(tmp_path: Path, name: str, *, temporary: bool) -> Path:
+    """A raw (legacy, non-zip) pickle stream naming ``torch.<name>`` directly —
+    the shape the removed suffix rule matched on.
+
+    Built with plain ``pickle.dumps``, like ``_MkdirPayload`` above, never with
+    ``torch.save``: ``torch.load``'s zip-format reader wraps the unpickler with
+    its OWN resolution for real ``torch.*Storage`` names and never calls ours
+    for one — the interception this node's CARD and the removed rule's comment
+    both describe, confirmed empirically while authoring this check (a
+    zip-format ``torch.FloatStorage`` reference never reaches
+    ``_RestrictedUnpickler.find_class`` at all; it comes back as torch's own
+    ``StorageType`` stand-in). The legacy path is the one place either the
+    removed rule or its replacement refusal is ever actually consulted for a
+    name shaped like this.
+
+    When ``temporary`` the attribute is fabricated on the real ``torch`` module
+    only long enough for ``pickle.dumps``'s own round-trip check to accept it,
+    then deleted before the checkpoint is ever read back. So if the removed
+    rule's ``getattr(torch, name)`` ran at load time it would raise
+    ``AttributeError`` — the attribute is simply gone by then — rather than
+    silently resolving. A real, permanent attribute (``temporary=False``)
+    covers the case where the name legitimately exists on ``torch``.
+    """
+    import pickle
+
+    if temporary:
+        cls = type(name, (), {})
+        cls.__module__ = "torch"
+        cls.__qualname__ = name
+        setattr(torch, name, cls)
+    else:
+        cls = getattr(torch, name)
+    path = tmp_path / f"torch.{name}.pt"
+    try:
+        path.write_bytes(pickle.dumps({"ema": None, "model": None, "payload": cls}, protocol=2))
+    finally:
+        if temporary:
+            delattr(torch, name)
+    return path
+
+
+def test_no_suffix_rule_survives_in_find_class() -> None:
+    """covers: M1, R:SUFFIX, R:DEADRULE — no `endswith` over a torch name
+    remains anywhere in the boundary; the rule is deleted, not narrowed."""
+    import ast
+    import inspect
+
+    from yowo.arch import _weights
+
+    assert not hasattr(_weights, "_ALLOWED_STORAGE_SUFFIX"), "the suffix constant is still defined"
+
+    tree = ast.parse(inspect.getsource(_weights._restricted_unpickler_module))
+    admits_by_suffix = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "endswith"
+    ]
+    assert not admits_by_suffix, (
+        "a name is still admitted by the SHAPE of a name (`endswith`) rather "
+        "than by the name itself"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "temporary"),
+    [
+        # E1 — a real torch storage class, admitted by shape alone under the
+        # old rule even though nothing ever observed it.
+        ("FloatStorage", False),
+        # E2 — a fictitious name that merely ends in "Storage"; deleted from
+        # `torch` before the load, so the old rule's `getattr` would fail
+        # loudly rather than silently resolving.
+        ("NotAStorage", True),
+    ],
+    ids=["real-storage-class", "fictitious-lookalike"],
+)
+def test_a_storage_name_is_refused_by_name(tmp_path: Path, name: str, temporary: bool) -> None:
+    """covers: M1, A4, E1, E2 — a `torch.<X>Storage` name is refused exactly
+    like any other unlisted name, without the removed rule's
+    `getattr(torch, name)` ever running. The fictitious case proves that: it
+    is gone from `torch` by the time the checkpoint is read, so if the old
+    `getattr` path still ran it would surface as `AttributeError`, never as
+    the clean by-name refusal."""
+    from yowo.arch._weights import _extract_state_dict
+    from yowo.errors import ModelLoadError
+
+    path = _checkpoint_naming_torch_attr(tmp_path, name, temporary=temporary)
+
+    with pytest.raises(ModelLoadError) as excinfo:
+        _extract_state_dict(path)
+    message = str(excinfo.value)
+    assert "Refusing to load" in message, f"not refused by name: {message}"
+    assert f"torch.{name}" in message, f"the refusal must name the exact class: {message}"
+    assert "AttributeError" not in message, "the removed getattr still ran"
+
+
+def test_allowlist_is_unchanged_by_the_removal() -> None:
+    """covers: M3, A2 — the storage rule is DELETED, not folded into the exact
+    set: `_ALLOWED_STORAGE_SUFFIX` is gone, and `_ALLOWED_TORCH` still matches
+    the recorded measurement exactly. A deletion that smuggled in a
+    compensating entry would pass every other check while widening the
+    boundary it claims to narrow."""
+    import json
+
+    from yowo.arch import _weights
+
+    assert not hasattr(_weights, "_ALLOWED_STORAGE_SUFFIX"), (
+        "the suffix constant survives; M3 requires deletion, not retention"
+    )
+
+    manifest = json.loads(_MANIFEST.read_text())
+    recorded_torch = frozenset((m, n) for m, n in manifest["allowed_torch"])
+    assert recorded_torch == _weights._ALLOWED_TORCH, (
+        "the torch set drifted from the recorded measurement while removing "
+        f"the storage rule: unrecorded={sorted(_weights._ALLOWED_TORCH - recorded_torch)} "
+        f"missing={sorted(recorded_torch - _weights._ALLOWED_TORCH)}"
+    )
+    assert not any(name.endswith("Storage") for _, name in _weights._ALLOWED), (
+        "a storage-shaped class was folded into the exact allowlist to "
+        "compensate for the removed suffix rule"
+    )
