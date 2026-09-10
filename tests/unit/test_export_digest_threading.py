@@ -153,6 +153,9 @@ def test_export_threads_the_registry_pin_for_detection(tmp_path: Path) -> None:
             "yowo.models._registry.get_obb",
         ),
     ],
+    # Explicit ids: the generated ones splice all four params into a name so long
+    # it is unreadable in a report and unquotable in a check list.
+    ids=["classify", "obb"],
 )
 def test_export_threads_the_registry_pin_for_cls_and_obb(
     task: str, builder: str, loader: str, registry_get: str, tmp_path: Path
@@ -226,6 +229,9 @@ def test_export_sends_no_pin_for_an_explicit_weights_path(tmp_path: Path) -> Non
             "yowo.models._registry.get_obb",
         ),
     ],
+    # Explicit ids: the generated ones splice all four params into a name so long
+    # it is unreadable in a report and unquotable in a check list.
+    ids=["classify", "obb"],
 )
 def test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision(
     task: str, builder: str, loader: str, registry_get: str, tmp_path: Path
