@@ -515,11 +515,19 @@ def open_source(
     Raises:
         SourceError: If no source type matches or the resource is unavailable.
     """
+    source_str = str(source)
+    # One redaction, at the boundary, before any branch can build a message and
+    # before Path() can rewrite the value — a message built from the Path form
+    # reads `https:/` with one slash, which is the tell that the value was
+    # laundered before anyone looked at it. Every `raise` below emits this and
+    # only this, so a branch added later inherits the redaction instead of
+    # having to remember it. A value with no userinfo is returned byte for byte,
+    # so plain paths and webcam indices are unaffected.
+    safe_source = redact_url(source_str)
+
     # Integer webcam index (e.g. open_source(0)).
     if isinstance(source, int):
         return WebcamSource(source, max_frames=max_frames, frame_skip=frame_skip)
-
-    source_str = str(source)
 
     # Webcam: pure digit string.
     if isinstance(source, str) and source.isdigit():
@@ -542,12 +550,12 @@ def open_source(
 
     if suffix in IMAGE_EXTS:
         if not path.exists():
-            raise SourceError(f"Image file not found: {path}")
+            raise SourceError(f"Image file not found: {safe_source}")
         return ImageFileSource(path)
 
     if suffix in VIDEO_EXTS:
         if not path.exists():
-            raise SourceError(f"Video file not found: {path}")
+            raise SourceError(f"Video file not found: {safe_source}")
         return VideoFileSource(
             path,
             loop=loop,
@@ -556,7 +564,7 @@ def open_source(
         )
 
     raise SourceError(
-        f"Cannot determine source type for: {source!r}. "
+        f"Cannot determine source type for: {safe_source!r}. "
         f"Supported: image files {sorted(IMAGE_EXTS)}, "
         f"video files {sorted(VIDEO_EXTS)}, "
         f'RTSP URLs (rtsp://), webcam indices ("0", "1", ...).'

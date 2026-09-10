@@ -25,6 +25,11 @@ verified:
   - { by: "Tin Dang", at: 2026-09-09, act: refreeze, authority: human, direction: "sha256:0a9800393106e820", binding: "sha256:e9a79d98e3503d91" }
   - { by: "process:run", at: 2026-09-09, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/4.md }
   - { by: "Tin Dang", at: 2026-09-09, act: gate, authority: human, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/4.md, brief: "sha256:f43440757ce221d0", reason: "16 checks green on a bound receipt. R:SELFKEYED made structural: pin (registry-only, authenticates) and sidecar_key (may be computed, addresses the cache) never merge. M5 confirmed on the real cached yolo11n - sidecar hit 0.025s no rehash, substitution after resolution refused. Backend.load byte-identical across five backends; resolve_weights unchanged so the ~60 mock sites stand. Residue carried not swallowed: export/_exporter.py resolves then loads with no digest, opened as export-digest-threading." }
+  - { by: loop, at: 2026-09-10, act: reopen, to: direction, reason: "M5 as frozen mandates the defect that sidecar-not-self-attesting exists to close: 'A sidecar hit whose stored raw_sha256 equals the pin is served without re-hashing the raw file.' The pin is public, printed in _registry.py, so a sidecar keyed on it authenticates itself with a value anyone can read - a planted .state_dict.pt naming the published digest served arbitrary tensors with no read of the checkpoint at all, reproduced 2026-09-10. The check bound to M5 asserted exactly that property with verify.assert_not_called() and rehash.assert_not_called(), so it encoded the hole rather than an invariant. What M5 was really defending is the cost bound - one read of the raw file per load, not two - and that survives intact. Amending M5 to say so, and the check to assert it." }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:e3be03091c443e4f", binding: "sha256:e9a79d98e3503d91" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:a78d3801a2969363" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/5.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/verified-digest-threading.d/runs/5.md, brief: "sha256:a78d3801a2969363", reason: "Re-gated after M5 was amended from 'a sidecar hit whose stored raw_sha256 equals the pin is served without re-hashing the raw file' to 'a load reads the raw checkpoint's bytes exactly once'. The old wording mandated the defect rather than an invariant: the pin is public, printed in _registry.py, so keying the sidecar on it let anything able to write the weight cache plant a .state_dict.pt naming the published digest and have arbitrary tensors served with the checkpoint never opened. Reproduced 2026-09-10. The check bound to M5 asserted precisely that property - verify.assert_not_called() plus rehash.assert_not_called() - so it encoded the hole; a green gate on it proved the wrong thing. The cost bound was the half worth keeping and it holds: I counted hashlib.sha256 constructions myself through load_verified_state_dict and got exactly one on the pinned fast path and one on the unpinned fast path. The check keeps its name so this node's binding survives, and its assertion is now a hash count plus an _extract_state_dict tripwire, which is strictly stronger than the assert_not_called pair it replaces. 19/19 reported, every cited id present, no rule unbound." }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
@@ -57,8 +62,14 @@ beat: done · next: add status
   today's behaviour: it converts, and its sidecar is keyed on the computed digest.
 - M4 The `Backend.load` protocol is unchanged. No backend that never unpickles gains a parameter it
   cannot use.
-- M5 A sidecar hit whose stored `raw_sha256` equals the pin is served without re-hashing the raw file —
-  the steady-state path `weight-integrity` made fast stays fast.
+- M5 A load reads the raw checkpoint's bytes exactly ONCE — the steady-state path `weight-integrity`
+  made fast stays fast, and one measurement answers both the pin comparison and the sidecar's
+  authentication. AMENDED 2026-09-10 by `sidecar-not-self-attesting`. This rule previously read "a
+  sidecar hit whose stored `raw_sha256` equals the pin is served without re-hashing the raw file",
+  which mandated the defect rather than an invariant: the pin is PUBLIC, printed in `_registry.py`,
+  so keying the sidecar on it let anything able to write the weight cache plant a `.state_dict.pt`
+  naming the published digest and have arbitrary tensors served with the checkpoint never opened.
+  The cost bound was the part worth keeping; the not-touching-the-file part was the hole.
 </must>
 <reject>
 - R:SELFKEYED A digest computed from the file under test may never satisfy the verification of that same
@@ -137,7 +148,11 @@ only the labels moved, and they moved toward what is on disk.
   `_extract_state_dict` is never reached on a mismatch.
 - test_stale_sidecar_falls_through_to_the_pin_comparison · covers: R:CONVERTFIRST, A3 · a sidecar
   miss must land on the comparison, not on the conversion.
-- test_sidecar_hit_on_the_pin_does_not_rehash_the_raw_file · covers: M5, A3, E2 · the steady-state fast path is not taxed.
+- test_sidecar_hit_on_the_pin_does_not_rehash_the_raw_file · covers: M5, A3, E2 ·
+  the steady-state fast path costs exactly one hash of the raw file and never reaches the executing
+  reader. Name kept so this node's gate still binds; the assertion was corrected from
+  `verify.assert_not_called()` + `rehash.assert_not_called()` — which asserted the defect — to a
+  hash count plus an `_extract_state_dict` tripwire.
 - test_unpinned_load_converts_without_claiming_verification · covers: M3, A4, E3 · an unpinned model still loads.
 - test_unpinned_sidecar_is_still_keyed_on_the_computed_digest · covers: M3, A4 · the cache key survives when there is no pin.
 - test_every_load_path_forwards_the_pin · covers: M2, A2 · parametrised over all three loaders.
