@@ -1,7 +1,7 @@
 ---
 type: Task
 title: open_source refuses a credentialed URL without echoing it
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -15,12 +15,14 @@ verified:
   - { by: "Tin Dang", at: 2026-09-10, act: interview, authority: human, interview: "sha256:5d58d94a2d506878", receipt: /tasks/source-factory-redaction.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:LEAK=confirm|R:PROXY=confirm|R:MANGLE=confirm" }
   - { by: "Tin Dang", at: 2026-09-10, act: freeze, authority: human, direction: "sha256:a28efabb3f9d6f1b", binding: "sha256:0f4c2e0e74c89eec" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:cd6fb7312cc94273" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/source-factory-redaction.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/source-factory-redaction.d/runs/1.md, brief: "sha256:9ec26624829aa315", reason: "Eleven checks green on a bound receipt, every cited id present, 1:1 with the CHECKS names. Verified independently rather than on the builder's word: all four original reproductions plus the username-only case now hide the credential, and no message reads 'https:/' with one slash - the tell that the value was laundered through Path() before anyone looked at it. One redaction at entry, before the webcam branch, before scheme dispatch, before Path(), so M2 holds structurally and not by three lines happening to be right. The AST half of test_every_raise_in_open_source_reads_the_redacted_form asserts exactly one redact_url call, positioned below every If/Raise/Path statement, with every Raise referencing the redacted name and none of source/source_str/path - that is what makes a later branch inherit the redaction rather than remember it. R:PROXY is bound the hard way: test_no_check_here_asserts_on_redact_url_alone passed its helper assertion before the fix and failed its factory assertion, which is the whole failure shape in one check. RECORDED EXCEPTION to red-first: test_a_credentialed_rtsp_url_still_opens_as_before was green before the change. E4 defines it as a non-regression guard on a path rtsp-credential-redaction already covers; a red result there would have meant that path was already broken, and manufacturing one would be theatre. The builder flagged this rather than weakening or faking it. ACCEPTED TRADE-OFF, confirmed at interview as A3/A4: a path beginning with // whose authority is malformed now reports as <unparseable url>. Checked by hand - ordinary absolute, relative, ./-prefixed, spaced, non-ASCII and @-containing paths all report byte for byte; //user@nas01/share strips the userinfo, which is correct, a UNC credential being a credential. Full suite 2289 passed 11 skipped, ruff, ruff-format and pyright all clean." }
 advised_by: security-reviewer
 ---
 ## CARD
 goal: `open_source` never echoes a userinfo component, on any branch, for any scheme.
 why: `rtsp-credential-redaction` closed the leak inside `RTSPStreamSource`, which redacts at the boundary where the URL is stored. `open_source` is upstream of that boundary — it raises before any source object exists — so three of its `SourceError` messages interpolate the caller's raw string. Reproduced 2026-09-10: `Video file not found: https:/admin:hunter2@10.0.0.5/stream.mp4`, `Image file not found: https:/admin:hunter2@10.0.0.5/frame.jpg`, and `Cannot determine source type for: 'http://admin:hunter2@10.0.0.5/video'.` — the last one via `{source!r}`, so quoting does not save it. This is not a newly discovered surface: `rtsp-credential-redaction`'s own A3 names it — "any source URL with a userinfo component, since `open_source` accepts HTTP(S) streams too -> an HTTP camera URL leaks by the same mechanism through a path nobody checked" — and its `R:LEAK` forbids userinfo being "emitted, logged, raised, returned or used as a key, in whole or in part". The check written for A3, `test_non_rtsp_scheme_with_userinfo_is_redacted`, calls `redact_url()` directly and never calls `open_source`, so it asserts redaction on a string that was never the leaking one. An HTTP camera password is the same secret as an RTSP one; the scheme is not the boundary.
-beat: direction
+beat: done · next: add status
 
 ## RULES
 <must>
