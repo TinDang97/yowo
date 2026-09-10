@@ -16,7 +16,8 @@ Registry of supported YOLO model families and sizes, plus weight file download a
 
 ```
 models/
-├── __init__.py    — public surface: get(), list_available(), resolve_weights()
+├── __init__.py    — public surface: get(), get_for_task(), list_available(),
+│                    list_all_registered(), resolve_weights()
 ├── _registry.py   — ModelMeta dataclass, in-memory registry, built-in registrations
 └── _weights.py    — download, hash verification, local cache management
 ```
@@ -37,11 +38,25 @@ class ModelMeta:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `register` | `(meta: ModelMeta) -> None` | Add entry to the in-memory registry. Overwrites if `(family, size)` key already exists. |
-| `get` | `(family: str, size: str) -> ModelMeta` | Return entry or raise `ModelNotFoundError`. |
-| `list_available` | `() -> list[ModelMeta]` | All registered entries, sorted by `(family, size)`. |
+| `register` | `(meta: ModelMeta) -> None` | Add entry to the in-memory **detection** registry. Overwrites if `(family, size)` key already exists. |
+| `get` | `(family: str, size: str) -> ModelMeta` | Detection entry, or raise `ModelNotFoundError`. |
+| `get_cls` | `(family: str, size: str) -> ModelMeta` | Classification (`-cls`) entry, or raise. |
+| `get_obb` | `(family: str, size: str) -> ModelMeta` | OBB (`-obb`) entry, or raise. |
+| `get_for_task` | `(task: str \| None, family, size) -> ModelMeta` | **The dispatch.** The task picks the registry; family and size pick the entry in it. `None` means `detect`. An unrecognised task raises, naming the task, the model and the registered tasks — it never falls back to detection. |
+| `registered_tasks` | `() -> tuple[str, ...]` | The task names that select a registry: `classify`, `detect`, `obb`. |
+| `list_available` | `() -> list[ModelMeta]` | All registered **detection** entries, sorted by `(family, size)`. |
+| `list_all_registered` | `() -> list[tuple[str, ModelMeta]]` | Every entry in **every** registry, as `(task, meta)`. Use this to audit the registries — `list_available()` returns ten of twenty-five. |
 
-The registry is a module-level `dict[tuple[str, str], ModelMeta]` populated at import time by `_register_builtins()`.
+There are three registries, one per task: `_REGISTRY` (detection), `_CLS_REGISTRY`
+(`-cls`) and `_OBB_REGISTRY` (`-obb`). Each is a module-level
+`dict[tuple[ModelFamily, ModelSize], ModelMeta]` populated at import time by
+`_register_builtins()`; `_TASK_REGISTRIES` maps a task name to its registry and is the
+only place that mapping is made.
+
+Every entry carries a pinned `sha256` measured by downloading that entry's own
+`default_weights_url` and hashing what it served — `scripts/measure_weight_digests.py`,
+whose output is recorded in `scripts/weight_digests.json` with the URL, the byte count
+and the date. A digest from any other source is not a pin.
 
 ### `_weights.py`
 
@@ -51,15 +66,23 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
     Return path to a local .pt file for spec.
 
     Resolution order:
-      1. spec.weights_path if set and file exists → return as-is
-      2. Cache hit at cache_dir / family / size / filename → return cached path
-      3. Download from ModelMeta.default_weights_url → verify hash → cache → return
+      1. spec.weights_path if set and file exists → return as-is, unpinned
+      2. spec.task picks the registry; family/size pick the entry in it
+      3. Cache hit at cache_dir / family / size / filename → return cached path
+      4. Download from ModelMeta.default_weights_url → verify hash → cache → return
 
     cache_dir defaults to ~/.cache/yowo/weights/
-    Raises ModelNotFoundError if spec.family/size not in registry.
+    Raises ModelNotFoundError if spec.task is not a registered task, or if
+      spec.family/size is not registered for that task.
     Raises IOError on download failure after retries.
     """
 ```
+
+Step 2 is why a `classify` spec reaches `yolo11n-cls.pt` and an `obb` spec reaches
+`yolo11n-obb.pt`. The task is read **before** the lookup, and that one lookup supplies
+both the URL and the pin, so the two can never come from different entries. An explicit
+`spec.weights_path` still wins over all of it, for every task: a fine-tuned checkpoint is
+a file no registry entry describes, so it is returned without a digest comparison.
 
 Download behavior:
 - Retries: 3 attempts with exponential backoff (2s, 4s, 8s).
@@ -146,14 +169,18 @@ download-failure messages.
 
 ```
 ~/.cache/yowo/weights/
-└── yolo26/
+└── yolo11/
     ├── n/
-    │   ├── yolo26n.pt
-    │   └── yolo26n.pt.sha256
+    │   ├── yolo11n.pt          # task=detect
+    │   ├── yolo11n-cls.pt      # task=classify
+    │   └── yolo11n-obb.pt      # task=obb
     └── m/
-        ├── yolo26m.pt
-        └── yolo26m.pt.sha256
+        └── yolo11m.pt
 ```
+
+The filename is `ModelMeta.weight_stem`, which carries the task suffix, so the three
+tasks for one family and size are three distinct files. A classification weight can
+never overwrite the detection weight it sits beside.
 
 Cache directory is configurable via `YOWO_CACHE_DIR` environment variable or `cache_dir` argument to `resolve_weights()`.
 

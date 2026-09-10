@@ -46,6 +46,20 @@ _REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
 _CLS_REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
 _OBB_REGISTRY: dict[tuple[ModelFamily, ModelSize], ModelMeta] = {}
 
+#: The task string a `ModelSpec` carries -> the registry that answers for it.
+#: Holds the live dicts, not copies, so a runtime `register()` is visible here.
+#: This is the ONLY place a task name is mapped to a registry: a second mapping
+#: elsewhere is how a URL and a pin come to be read from different entries.
+_TASK_REGISTRIES: dict[str, dict[tuple[ModelFamily, ModelSize], ModelMeta]] = {
+    "detect": _REGISTRY,
+    "classify": _CLS_REGISTRY,
+    "obb": _OBB_REGISTRY,
+}
+
+#: What an absent or ``None`` task means -- the same default ``ModelSpec.task``
+#: carries, so a task-blind caller keeps resolving detection weights (A4).
+DEFAULT_TASK = "detect"
+
 
 def register(meta: ModelMeta) -> None:
     """Add *meta* to the registry.
@@ -101,9 +115,73 @@ def get_obb(family: ModelFamily, size: ModelSize) -> ModelMeta:
     return _OBB_REGISTRY[key]
 
 
+def registered_tasks() -> tuple[str, ...]:
+    """The task names that select a registry, in a stable order."""
+    return tuple(sorted(_TASK_REGISTRIES))
+
+
+def get_for_task(task: str | None, family: ModelFamily, size: ModelSize) -> ModelMeta:
+    """Return the ModelMeta for *task*'s registry, family and size.
+
+    The task picks the registry; family and size pick the entry within it. One
+    lookup yields both the download URL and the pinned digest, so the two can
+    never come from different entries (A3).
+
+    ``None`` -- and, at the caller, an absent task -- means ``detect``, matching
+    ``ModelSpec.task``'s own default, so every task-blind caller keeps resolving
+    what it resolved before (A1, A4).
+
+    An unrecognised task string is an error, never a fallback to detection:
+    that fallback is precisely the defect this exists to close, and it surfaces
+    two hundred lines later as a shape mismatch in a conv layer instead of here
+    (M6, A6).
+
+    Raises:
+        ModelNotFoundError: When ``task`` is not a registered task, or when the
+            family/size combination is not registered for that task.
+    """
+    resolved = DEFAULT_TASK if task is None else task
+    registry = _TASK_REGISTRIES.get(resolved)
+    if registry is None:
+        raise ModelNotFoundError(
+            f"Unknown task {resolved!r} for model {family.value}{size.value}. "
+            f"Registered tasks: {', '.join(registered_tasks())}. "
+            "No fallback to the detection weight is attempted -- handing a "
+            f"{resolved!r} model the detection checkpoint is what this check exists "
+            "to prevent."
+        )
+    key = (family, size)
+    if key not in registry:
+        available = ", ".join(f"{f.value}/{s.value}" for f, s in sorted(registry))
+        raise ModelNotFoundError(
+            f"No {resolved} model {family.value}/{size.value} in the registry. "
+            f"Available for {resolved}: {available}"
+        )
+    return registry[key]
+
+
 def list_available() -> list[ModelMeta]:
-    """Return all registered ModelMeta entries sorted by (family, size)."""
+    """Return all registered DETECTION ModelMeta entries sorted by (family, size).
+
+    Detection only. Use :func:`list_all_registered` to audit every registry --
+    walking this one and calling the result complete is how fifteen ``-cls`` and
+    ``-obb`` entries stayed unpinned behind a green check.
+    """
     return [_REGISTRY[k] for k in sorted(_REGISTRY)]
+
+
+def list_all_registered() -> list[tuple[str, ModelMeta]]:
+    """Every registered entry in EVERY registry, as ``(task, meta)`` pairs.
+
+    Sorted by task, then family, then size. This is the enumeration an audit of
+    the registries must use: `list_available()` returns the ten detection metas
+    and cannot see the classification or OBB entries at all.
+    """
+    return [
+        (task, _TASK_REGISTRIES[task][key])
+        for task in registered_tasks()
+        for key in sorted(_TASK_REGISTRIES[task])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -114,12 +192,21 @@ _ASSETS_V83 = "https://github.com/ultralytics/assets/releases/download/v8.3.0/"
 _ASSETS_V84 = "https://github.com/ultralytics/assets/releases/download/v8.4.0/"
 
 
-# Pinned SHA-256 of each canonical release asset, captured from the upstream
-# files themselves. yolo11n's value was cross-checked against a real cache
-# entry and matched byte for byte, confirming a pin validates a cache hit and
-# not merely a fresh download. Upstream republishing a tag with new bytes must
-# FAIL loudly here and be re-pinned deliberately — auto-accepting new bytes
-# under an old pin would make the pin decorative.
+# Pinned SHA-256 of each canonical release asset, keyed by weight_stem so a
+# detection, a `-cls` and an `-obb` asset for the same family and size are three
+# separate keys and cannot borrow each other's digest.
+#
+# Every value is measured by downloading that entry's own `default_weights_url`
+# and hashing the bytes it served — `scripts/measure_weight_digests.py`, whose
+# output is recorded in `scripts/weight_digests.json` with the URL, the byte
+# count and the date. A digest from any other source (another variant, a local
+# file of unknown origin, a third party) is R:UNMEASURED and is not a pin.
+#
+# yolo11n's value was additionally cross-checked against a real cache entry and
+# matched byte for byte, confirming a pin validates a cache hit and not merely a
+# fresh download. Upstream republishing a tag with new bytes must FAIL loudly
+# here and be re-pinned deliberately — auto-accepting new bytes under an old pin
+# would make the pin decorative.
 _PINS: dict[str, str] = {
     "yolo11l": "9ebd0e09d59811db4b1d61e2bc6730649608b1ac47f8dd01e2da6bca7c20023f",
     "yolo11m": "d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95",
@@ -168,6 +255,7 @@ def _make_obb_meta(size: ModelSize) -> ModelMeta:
         num_classes=15,  # DOTA v1 — CRITICAL: not 80
         weight_stem=name,
         default_weights_url=f"{_ASSETS_V83}{name}.pt",
+        sha256=_PINS.get(name),
     )
 
 
@@ -189,6 +277,7 @@ def _make_cls_meta(family: ModelFamily, size: ModelSize) -> ModelMeta:
         num_classes=1000,
         weight_stem=name,
         default_weights_url=url,
+        sha256=_PINS.get(name),
     )
 
 
@@ -217,12 +306,16 @@ def _register_builtins() -> None:
 _register_builtins()
 
 __all__ = [
+    "DEFAULT_TASK",
     "_CLS_REGISTRY",
     "_OBB_REGISTRY",
     "ModelMeta",
     "get",
     "get_cls",
+    "get_for_task",
     "get_obb",
+    "list_all_registered",
     "list_available",
     "register",
+    "registered_tasks",
 ]

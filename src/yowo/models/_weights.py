@@ -18,7 +18,7 @@ import requests
 
 from yowo.errors import ModelNotFoundError
 from yowo.io._redact import redact_url
-from yowo.models._registry import get
+from yowo.models._registry import get_for_task
 from yowo.types import ModelSpec
 
 _CACHE_DIR = Path.home() / ".cache" / "yowo" / "weights"
@@ -108,9 +108,22 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
 
     Resolution order:
     1. ``spec.weights_path`` if set — validate file exists and return.
-    2. Cache hit at ``cache_dir/family/size/<name>.pt`` — return cached path.
-    3. Download from ``ModelMeta.default_weights_url`` with progress bar
+    2. ``spec.task`` selects the registry, and family/size the entry in it.
+    3. Cache hit at ``cache_dir/family/size/<name>.pt`` — return cached path.
+    4. Download from ``ModelMeta.default_weights_url`` with progress bar
        and 3 retries with exponential backoff (2, 4, 8 seconds).
+
+    Step 2 is the whole point of the task dispatch: a ``classify`` spec must
+    reach the ``-cls`` asset and an ``obb`` spec the ``-obb`` one. This used to
+    call ``get(spec.family, spec.size)`` unconditionally, so the DETECTION
+    registry answered every question and `yowo classify SOURCE --model
+    yolo11n-cls` could not work at all. ``spec.task`` is read here, BEFORE the
+    lookup, and one lookup supplies both the URL and the pin so the two cannot
+    come from different entries (A3).
+
+    ``spec.weights_path`` still wins over all of it, for every task: an explicit
+    file is the user's own, no registry entry describes it, and it is returned
+    unpinned (A5).
 
     Args:
         spec: Fully-qualified model identity.
@@ -120,17 +133,19 @@ def resolve_weights(spec: ModelSpec, cache_dir: Path | None = None) -> Path:
         Absolute path to a local ``.pt`` weights file.
 
     Raises:
-        ModelNotFoundError: If ``spec.weights_path`` is set but missing,
-            if the family/size is not in the registry, or if download
-            fails after all retries.
+        ModelNotFoundError: If ``spec.weights_path`` is set but missing, if
+            ``spec.task`` is not a registered task, if the family/size is not
+            registered for that task, or if download fails after all retries.
     """
     if spec.weights_path is not None:
         if not spec.weights_path.exists():
             raise ModelNotFoundError(f"weights_path does not exist: {spec.weights_path}")
         return spec.weights_path
 
-    # Resolve from registry (raises ModelNotFoundError if not registered).
-    meta = get(spec.family, spec.size)
+    # The task picks the registry; family and size pick the entry. Raises
+    # ModelNotFoundError naming the task and the registered ones if the task is
+    # not one of them -- never a silent fall back to detection (M6, A4).
+    meta = get_for_task(spec.task, spec.family, spec.size)
 
     root = cache_dir or Path(os.environ.get("YOWO_CACHE_DIR", str(_CACHE_DIR)))
     dest = root / spec.family.value / spec.size.value / f"{meta.weight_stem}.pt"
