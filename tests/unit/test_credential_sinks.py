@@ -766,10 +766,16 @@ def test_redaction_happens_once_at_the_boundary() -> None:
         side_effect=source_module.redact_url,
     ) as boundary:
         _run_pipeline_with_failing_stream(URL)
-    add_and_remove = 2  # add_stream on entry, remove_stream on auto-removal
-    assert boundary.call_count <= add_and_remove * 2, (
-        f"the pipeline boundary ran {boundary.call_count} times for two streams. It must "
-        "normalise once per entry point call, not once per frame or per log line (M5)."
+    # The run makes at most three boundary-crossing calls: `add_stream` for each of the
+    # two streams, plus one `remove_stream` when the failing stream is auto-removed.
+    # An UPPER bound is deliberate — the auto-removal is timing-dependent, so a run that
+    # makes only two calls is fine, while any count above three means the boundary is
+    # being crossed per frame or per log line, which is the M5 failure this pins.
+    entry_point_calls = 3
+    assert boundary.call_count <= entry_point_calls, (
+        f"the pipeline boundary ran {boundary.call_count} times for two streams, more than "
+        f"the {entry_point_calls} entry-point calls this run makes. It must normalise once "
+        "per entry point, not once per frame or per log line (M5)."
     )
 
     # M5's other half: a boundary that redacts is worthless if it also mangles. An
