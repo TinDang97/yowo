@@ -1,7 +1,7 @@
 ---
 type: Task
 title: resolve_weights returns the weight for the spec's task, and every registered model is pinned
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -16,12 +16,14 @@ verified:
   - { by: "Tin Dang", at: 2026-09-10, act: interview, authority: human, interview: "sha256:6b2ccad889487674", receipt: /tasks/task-aware-weight-resolution.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:WRONGASSET=confirm|R:UNMEASURED=confirm|R:COLLIDE=confirm" }
   - { by: "Tin Dang", at: 2026-09-10, act: freeze, authority: human, direction: "sha256:3c856bae5573c791", binding: "sha256:403f71e509d37f74" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:6ed5f34052fa8401" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/task-aware-weight-resolution.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/task-aware-weight-resolution.d/runs/1.md, brief: "sha256:bf04efc2f1875b53", reason: "Twelve checks green on a bound receipt, every rule proven. Verified independently rather than on the builder's word: a classify spec now resolves yolo11n-cls.pt with pin c62d41bf9625, an obb spec yolo11n-obb.pt with b62898ebf389, detect and taskless are unchanged, and a typo'd task raises 'Unknown task classifiy for model yolo11n. Registered tasks: classify, detect, obb' instead of silently fetching a detection weight - A4 and M6 as the human chose them. R:UNMEASURED is discharged by method, not by assertion: all 25 pins were written programmatically from scripts/weight_digests.json, which the measuring script produced by downloading each registered URL and hashing what it served, and the 10 detection digests already in the registry reproduce from that sweep exactly - so the 15 new ones rest on a method proved against known-good answers. The builder proved M4/R:COLLIDE on disk across all 25 entries rather than assuming weight_stem uniqueness, and left the two pin checks deliberately red rather than inventing a digest, which is the correct refusal. MY ERROR, recorded: the frozen node and its interview were authored, interviewed, advised and frozen but never committed, so the builder's worktree could not see them and it read them out of the shared checkout. It said so. This is the same class as method M7 in a new form - it is not enough for the direction to be frozen, it has to be COMMITTED before a worktree is cut. Both are committed now. Known follow-on outside this node's scope: resolving and digest-verifying a real -cls weight now succeeds and the checkpoint loader then refuses it, because the file names torchvision.transforms.transforms.Compose and the allowlist was measured from the ten detection checkpoints only. That is narrow-loader-allowlist's declared change-request path and needs its own measurement. Two further findings recorded for the user: engine.py:_resolve_model_meta and export/_exporter.py each still carry their own task dispatch with no unknown-task branch, so three copies of one decision now exist where get_for_task was built to be the only one." }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: `resolve_weights` returns the asset the spec's TASK names, and every model in every registry carries a SHA-256 measured from the file that URL actually serves.
 why: `resolve_weights` calls `get(spec.family, spec.size)` at `models/_weights.py:124` regardless of `spec.task`, so a `classify` or `obb` spec resolves the DETECTION checkpoint. `engine.py:447` is the call site every engine uses, so `yowo classify SOURCE --model yolo11n-cls` with no `--weights` cannot work. Reproduced 2026-09-10: loading the detection `yolo11n.pt` into a classification model raises `RuntimeError: Shape mismatches` at `backbone.c2psa.cv1.conv.weight`, and into an OBB model raises the same after WARNING about 42 missing keys — "model may produce incorrect results". Had the shapes lined up, OBB would have loaded a silently wrong model behind a warning. Classification shipped in v2.2.2 and OBB in v2.4.0; neither has ever worked through the registry. Three independent signs it was never exercised: the maintainer's weight cache holds only detection files, every test in `test_classification_engine.py` patches `yowo.engine.resolve_weights` to `/fake/cls.pt`, and `tests/integration/` has no classify coverage at all. This also explains the `sha256=None` on all 10 `-cls` and all 5 `-obb` entries cleanly — those pins were never added because those URLs were never fetched. All 15 URLs are correct and live; HEAD-probed 2026-09-10, every one 200, 5.8 MB to 118.4 MB.
-beat: direction
+beat: done · next: add status
 
 ## RULES
 <must>
