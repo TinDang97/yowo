@@ -22,6 +22,12 @@ verified:
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:ff6cf7e91e1a654d" }
   - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/2.md }
   - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/2.md, brief: "sha256:ff6cf7e91e1a654d", reason: "13 checks green on a bound receipt. All three export branches thread the registry pin; the detection branch gained the lookup it never made, which is exactly the branch a partial fix skips. No new comparison logic - the exporter supplies the value and load_verified_state_dict still owns the single check. R:PARTIALCLAIM discharged: the resolve-to-load window is now shut on the export path as well as inference, so the parent's claim is true of the system rather than of one path. Three rules the build left unbound (M2, A5, R:CONVERTFIRST) were bound at review, with red evidence obtained by reverting the exporter to df02f7f." }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/3.md }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:28ee9e21b7e89fe8", binding: "sha256:f0152cc85f9b363a" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:1d59929dd5cc72bd" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/5.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/export-digest-threading.d/runs/5.md, brief: "sha256:1d59929dd5cc72bd", reason: "Re-gated on receipt 5 after a refreeze that carries no change of claim. The CHECKS line naming test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[classify] wrapped its covers list across a line break; COVERS_IN_CHECK matches per line and needs the closing separator on the same line, so that line registered no citation at all. M3 and E2 stayed bound through the [obb] twin, so no rule was ever unproven - but the line claimed a binding it did not make, which is the same class of quiet gap this milestone exists to close. Rewrapped; receipt 5 reports 13/13 with every cited id present, where receipt 3 recorded only 12. Separately, the four parametrised ids these CHECKS cite existed only in an uncommitted working-tree edit; committed as 4bbfee4, so the tree now matches the state that was gated. Audited every CHECKS line in the bundle for the same wrap defect - this was the only one." }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
@@ -122,8 +128,8 @@ from reverting the exporter, and is recorded in the commit.
   not compared to the official digest.
 - test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision · covers: A4 · an
   unpinned entry yields an explicit no-pin decision, not an omission.
-- test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[classify] · covers: M3,
-  E2 · an unpinned model still exports — the common case, since every -cls entry is sha256=None.
+- test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[classify] · covers: M3, E2 ·
+  an unpinned model still exports — the common case, since every -cls entry is sha256=None.
 - test_export_unpinned_registry_model_still_makes_an_explicit_no_pin_decision[obb] · covers: M3, E2 ·
   likewise for OBB.
 - test_no_new_comparison_logic_was_authored_in_exporter · covers: M4, A3 · the exporter supplies the
