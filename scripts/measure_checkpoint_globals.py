@@ -12,19 +12,26 @@ set comes from: every entry is OBSERVED here, never reasoned into existence.
 What is measured (A2 of the node):
   * the 10 digest-pinned DETECTION variants, each fetched through
     `resolve_weights()` so every measured byte was verified against its pin —
-    and re-hashed here so the digest recorded is the digest read; and
+    and re-hashed here so the digest recorded is the digest read;
+  * the nano `-cls` and `-obb` checkpoints. `narrow-loader-allowlist` could not
+    measure these: their registry entries carried no pin, and measuring a trust
+    boundary from unverified bytes would let the corpus choose the allowlist.
+    `task-aware-weight-resolution` pinned them, so `non-weight-globals-are-inert`
+    measures them here on the same terms as everything else — and they are where
+    `torchvision.transforms.transforms.Compose` and `__builtin__.getattr` were
+    observed, the two names that node stands in for;
   * an in-process sweep of our own `YOLOModel` / `ClassifyModel` / `OBBModel`
     across every registered size, serialised and read back through the same
-    recorder. The `-cls` and `-obb` registry entries carry no pin, so their
-    checkpoints are NOT fetched — measuring a trust boundary from unverified
-    bytes would let the corpus choose the allowlist. Their layer types come
-    from code we own instead.
+    recorder; and
+  * the state_dict each pinned detection variant yields through the PRODUCTION
+    loader, digested tensor byte by tensor byte. That is R:CORRUPT's baseline:
+    a stand-in is only inert if it is invisible to the result.
 
 How it reads: `torch.load` is driven with a `find_class` that RECORDS every
 global and then applies the production loader's own rules for everything
-outside `torch.nn.*` — the exact set, the storage suffix, an inert stub for
-`ultralytics.*` — while constructing `torch.nn.*` so the stream can be walked.
-It measures the boundary; it does not widen what runs.
+outside `torch.nn.*` — the exact set, and an inert stand-in for everything else
+— while constructing `torch.nn.*` so the stream can be walked. It measures the
+boundary; it does not widen what runs.
 
 This is a MAINTAINER action, not a CI job (A7, A8): the corpus is ~440 MB, and
 a per-run download is the check someone eventually disables. It refuses to
@@ -48,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import io
 import json
 import os
@@ -56,11 +64,19 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from yowo.models._registry import _CLS_REGISTRY, _OBB_REGISTRY, ModelMeta, list_available
+from yowo.models._registry import (
+    _CLS_REGISTRY,
+    _OBB_REGISTRY,
+    ModelMeta,
+    get_for_task,
+    list_available,
+)
 from yowo.models._weights import file_digest, resolve_weights
-from yowo.types import ModelSpec
+from yowo.types import ModelFamily, ModelSize, ModelSpec
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import torch as _torch
 
 MANIFEST = Path(__file__).resolve().parents[1] / "scripts" / "checkpoint_globals_manifest.json"
@@ -96,11 +112,7 @@ def _recording_module(label: str, observations: Observations):
     import pickle
     import types
 
-    from yowo.arch._weights import (
-        _ALLOWED_EXACT,
-        _ALLOWED_STORAGE_SUFFIX,
-        _inert_module_cls,
-    )
+    from yowo.arch._weights import _ALLOWED_EXACT, _inert_module_cls
 
     inert = _inert_module_cls()
 
@@ -111,11 +123,10 @@ def _recording_module(label: str, observations: Observations):
                 return super().find_class(module, name)
             if (module, name) in _ALLOWED_EXACT:
                 return super().find_class(module, name)
-            if module == "torch" and name.endswith(_ALLOWED_STORAGE_SUFFIX):
-                return super().find_class(module, name)
-            # Anything else — `ultralytics.*`, our own `yowo.arch.*` in the sweep,
-            # or something new — is stubbed so the stream can still be walked to
-            # the end. It is recorded above and reported below; it is never run.
+            # Anything else — `ultralytics.*`, `torchvision.*`, `__builtin__.getattr`,
+            # our own `yowo.arch.*` in the sweep, or something new — is stubbed so
+            # the stream can still be walked to the end. It is recorded above and
+            # reported below; it is never run.
             return inert
 
     shim = types.ModuleType("yowo_recording_pickle")
@@ -145,9 +156,13 @@ def _walk(source: Path | io.BytesIO, label: str, observations: Observations) -> 
 
 
 def measure_checkpoint(
-    meta: ModelMeta, observations: Observations, cache_dir: Path | None
+    meta: ModelMeta, observations: Observations, cache_dir: Path | None, task: str = "detect"
 ) -> dict[str, str]:
     """Fetch one pinned variant through the production path, verify, record, walk.
+
+    `task` picks the registry the resolution reads, exactly as production does —
+    without it, a `-cls` or `-obb` meta would be handed the DETECTION asset and
+    the measurement would describe the wrong file.
 
     Returns the manifest row: stem, url, and the digest of the bytes actually read.
     """
@@ -156,7 +171,7 @@ def measure_checkpoint(
             f"{meta.weight_stem} has no pinned sha256; an unpinned checkpoint cannot "
             "define a trust boundary (A2). Pin it in yowo.models._registry first."
         )
-    spec = ModelSpec(family=meta.family, size=meta.size)
+    spec = ModelSpec(family=meta.family, size=meta.size, task=task)
     try:
         path = resolve_weights(spec, cache_dir=cache_dir)
     except Exception as exc:
@@ -172,6 +187,74 @@ def measure_checkpoint(
         )
     _walk(path, meta.weight_stem, observations)
     return {"stem": meta.weight_stem, "url": meta.default_weights_url, "sha256": digest}
+
+
+def measure_task_checkpoints(
+    observations: Observations, cache_dir: Path | None
+) -> list[dict[str, str]]:
+    """The nano `-cls` and `-obb` checkpoints, which name globals no `-det` one does.
+
+    `narrow-loader-allowlist` could not measure these: their registry entries
+    carried no pin, and measuring a trust boundary from unverified bytes would
+    let the corpus choose the allowlist. `task-aware-weight-resolution` pinned
+    them, so they are measurable here on the same terms as every detection
+    variant — fetched through `resolve_weights`, digest-verified, re-hashed.
+
+    Exactly two entries, not the whole `-cls`/`-obb` registry: A2 of
+    `non-weight-globals-are-inert` scopes this to the globals those two files
+    are OBSERVED to name, with no speculative additions for variants nobody has
+    measured. A variant that later names something new fails loudly at the
+    boundary and takes its own change-request, which is the process working.
+    """
+    return [
+        measure_checkpoint(get_for_task(task, family, size), observations, cache_dir, task=task)
+        for task, family, size in (
+            ("classify", ModelFamily.YOLO11, ModelSize.NANO),
+            ("obb", ModelFamily.YOLO11, ModelSize.NANO),
+        )
+    ]
+
+
+def state_dict_digest(state: Mapping[str, _torch.Tensor]) -> str:
+    """SHA-256 over every key, dtype, shape and tensor BYTE, in sorted order.
+
+    The measurement R:CORRUPT is checked against: a stand-in is only inert if it
+    is INVISIBLE to the result, so the tensors a pinned checkpoint yields must
+    be byte-identical across any change to what the loader stands in for.
+    """
+    h = hashlib.sha256()
+    for key in sorted(state):
+        tensor = state[key]
+        h.update(key.encode())
+        h.update(str(tensor.dtype).encode())
+        h.update(repr(tuple(tensor.shape)).encode())
+        h.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
+def measure_state_dicts(cache_dir: Path | None) -> dict[str, dict[str, object]]:
+    """What the PRODUCTION loader returns for each pinned detection variant.
+
+    Not the recorder above: this walks `_extract_state_dict`, rules and all, so
+    the baseline describes the tensors callers actually get.
+    """
+    from yowo.arch._weights import _extract_state_dict
+
+    digests: dict[str, dict[str, object]] = {}
+    for meta in list_available():
+        try:
+            path = resolve_weights(ModelSpec(family=meta.family, size=meta.size), cache_dir)
+            state = _extract_state_dict(path)
+        except Exception as exc:
+            raise MeasurementError(
+                f"could not read {meta.weight_stem} through the production loader: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        digests[meta.weight_stem] = {
+            "entries": len(state),
+            "sha256": state_dict_digest(state),
+        }
+    return digests
 
 
 def _sweep_models() -> list[tuple[str, _torch.nn.Module]]:
@@ -235,12 +318,15 @@ def measure_arch_sweep(observations: Observations) -> list[str]:
 
 def _rule_for(module: str, name: str, observers: set[str]) -> str:
     """Which production rule covers an observed global that is NOT a torch.nn one."""
-    from yowo.arch._weights import _ALLOWED_EXACT, _ALLOWED_STORAGE_SUFFIX, _STUBBED_PREFIXES
+    from yowo.arch._weights import _ALLOWED_EXACT, _INERT_EXACT, _STUBBED_PREFIXES
 
     if (module, name) in _ALLOWED_EXACT:
         return "exact"
-    if module == "torch" and name.endswith(_ALLOWED_STORAGE_SUFFIX):
-        return "storage-suffix"
+    # `inert` and `stub` are the SAME permission and a different one from
+    # `exact`: the name is stood in for, never imported. They are reported apart
+    # only because one is an enumerated name and the other a namespace.
+    if (module, name) in _INERT_EXACT:
+        return "inert"
     if module.startswith(_STUBBED_PREFIXES):
         return "stub"
     if all(o.startswith("arch:") for o in observers):
@@ -249,13 +335,16 @@ def _rule_for(module: str, name: str, observers: set[str]) -> str:
 
 
 def build_manifest(
-    checkpoints: list[dict[str, str]], arch_sweep: list[str], observations: Observations
+    checkpoints: list[dict[str, str]],
+    arch_sweep: list[str],
+    observations: Observations,
+    state_dict_digests: dict[str, dict[str, object]],
 ) -> dict[str, object]:
     import torch
 
     allowed_torch = sorted(g for g in observations if g[0].startswith(_TORCH_NN))
     return {
-        "schema": 1,
+        "schema": 2,
         "measured_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "torch_version": torch.__version__,
         "measured_by": "scripts/measure_checkpoint_globals.py",
@@ -264,16 +353,25 @@ def build_manifest(
         "arch_sweep": sorted(arch_sweep),
         "allowed_torch": [list(g) for g in allowed_torch],
         "observations": {f"{m}.{n}": sorted(observations[(m, n)]) for m, n in sorted(observations)},
+        # R:CORRUPT's baseline: what the PRODUCTION loader returns today, per
+        # pinned detection variant. A stand-in that changed which tensors come
+        # back, or their values, moves one of these.
+        "state_dict_digests": dict(sorted(state_dict_digests.items())),
     }
 
 
 def print_report(manifest: dict[str, object], observations: Observations) -> None:
     checkpoints: list[dict[str, str]] = manifest["checkpoints"]  # type: ignore[assignment]
     arch_sweep: list[str] = manifest["arch_sweep"]  # type: ignore[assignment]
+    digests: dict[str, dict[str, object]] = manifest["state_dict_digests"]  # type: ignore[assignment]
     print("Checkpoints measured (every byte digest-verified):")
     for row in checkpoints:
-        print(f"  {row['stem']:<9} sha256={row['sha256']}")
+        print(f"  {row['stem']:<13} sha256={row['sha256']}")
     print(f"Arch sweep: {len(arch_sweep)} models serialised in process")
+    print()
+    print("State_dict baseline through the production loader (R:CORRUPT):")
+    for stem, row in digests.items():
+        print(f"  {stem:<13} entries={row['entries']:<5} sha256={row['sha256']}")
     print()
     print("Proposed _ALLOWED_TORCH — observed torch.nn globals, sorted by (module, name):")
     for module, name in sorted(g for g in observations if g[0].startswith(_TORCH_NN)):
@@ -329,13 +427,15 @@ def main(argv: list[str] | None = None) -> int:
         checkpoints = [
             measure_checkpoint(meta, observations, args.cache_dir) for meta in list_available()
         ]
+        checkpoints += measure_task_checkpoints(observations, args.cache_dir)
         arch_sweep = measure_arch_sweep(observations)
+        state_dict_digests = measure_state_dicts(args.cache_dir)
     except MeasurementError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         print("No manifest written: a partial measurement is not a measurement.", file=sys.stderr)
         return 1
 
-    manifest = build_manifest(checkpoints, arch_sweep, observations)
+    manifest = build_manifest(checkpoints, arch_sweep, observations, state_dict_digests)
     print_report(manifest, observations)
     write_manifest(manifest, args.write)
     print()
