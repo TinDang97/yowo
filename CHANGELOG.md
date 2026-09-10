@@ -13,6 +13,87 @@ from [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **weights**: No checkpoint is deserialized before its pinned SHA-256 is
+  compared. `ModelMeta` carries a `sha256` for all 10 detection variants;
+  `resolve_weights` verifies on first download and on every cache hit, and the
+  verified digest is threaded into the loader so a file swapped between resolve
+  and load is caught before conversion. Both the inference path
+  (`PyTorchBackend`) and the export path (`export_model`) supply the pin.
+
+- **weights**: The checkpoint unpickler admits by name, not by shape. The
+  `torch.nn.modules.*` prefix rule and the `*Storage` suffix rule are both gone,
+  replaced by an explicit set of 11 measured `(module, class)` pairs.
+  `scripts/checkpoint_globals_manifest.json` records the 53 globals observed
+  across the pinned checkpoints that justify the set.
+
+- **weights**: All four entry points of the unpickler shim are restricted.
+  `torch.load`'s legacy non-zip reader calls `pickle_module.load` on the file
+  header three times *before* constructing an `Unpickler`, so a stock `load`
+  there was an unrestricted read of attacker-controlled bytes — a checkpoint
+  could execute code without `find_class` ever being consulted.
+
+- **io**: RTSP credentials are redacted at the boundary where the URL is
+  stored, so `Frame.source_id`, result payloads and feature-cache keys carry
+  `redact_url`'s output rather than the raw URL. Userinfo is also scrubbed out
+  of third-party exception text — `requests` keeps `user:pass@` in
+  `PreparedRequest.url` even when it also sets an `Authorization` header, so
+  redacting the URL alone was not enough. `yowo models` no longer echoes a
+  registered credentialed weights URL.
+
+  Not yet covered: `open_source()` still interpolates a credentialed non-RTSP
+  camera URL verbatim into three `SourceError` messages
+  (`io/_source.py:545`, `:550`, `:558`), because redaction happens inside
+  `RTSPStreamSource` and that factory raises before any source object exists.
+
+### Added
+
+- **release**: Publish to PyPI over OIDC trusted publishing. No API token on the
+  release path.
+- **ci**: `ci.yml` runs on `pull_request` with four jobs — Quality Gate, Source
+  Distribution, Reproducible Build, Weight Fixture — all four required on
+  `main`. CI obtains a real weight, digest-verified before use, without
+  committing it or fetching per job.
+- **docs**: `NOTICE` and `SECURITY.md`. Model weights are AGPL-3.0 ultralytics
+  artifacts and are documented as such; the package itself stays Apache-2.0 and
+  ships no weights.
+
+### Fixed
+
+- **packaging**: The sdist is restricted to an explicit `only-include`
+  allowlist. `2.4.0` and `2.4.1` shipped a 5.6 MB `yolo11n.pt` to PyPI inside an
+  Apache-2.0 declaration; both are now yanked.
+- **packaging**: Builds are reproducible — CI builds twice under a pinned
+  `SOURCE_DATE_EPOCH` and compares digests.
+- **version**: `yowo.__version__`, `yowo --version`, distribution metadata and
+  export sidecars are single-sourced, with a check that fails the build on
+  drift.
+- **hardware**: A Jetson no longer reads as a machine with no GPU, and an old
+  driver's rejected compute capability no longer hides the GPU.
+- **engine**: `DetectionEngine` labels detections with COCO names for any model.
+- **obb**: Importing `yowo` no longer drags `torch` in.
+
+### Tests
+
+- 2278 unit tests (up from 2084 in v2.4.1).
+
+---
+
+## [2.5.0] — 2026-03-25
+
+No code changes.
+
+`v2.5.0` differs from `v2.4.1` by a single line — the version string in
+`pyproject.toml`. Every commit listed in the GitHub release note for this tag
+is an ancestor of `v2.4.1` and shipped in that release; semantic-release
+generated the note from a range that had already been published.
+
+The tag was never published to PyPI: the release workflow had no publish step
+at the time. `2.5.0` therefore exists only as a git tag and a GitHub release.
+
+Recorded rather than omitted so the version sequence has no silent gap.
+
 ---
 
 ## [2.4.1] — 2026-03-17

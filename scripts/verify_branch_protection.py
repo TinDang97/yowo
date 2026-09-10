@@ -24,7 +24,20 @@ from xml.etree import ElementTree as ET
 
 REPO = "TinDang97/yowo"
 BRANCH = "main"
-REQUIRED_CONTEXT = "Quality Gate"
+# All four of ci.yml's job names, not just the quality gate. Amended 2026-09-10:
+# until then only "Quality Gate" was required, so the three checks m1 built could
+# each fail and a pull request still merged. Kept in the SAME ORDER as
+# docs/branch-protection.json so a reader can diff the two by eye.
+REQUIRED_CONTEXTS = (
+    "Quality Gate",
+    "Source Distribution",
+    "Reproducible Build",
+    "Weight Fixture",
+)
+# The one whose check-run is probed for actual observation below. Protection accepts
+# a context GitHub has never reported; the quality gate is the longest-running of the
+# four, so it is the one most worth confirming really ran.
+OBSERVED_CONTEXT = REQUIRED_CONTEXTS[0]
 
 
 def _gh(path: str) -> tuple[int, str]:
@@ -55,9 +68,9 @@ def _context_was_observed(sha: str) -> tuple[bool, str]:
         names = [r.get("name") for r in json.loads(out).get("check_runs", [])]
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         return False, f"check-runs response was not JSON: {exc}"
-    if REQUIRED_CONTEXT not in names:
+    if OBSERVED_CONTEXT not in names:
         return False, (
-            f"GitHub has never reported a check named {REQUIRED_CONTEXT!r} on {sha[:8]} "
+            f"GitHub has never reported a check named {OBSERVED_CONTEXT!r} on {sha[:8]} "
             f"(observed: {names or 'none'}) — protection requiring it would block every "
             "merge on a check that never reports"
         )
@@ -78,10 +91,11 @@ def check(ref: str | None = None) -> list[str]:
     failures: list[str] = []
 
     contexts = (data.get("required_status_checks") or {}).get("contexts") or []
-    if REQUIRED_CONTEXT not in contexts:
+    missing = [c for c in REQUIRED_CONTEXTS if c not in contexts]
+    if missing:
         failures.append(
-            f"required status checks {contexts!r} do not include {REQUIRED_CONTEXT!r} — "
-            "a merge is not gated on the quality gate"
+            f"required status checks {contexts!r} are missing {missing!r} — "
+            "a merge is not gated on every check ci.yml publishes"
         )
 
     if not (data.get("enforce_admins") or {}).get("enabled"):
@@ -133,7 +147,10 @@ def main() -> int:
     for line in failures:
         print(f"FAIL: {line}", file=sys.stderr)
     if not failures:
-        print(f"OK: {BRANCH} requires {REQUIRED_CONTEXT!r} and enforces it on admins")
+        print(
+            f"OK: {BRANCH} requires all {len(REQUIRED_CONTEXTS)} checks "
+            f"({', '.join(REQUIRED_CONTEXTS)}) and enforces them on admins"
+        )
     return 1 if failures else 0
 
 

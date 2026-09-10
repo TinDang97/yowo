@@ -1,7 +1,12 @@
 {
   "required_status_checks": {
     "strict": false,
-    "contexts": ["Quality Gate"]
+    "contexts": [
+      "Quality Gate",
+      "Source Distribution",
+      "Reproducible Build",
+      "Weight Fixture"
+    ]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": null,
