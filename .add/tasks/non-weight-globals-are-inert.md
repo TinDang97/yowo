@@ -16,11 +16,13 @@ verified:
   - { by: "Tin Dang", at: 2026-09-10, act: interview, authority: human, interview: "sha256:5e2e0a2d22c65b7c", receipt: /tasks/non-weight-globals-are-inert.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|R:RESOLVEGADGET=confirm|R:SILENTWIDEN=confirm|R:CORRUPT=confirm" }
   - { by: "Tin Dang", at: 2026-09-10, act: freeze, authority: human, direction: "sha256:78ec7422b239ca74", binding: "sha256:33ee11d29cc8a55d" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:b310775178405f0b" }
+  - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:78ec7422b239ca74", binding: "sha256:33ee11d29cc8a55d" }
+  - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:a882f515bbd9092c" }
 advised_by: security-reviewer
 ---
 ## CARD
 goal: `-cls` and `-obb` checkpoints load, by making the globals they name that the state_dict does not need INERT — never by resolving them.
-why: `task-aware-weight-resolution` made a classify spec resolve and digest-verify its own `yolo11n-cls.pt`. The loader then refuses it. Measured 2026-09-10 against the real restricted loader, not a scan: `-obb` refuses on `__builtin__.getattr`, `-cls` on `torchvision.transforms.transforms.Compose`. The allowlist is correct to refuse — it was measured from the ten DETECTION checkpoints and these are different files — and this is the change-request path its own refusal message names. What it must NOT do is admit them. `getattr` in a restricted unpickler is a general attribute-access primitive: a crafted checkpoint that can call it can reach any attribute of anything it can name and chain from there, which is the classic pickle gadget and would undo the narrowing `narrow-loader-allowlist` and `storage-suffix-enumeration` performed. `torchvision.transforms.*` is the training-time preprocessing pipeline stored as objects, and `Compose` holds a list of arbitrary callables. Neither is weights. Both are metadata riding along in the same pickle. DECIDED BY THE HUMAN, 2026-09-10: `torchvision.` joins the stubbed prefixes beside `ultralytics.` and `models.`, and `__builtin__.getattr` is handed an inert callable, never the real one. Probed before freezing: with those two changes `-obb` yields 541 tensors; `-cls` needs both and then reaches a further refusal this task must measure and decide on the same terms.
+why: `task-aware-weight-resolution` made a classify spec resolve and digest-verify its own `yolo11n-cls.pt`. The loader then refuses it. Measured 2026-09-10 against the real restricted loader, not a scan: `-obb` refuses on `__builtin__.getattr`, `-cls` on `torchvision.transforms.transforms.Compose`. The allowlist is correct to refuse — it was measured from the ten DETECTION checkpoints and these are different files — and this is the change-request path its own refusal message names. What it must NOT do is admit them. `getattr` in a restricted unpickler is a general attribute-access primitive: a crafted checkpoint that can call it can reach any attribute of anything it can name and chain from there, which is the classic pickle gadget and would undo the narrowing `narrow-loader-allowlist` and `storage-suffix-enumeration` performed. `torchvision.transforms.*` is the training-time preprocessing pipeline stored as objects, and `Compose` holds a list of arbitrary callables. Neither is weights. Both are metadata riding along in the same pickle. DECIDED BY THE HUMAN, 2026-09-10: `torchvision.` joins the stubbed prefixes beside `ultralytics.` and `models.`, and `__builtin__.getattr` is handed an inert callable, never the real one. Measured with an inert `getattr` and `torchvision.` stubbed, which is what this node specifies: `-obb` yields 541 entries and `-cls` 236, with nothing further refused. An earlier note here claimed a further `-cls` refusal; it was wrong, and the correction is recorded at E2 rather than quietly dropped.
 beat: direction
 
 ## RULES
@@ -51,7 +53,13 @@ contract: `_extract_state_dict(path) -> object` and `load_verified_state_dict` u
 
 ## EDGES
 - E1 `yolo11n-obb.pt` — refuses on `__builtin__.getattr` today; must load and yield 541 tensors.
-- E2 `yolo11n-cls.pt` — refuses on `torchvision.transforms.transforms.Compose` today; must load and yield tensors. There is at least one further refusal behind it: measure it, decide it on these same terms, record it.
+- E2 `yolo11n-cls.pt` — refuses on `torchvision.transforms.transforms.Compose` today; must load and yield its
+  236 entries. CORRECTED 2026-09-10: this edge previously asserted "there is at least one further refusal
+  behind it". There is not. That claim came from a pre-freeze probe that admitted the REAL `getattr` and
+  stubbed torchvision; the real `getattr` then failed against a stubbed object and the failure was
+  misrecorded as a further refusal. Re-measured with an INERT `getattr`, which is what this node actually
+  specifies: `-obb` loads 541 entries and `-cls` loads 236, with nothing else refused. An edge asserting a
+  refusal that does not exist cannot be satisfied honestly, and the first build stalled on it.
 - E3 A checkpoint naming `builtins.eval`, `builtins.exec` or `os.system` — still refused, by name, with the existing message. The gadget test.
 - E4 The ten detection variants — byte-identical tensors before and after. R:CORRUPT.
 - E5 The legacy non-zip RCE probe — still refused before anything runs. This node must not reopen the path `checkpoint-loader` closed.
