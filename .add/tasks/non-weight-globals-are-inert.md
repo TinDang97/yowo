@@ -1,7 +1,7 @@
 ---
 type: Task
 title: A global the state_dict does not need is stubbed, never resolved
-status: direction
+status: done
 depth: quick
 sensitivity: security
 milestone: m1-trust-the-ship
@@ -18,12 +18,18 @@ verified:
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:b310775178405f0b" }
   - { by: "Tin Dang", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:78ec7422b239ca74", binding: "sha256:33ee11d29cc8a55d" }
   - { by: "cli", at: 2026-09-10, act: brief, authority: process, brief: "sha256:a882f515bbd9092c" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: FAIL, receipt: /tasks/non-weight-globals-are-inert.d/runs/1.md }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/non-weight-globals-are-inert.d/runs/2.md }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/non-weight-globals-are-inert.d/runs/3.md }
+  - { by: "cli", at: 2026-09-10, act: refreeze, authority: human, direction: "sha256:ce28dae36ce12a43", binding: "sha256:33ee11d29cc8a55d" }
+  - { by: "process:run", at: 2026-09-10, act: run, authority: process, outcome: PASS, receipt: /tasks/non-weight-globals-are-inert.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-10, act: gate, authority: human, outcome: PASS, receipt: /tasks/non-weight-globals-are-inert.d/runs/4.md, brief: "sha256:65a006118b143d2a", reason: "20 checks green, zero skipped. Independently re-verified, not taken on the builder's report: (a) find_class probe — __builtin__.getattr and torchvision.transforms.transforms.Compose return the inert stand-in; builtins.getattr, __builtin__.eval, builtins.exec, os.system, posix.system, subprocess.Popen, torch.FloatStorage and torchvisionEVIL.Anything are all refused; (b) the inert getattr cannot read an attribute — inert(obj,'secret') returns a stand-in, not the value; (c) R:CORRUPT measured on both branches — yolo11n.pt 499 entries, digest 85fc8064..b6819b44, identical on main and here, while -cls and -obb refuse on main and load here at 236 and 541 entries, matching the corrected E2 exactly; (d) M6 re-run — the repaired measure_checkpoint_globals.py regenerates the manifest identically apart from measured_at, which it could NOT do before this node because the script imported the deleted _ALLOWED_STORAGE_SUFFIX. TWO THINGS RECORDED AGAINST THIS GATE RATHER THAN HIDDEN. First: E3 and E6 were unbound on the first receipt because both cite parametrised checks, and a bare name cannot bind against a reported id ending in [param]. The gate refused the PASS and was right; the node was refrozen citing each parametrisation on its own line and re-run, and the seven items were passing throughout — the gap was in the citation, never in the coverage. Second: the build edited the parent check test_no_rule_admits_a_torch_namespace. Reviewed by hand — startswith('torch') was a substring false positive on 'torchvision.'; it now reads s=='torch' or s.startswith('torch.'), and a strictly stronger AST assertion was added beside it proving exactly one branch reaches super().find_class and that its test is the _ALLOWED membership check. Suite 2332 passed / 11 skipped, ruff clean, pyright 0 errors." }
 advised_by: security-reviewer
 ---
 ## CARD
 goal: `-cls` and `-obb` checkpoints load, by making the globals they name that the state_dict does not need INERT — never by resolving them.
 why: `task-aware-weight-resolution` made a classify spec resolve and digest-verify its own `yolo11n-cls.pt`. The loader then refuses it. Measured 2026-09-10 against the real restricted loader, not a scan: `-obb` refuses on `__builtin__.getattr`, `-cls` on `torchvision.transforms.transforms.Compose`. The allowlist is correct to refuse — it was measured from the ten DETECTION checkpoints and these are different files — and this is the change-request path its own refusal message names. What it must NOT do is admit them. `getattr` in a restricted unpickler is a general attribute-access primitive: a crafted checkpoint that can call it can reach any attribute of anything it can name and chain from there, which is the classic pickle gadget and would undo the narrowing `narrow-loader-allowlist` and `storage-suffix-enumeration` performed. `torchvision.transforms.*` is the training-time preprocessing pipeline stored as objects, and `Compose` holds a list of arbitrary callables. Neither is weights. Both are metadata riding along in the same pickle. DECIDED BY THE HUMAN, 2026-09-10: `torchvision.` joins the stubbed prefixes beside `ultralytics.` and `models.`, and `__builtin__.getattr` is handed an inert callable, never the real one. Measured with an inert `getattr` and `torchvision.` stubbed, which is what this node specifies: `-obb` yields 541 entries and `-cls` 236, with nothing further refused. An earlier note here claimed a further `-cls` refusal; it was wrong, and the correction is recorded at E2 rather than quietly dropped.
-beat: direction
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -78,9 +84,12 @@ all in `tests/unit/test_inert_globals.py`, and every one goes through the real
   never reach it — that is the difference between standing in for a class and importing it.
 - test_getattr_resolves_to_something_inert_not_the_builtin · covers: M3, R:RESOLVEGADGET ·
   the object handed back is not `builtins.getattr` and cannot read an attribute off a real object.
-- test_a_general_purpose_primitive_is_still_refused · covers: E3, R:RESOLVEGADGET ·
-  `eval`, `exec`, `__import__` and `os.system` are refused by name, with the message that
-  names them.
+- test_a_general_purpose_primitive_is_still_refused[eval] · covers: E3, R:RESOLVEGADGET · refused by name, with the message that names it.
+- test_a_general_purpose_primitive_is_still_refused[exec] · covers: E3, R:RESOLVEGADGET · the same for `exec`.
+- test_a_general_purpose_primitive_is_still_refused[import] · covers: E3, R:RESOLVEGADGET · the same for `__import__`.
+- test_a_general_purpose_primitive_is_still_refused[os-system] · covers: E3, R:RESOLVEGADGET · the same for `os.system`.
+  Cited one parametrisation per line: a bare name cannot bind against a reported id ending in
+  `[param]`, and the gate correctly refused a PASS while these read as unbound (method M12).
 - test_no_torchvision_class_is_ever_constructed · covers: M2 ·
   a checkpoint naming a torchvision transform gets a stand-in; the real class is never reached.
 - test_the_resolved_allowlist_is_unchanged · covers: M4, R:SILENTWIDEN ·
@@ -92,9 +101,9 @@ all in `tests/unit/test_inert_globals.py`, and every one goes through the real
 - test_a_stand_in_absorbs_calls_without_aborting_the_load · covers: A4 ·
   indexing, calling and attribute-setting on a stand-in do not raise, so a load cannot end
   early and report a truncated result as a complete one.
-- test_a_checkpoint_with_no_tensors_still_fails · covers: A4, E6 ·
-  the probe A4 names: absorb-and-continue must not turn a malformed checkpoint into an empty
-  success.
+- test_a_checkpoint_with_no_tensors_still_fails[empty-checkpoint] · covers: A4, E6 · the probe A4 names: absorb-and-continue must not turn a malformed checkpoint into an empty success.
+- test_a_checkpoint_with_no_tensors_still_fails[no-model-key] · covers: A4, E6 · the same for a checkpoint with no 'ema'/'model' key.
+- test_a_checkpoint_with_no_tensors_still_fails[stand-in-without-tensors] · covers: A4, E6 · the same for a stand-in that walks the whole stream and holds nothing.
 - test_the_ten_detection_variants_are_byte_identical · covers: E4, R:CORRUPT ·
   every tensor of every pinned detection variant is unchanged by this node.
 - test_find_class_consults_the_exact_set_before_any_prefix · covers: A5 ·
