@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "measured_at": "2026-09-09T13:44:07+00:00",
+  "schema": 2,
+  "measured_at": "2026-09-10T14:31:44+00:00",
   "torch_version": "2.10.0",
   "measured_by": "scripts/measure_checkpoint_globals.py",
   "change_request": ".add/tasks/narrow-loader-allowlist.md",
@@ -19,6 +19,16 @@
       "stem": "yolo11n",
       "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt",
       "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1"
+    },
+    {
+      "stem": "yolo11n-cls",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-cls.pt",
+      "sha256": "c62d41bf9625777760018bf914d2e6cd472420ccd01706d97a61cb6c82502bd7"
+    },
+    {
+      "stem": "yolo11n-obb",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-obb.pt",
+      "sha256": "b62898ebf38940ca4df323863e45ee9d84a1a46d5d11ebdde529fb33aa9f3a32"
     },
     {
       "stem": "yolo11s",
@@ -130,6 +140,10 @@
     ]
   ],
   "observations": {
+    "__builtin__.getattr": [
+      "yolo11n-cls",
+      "yolo11n-obb"
+    ],
     "__builtin__.set": [
       "arch:yolo11l",
       "arch:yolo11l-cls",
@@ -159,6 +173,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -196,6 +212,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -206,6 +224,7 @@
     ],
     "torch.Size": [
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo26l",
       "yolo26m",
@@ -242,6 +261,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -279,6 +300,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -316,6 +339,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -353,6 +378,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -390,6 +417,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -427,6 +456,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -464,6 +495,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -482,7 +515,8 @@
       "arch:yolo26m-cls",
       "arch:yolo26n-cls",
       "arch:yolo26s-cls",
-      "arch:yolo26x-cls"
+      "arch:yolo26x-cls",
+      "yolo11n-cls"
     ],
     "torch.nn.modules.linear.Identity": [
       "arch:yolo11l",
@@ -513,6 +547,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -531,7 +567,8 @@
       "arch:yolo26m-cls",
       "arch:yolo26n-cls",
       "arch:yolo26s-cls",
-      "arch:yolo26x-cls"
+      "arch:yolo26x-cls",
+      "yolo11n-cls"
     ],
     "torch.nn.modules.pooling.AdaptiveAvgPool2d": [
       "arch:yolo11l-cls",
@@ -543,7 +580,8 @@
       "arch:yolo26m-cls",
       "arch:yolo26n-cls",
       "arch:yolo26s-cls",
-      "arch:yolo26x-cls"
+      "arch:yolo26x-cls",
+      "yolo11n-cls"
     ],
     "torch.nn.modules.pooling.MaxPool2d": [
       "arch:yolo11l",
@@ -564,6 +602,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -591,6 +630,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -599,10 +639,30 @@
       "yolo26s",
       "yolo26x"
     ],
+    "torchvision.transforms.functional.InterpolationMode": [
+      "yolo11n-cls"
+    ],
+    "torchvision.transforms.transforms.CenterCrop": [
+      "yolo11n-cls"
+    ],
+    "torchvision.transforms.transforms.Compose": [
+      "yolo11n-cls"
+    ],
+    "torchvision.transforms.transforms.Normalize": [
+      "yolo11n-cls"
+    ],
+    "torchvision.transforms.transforms.Resize": [
+      "yolo11n-cls"
+    ],
+    "torchvision.transforms.transforms.ToTensor": [
+      "yolo11n-cls"
+    ],
     "ultralytics.nn.modules.block.Attention": [
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -615,6 +675,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -627,6 +689,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -639,6 +703,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -651,6 +717,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -663,6 +731,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x"
     ],
@@ -670,6 +739,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -682,6 +753,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -694,6 +766,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -706,6 +779,8 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-cls",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -718,6 +793,7 @@
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -726,10 +802,14 @@
       "yolo26s",
       "yolo26x"
     ],
+    "ultralytics.nn.modules.head.Classify": [
+      "yolo11n-cls"
+    ],
     "ultralytics.nn.modules.head.Detect": [
       "yolo11l",
       "yolo11m",
       "yolo11n",
+      "yolo11n-obb",
       "yolo11s",
       "yolo11x",
       "yolo26l",
@@ -737,6 +817,12 @@
       "yolo26n",
       "yolo26s",
       "yolo26x"
+    ],
+    "ultralytics.nn.modules.head.OBB": [
+      "yolo11n-obb"
+    ],
+    "ultralytics.nn.tasks.ClassificationModel": [
+      "yolo11n-cls"
     ],
     "ultralytics.nn.tasks.DetectionModel": [
       "yolo11l",
@@ -749,6 +835,9 @@
       "yolo26n",
       "yolo26s",
       "yolo26x"
+    ],
+    "ultralytics.nn.tasks.OBBModel": [
+      "yolo11n-obb"
     ],
     "yowo.arch._attention.Attention": [
       "arch:yolo11l",
@@ -1198,5 +1287,47 @@
       "arch:yolo26x",
       "arch:yolo26x-cls"
     ]
+  },
+  "state_dict_digests": {
+    "yolo11l": {
+      "entries": 1015,
+      "sha256": "93411838eca546b1aa07348176a7d5a28d52fcdcdb00c87f2c7a9a94b8ca7eac"
+    },
+    "yolo11m": {
+      "entries": 649,
+      "sha256": "7a91ed285bca40411c0311276e1bae03586b99f1a13c9baecb75550b5c4acdee"
+    },
+    "yolo11n": {
+      "entries": 499,
+      "sha256": "85fc80649be2c3613d674d50a6570999a6ce2f8586d78dcf3c758194b6819b44"
+    },
+    "yolo11s": {
+      "entries": 499,
+      "sha256": "45f1b9b46db6b0945930e5d2808a10f008cd730ccb958519ff6bf50f6a4e9637"
+    },
+    "yolo11x": {
+      "entries": 1015,
+      "sha256": "a21dcb8c0c818005f91283e89a7819998d78717f3094321e0f9102b425ea5ff0"
+    },
+    "yolo26l": {
+      "entries": 1092,
+      "sha256": "270fb5e316630f7159e0d91fbeb3b9cd031036ee0122249e8c8b7be10d61b9b8"
+    },
+    "yolo26m": {
+      "entries": 768,
+      "sha256": "23d70d6259af6767a2e8a82994386aedb688a4d55e2f5e4e7d3b49325e8d4217"
+    },
+    "yolo26n": {
+      "entries": 708,
+      "sha256": "c833014754d626016649950391e731ca4120518548a7d5ca8c2100cc66523c67"
+    },
+    "yolo26s": {
+      "entries": 708,
+      "sha256": "e33269b411bd0e23957d641f84f723086b7a6e6170a6087aab3eff0729822fec"
+    },
+    "yolo26x": {
+      "entries": 1092,
+      "sha256": "88314f0952b9401e96b577d919572f6fed0f58689689a2ef4bbde1c21483db98"
+    }
   }
 }

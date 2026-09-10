@@ -248,11 +248,45 @@ def test_no_rule_admits_a_torch_namespace() -> None:
             and node.func.attr == "startswith"
         ):
             for arg in node.args:
+                # `torch.` and bare `torch`, not every string beginning with
+                # those five letters: `torchvision.` is a different distribution
+                # entirely and is STUBBED, never admitted (M4 of
+                # `non-weight-globals-are-inert`). Matching it here would be a
+                # substring accident, not a namespace admission.
                 admitted_by_prefix.extend(
-                    s for s in _string_literals(arg, _weights) if s.startswith("torch")
+                    s
+                    for s in _string_literals(arg, _weights)
+                    if s == "torch" or s.startswith("torch.")
                 )
     assert not admitted_by_prefix, (
         f"a torch namespace is still admitted by prefix: {admitted_by_prefix}"
+    )
+
+    # Stronger than the literal scan above, and independent of how a prefix is
+    # spelled: the ONLY branch that reaches the real resolution must be gated on
+    # membership of `_ALLOWED`. A prefix rule therefore cannot admit anything at
+    # all, whatever namespace it names.
+    admitting_tests: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        reaches_super = any(
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Attribute)
+            and inner.func.attr == "find_class"
+            and isinstance(inner.func.value, ast.Call)
+            and isinstance(inner.func.value.func, ast.Name)
+            and inner.func.value.func.id == "super"
+            for statement in node.body
+            for inner in ast.walk(statement)
+        )
+        if reaches_super:
+            admitting_tests.append(ast.dump(node.test))
+    assert len(admitting_tests) == 1, (
+        f"the real resolution is reached from {len(admitting_tests)} branches, not one"
+    )
+    assert "_ALLOWED" in admitting_tests[0] and "startswith" not in admitting_tests[0], (
+        f"the admitting branch is not the exact-allowlist membership test: {admitting_tests[0]}"
     )
 
 
