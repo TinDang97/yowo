@@ -40,6 +40,12 @@ jobs:
     # matches either, so no branch of this workflow can mint a PyPI token.
     environment: testpypi
     permissions:
+      # A job-level `permissions:` block REPLACES the workflow default, it does not
+      # merge — everything unlisted becomes `none`. So `contents: read` has to be
+      # restated here or the very first step, `actions/checkout`, is running with
+      # `contents: none`. `release.yml`'s publish job declares `id-token: write`
+      # alone and is right to: it has no checkout, it downloads an artifact.
+      contents: read
       # M2 — the same mechanism the real publish uses. A dry run over a different
       # mechanism proves nothing about the one that matters.
       id-token: write

@@ -169,8 +169,19 @@ only for `release-dry-run.yml` running in `testpypi`, and the PyPI one only for
 `release.yml` running in `release`. Neither can stand in for the other.
 
 You also need the `testpypi` environment to exist:
-**Settings → Environments → New environment → `testpypi`**. No secrets, no
-protection rules — it is a name the publisher binds to, nothing more.
+**Settings → Environments → New environment → `testpypi`**. No secrets — the
+publisher binds to the name, and there is nothing to store.
+
+**One optional hardening, and it is your call.** With no protection rules the
+TestPyPI identity is reachable from any ref: `workflow_dispatch` accepts any
+branch, and `push: tags: v*` fires on any `v*` tag on any commit. `uv build` then
+runs the repository's own build backend inside the job holding the OIDC token, so a
+malicious build hook could mint TestPyPI tokens. The blast radius is bounded to
+TestPyPI — the pypi.org publisher requires `release.yml` and the `release`
+environment, and those claims cannot be forged from this file — but if you want it
+closed, add a **deployment tag rule** of `v*` on the environment. It costs nothing,
+and it is the difference between "anyone with write access" and "anyone who can cut
+a release tag".
 
 Then run it: **Actions → Release Dry Run → Run workflow**. It needs no tag.
 
@@ -202,10 +213,23 @@ triggered by a `v*` tag or on demand, built and gated by ADD task
 `testpypi-dry-run`.
 
 What still does not exist is a **run**. The clause asks that a dry run *publishes*,
-and thirteen checks asserting the shape of that workflow prove exactly as much as
+and fourteen checks asserting the shape of that workflow prove exactly as much as
 the eleven that have been green over a release job which cannot start. Section 7b
 is the part only you can do, and until a run appears on
 `test.pypi.org/project/yowo/` this box stays open.
+
+Two things a green dry run still will not have proved, so you know what you are and
+are not buying:
+
+- **`skip-existing: true` makes a re-run green whether it uploaded or skipped.** So
+  the run that closes this box has to be judged by `test.pypi.org/project/yowo/`
+  showing a version, not by the badge. That is the successor to the problem at the
+  top of this page and it deserves the same suspicion.
+- **The dry run does not mirror the real job's shape.** `release.yml`'s `publish`
+  downloads an artifact and never builds; the dry run checks out, builds and
+  publishes in one job. What it proves is the OIDC exchange and the upload — the
+  part that has never once been exercised. It does not exercise the artifact
+  handoff, the `if: released == 'true'` gate, or the `release` environment.
 
 ## 10. Verifying it actually worked
 
