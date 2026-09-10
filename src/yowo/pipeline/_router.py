@@ -18,6 +18,7 @@ import threading
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from yowo.pipeline._ids import safe_stream_id
 from yowo.types import Detection, TaggedFrame
 
 if TYPE_CHECKING:
@@ -62,10 +63,16 @@ class DetectionRouter:
         Overwrites any previously registered callback for the same stream.
 
         Args:
-            stream_id: Unique identifier for the source stream.
+            stream_id: Unique identifier for the source stream. Normalised the same
+                way as :meth:`FrameCollector.add_stream`: any embedded credential is
+                stripped, so the value the callback receives is safe to emit.
             callback: Invoked as ``callback(stream_id, detections)`` when
                 detections are available for this stream.
         """
+        # Boundary: the collector redacts the same identifier on the way in, so both
+        # sides must normalise or a credentialed id would never match its callback.
+        stream_id = safe_stream_id(stream_id)
+
         with self._lock:
             self._callbacks[stream_id] = callback
             logger.debug("Registered callback for stream '%s'", stream_id)
@@ -78,6 +85,8 @@ class DetectionRouter:
         Args:
             stream_id: Stream whose callback should be removed.
         """
+        stream_id = safe_stream_id(stream_id)
+
         with self._lock:
             removed = self._callbacks.pop(stream_id, None)
         if removed is not None:

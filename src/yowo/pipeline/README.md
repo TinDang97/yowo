@@ -64,6 +64,50 @@ class FrameCollector:
     active_count: int                         # RUNNING + RECONNECTING
 ```
 
+### Stream identifiers are redacted at the boundary — `_ids.py`
+
+A stream id is whatever the caller passed, and in practice that is very often the camera
+URL, credentials and all. The same string then reaches a log record, an exception message,
+a dict key, a bridge thread name and the routing callback — and a credential in any of
+those outlives log scrubbing.
+
+`safe_stream_id()` therefore strips any embedded `user:password@` **once, on the way in**,
+at every public entry point that accepts an identifier (`add_stream`, `remove_stream`,
+`register`, `unregister`). Sinks never redact for themselves, so a sink added later is safe
+by construction. An identifier containing no `@` cannot carry a credential and is returned
+unchanged, byte for byte — `"cam-0"`, a path, a webcam index, and ordinary URLs are all
+untouched.
+
+The stripped form is the canonical id: it is the key in `stream_states` / `stream_errors`,
+the `TaggedFrame.stream_id`, and the value the callback receives. Pass the same value to
+`add_stream()` and `register()` — both normalise identically, so they still match.
+
+#### Identifiers that collapse
+
+Redaction is not injective. Two ids can normalise to the same string, and the two entry
+points react differently — which is the sharp edge:
+
+| Input | Normalises to | Why |
+|---|---|---|
+| `rtsp://a:1@h/s` and `rtsp://b:2@h/s` | `rtsp://h/s` | credentials are all that differed |
+| `rtsp://u:p@[bad:::/s` and `rtsp://x:y@[also:::/s` | `<unparseable url>` | `@` present, authority unparseable |
+
+> **`add_stream()` raises** `ValueError: Stream already registered` on a collision, so you
+> find out. **`register()` does not** — it silently overwrites the earlier callback, and
+> the surviving stream's detections are then delivered to the other camera's callback.
+> Give colliding streams distinct ids (distinct paths, or a name rather than a URL).
+
+Identifiers *without* an `@` never collapse, including malformed ones like
+`rtsp://host:abc/path` — the boundary short-circuits before `redact_url`'s parse-failure
+path can flatten them.
+
+#### Behaviour change (v2.4.0+)
+
+Callbacks now receive the **redacted** id, not the string originally passed to
+`add_stream()`. A consumer that reused the stream id *as a reconnect URL* will get a
+non-connectable one; keep the connectable URL alongside the id rather than deriving it
+from the id.
+
 ### How it works
 
 1. `add_stream()` creates a `ThreadedFrameReader` per source (bounded deque, daemon thread).
