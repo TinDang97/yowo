@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from yowo.io._reader import ThreadedFrameReader
+from yowo.pipeline._ids import safe_stream_id
 from yowo.types import Frame, FrameDropPolicy, StreamConfig, StreamState, TaggedFrame
 
 if TYPE_CHECKING:
@@ -233,7 +234,11 @@ class FrameCollector:
         ``FrameDropPolicy.NONE`` for offline sources.
 
         Args:
-            stream_id: Unique identifier for this stream.
+            stream_id: Unique identifier for this stream. Any credential embedded in
+                it (an RTSP URL's ``user:password@``) is stripped before anything else
+                sees it, so logs, errors, dict keys and callbacks never carry it. The
+                stripped form becomes the canonical id -- pass the same value to
+                :meth:`DetectionRouter.register`, which normalises it identically.
             source: A FrameSource instance to read from.
             policy: Override frame drop policy. Auto-selected when None.
             stream_config: Per-stream failure handling configuration. Uses
@@ -243,6 +248,11 @@ class FrameCollector:
             RuntimeError: If the collector is closed.
             ValueError: If ``stream_id`` is already registered.
         """
+        # Boundary: nothing else in this package ever sees the raw identifier, so
+        # every sink below -- the log lines, the ValueError, the bridge thread name,
+        # the dict keys and the routing callbacks -- is safe by construction.
+        stream_id = safe_stream_id(stream_id)
+
         if policy is None:
             policy = FrameDropPolicy.LATEST if source.is_live else FrameDropPolicy.NONE
 
@@ -281,6 +291,8 @@ class FrameCollector:
         Args:
             stream_id: The identifier of the stream to remove.
         """
+        stream_id = safe_stream_id(stream_id)
+
         with self._lock:
             entry = self._streams.pop(stream_id, None)
 
