@@ -9,7 +9,6 @@ Covers:
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -212,83 +211,155 @@ class TestInferFromTensorDelegation:
         mock_emit.assert_called_once_with("detection", sentinel)
 
 
+class _ThreadingShim:
+    """`threading` as `_streaming` sees it, with `Lock()` handing back ours.
+
+    Everything else delegates to the real module, so `Event` and anything added
+    later keep working. Scoped to one module's namespace on purpose — see the
+    comment at the patch site.
+    """
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self._lock = lock
+
+    def Lock(self) -> threading.Lock:  # mirrors the stdlib name, deliberately
+        return self._lock
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(threading, name)
+
+
 class TestInferBatchLockScope:
-    """Tests that _infer_batch in _stream_pipeline releases the lock before NMS."""
+    """The real `_stream_pipeline` closure must not hold the inference lock
+    across postprocessing.
+
+    Replaces a stopwatch. The previous check built its OWN `_infer_batch` inside
+    the test, chose the lock scope itself, ran two workers with 5ms and 50ms
+    sleeps and asserted the wall clock came in under 90ms. Two problems, and the
+    second is the serious one:
+
+    * It flaked. A wall-clock budget on a loaded machine fails for reasons that
+      have nothing to do with the property, and since 2026-09-10 this file sits
+      inside a REQUIRED status check, so a flake blocks a merge.
+    * It could not fail for the right reason either. The production
+      `_infer_batch` is a closure defined inside `_stream_pipeline`
+      (`_streaming.py:153`) and is unreachable from a test, so the old check
+      timed a copy — and the copy called `_process_batch` where production calls
+      `_postprocess_and_emit`. Moving the real postprocess inside the real lock
+      would not have failed it.
+
+    This drives the real `_stream_pipeline` and records, at the moment
+    `_postprocess_and_emit` is entered, whether the inference lock is held. No
+    sleeps, no timing, and it reads the production closure rather than a
+    restatement of it.
+    """
+
+    class _Source:
+        """The minimum `_stream_pipeline` asks of a source: it closes it."""
+
+        def close(self) -> None: ...
+
+    @staticmethod
+    def _drive(engine: DetectionEngine, frame_count: int) -> list[bool]:
+        """Run the real pipeline; return lock-held state at each postprocess."""
+        held: list[bool] = []
+        lock = threading.Lock()
+
+        frames = [_make_frame(i) for i in range(frame_count)]
+
+        class _Reader:
+            """The queue `_stream_pipeline` drains: every frame, then None."""
+
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                self._items: list[Frame | None] = [*frames, None]
+
+            def start(self) -> None: ...
+
+            def stop(self) -> None: ...
+
+            def get(self, timeout: float = 0.0) -> Frame | None:
+                return self._items.pop(0) if self._items else None
+
+            @property
+            def is_exhausted(self) -> bool:
+                return not self._items
+
+        real_postprocess = engine._postprocess_and_emit
+
+        def _recording(*args: object, **kwargs: object) -> list[object]:
+            held.append(lock.locked())
+            return real_postprocess(*args, **kwargs)
+
+        with (
+            # A shim MODULE, not `patch("...threading.Lock")`. `_streaming` does
+            # `import threading`, so its `threading` attribute IS the stdlib
+            # module — patching an attribute on it replaces `threading.Lock`
+            # process-wide, every lock in the interpreter becomes the same
+            # object, and the run deadlocks. Replacing the module reference in
+            # this one namespace touches nothing else.
+            patch("yowo._streaming.threading", _ThreadingShim(lock)),
+            patch("yowo._streaming.ThreadedFrameReader", _Reader),
+            patch.object(engine, "_postprocess_and_emit", _recording),
+        ):
+            list(engine._stream_pipeline(TestInferBatchLockScope._Source()))  # type: ignore[arg-type]
+        return held
 
     def test_postprocess_runs_outside_lock(self) -> None:
-        """Two workers: if postprocess overlaps, total time < 2x sequential.
-
-        We simulate:
-        - _run_gpu takes ~5ms (fast, under lock)
-        - _process_batch takes ~50ms (slow, should run OUTSIDE lock)
-
-        If lock covers only _run_gpu, two batches complete in ~(5+5)+50 = 60ms.
-        If lock covers both, two batches take ~(5+50)+(5+50) = 110ms.
-        We assert total < 90ms to confirm postprocess is outside the lock.
-        """
-        backend = _make_mock_backend()
-        engine = _make_engine_and_load(mock_backend=backend)
-
-        # Force pipeline_workers=2 to enable concurrent path
+        """Concurrent path: the lock is never held when postprocess is entered."""
+        engine = _make_engine_and_load(mock_backend=_make_mock_backend())
         engine._pipeline_workers = 2
+        engine._batch_size = 1
 
-        raw = np.zeros((1, 0, 6), dtype=np.float32)
+        held = self._drive(engine, frame_count=4)
 
-        def slow_gpu(tensor: object) -> np.ndarray:
-            time.sleep(0.005)  # 5ms GPU
-            return raw
-
-        backend.infer.side_effect = slow_gpu
-
-        def slow_process_batch(*args: object, **kwargs: object) -> list[object]:
-            time.sleep(0.050)  # 50ms NMS
-            return []
-
-        engine._process_batch = slow_process_batch  # type: ignore[assignment]
-
-        # Build two batches and run them through _stream_pipeline's _infer_batch
-        # by exercising the concurrent path directly.
-        from concurrent.futures import ThreadPoolExecutor
-
-        from yowo.io._decode import PreprocessBufferPool
-
-        target = (640, 640)
-        buffer_pool = PreprocessBufferPool(2, 1, target)
-        infer_lock = threading.Lock()
-
-        def _infer_batch(frames: list[Frame]) -> list[object]:
-            buf = buffer_pool.acquire()
-            try:
-                from yowo.io._decode import preprocess_into
-
-                tensor = preprocess_into(frames, target, buf)
-                with infer_lock:
-                    raw_output, elapsed_ms = engine._run_gpu(tensor, frames)
-                results = engine._process_batch(
-                    raw_output,
-                    tensor,
-                    frames,
-                    elapsed_ms,
-                    None,
-                )
-                return results
-            finally:
-                buffer_pool.release(buf)
-
-        frames_a = [_make_frame(0)]
-        frames_b = [_make_frame(1)]
-
-        t0 = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_a = pool.submit(_infer_batch, frames_a)
-            fut_b = pool.submit(_infer_batch, frames_b)
-            fut_a.result()
-            fut_b.result()
-        elapsed = time.perf_counter() - t0
-
-        # If postprocess were inside the lock: ~110ms (serial)
-        # With postprocess outside: ~60ms (GPU serial, NMS parallel)
-        # Allow generous margin for CI variance
-        assert elapsed < 0.090, (
-            f"Expected <90ms (postprocess outside lock), got {elapsed * 1000:.0f}ms"
+        assert held, "postprocess was never reached — the fixture drove nothing"
+        assert not any(held), (
+            f"the inference lock was held on {sum(held)} of {len(held)} postprocess "
+            "calls; _infer_batch must release it before _postprocess_and_emit"
         )
+
+    def test_the_lock_is_actually_held_during_inference(self) -> None:
+        """The companion the old check lacked.
+
+        Without this, a build that never took the lock at all would satisfy the
+        test above perfectly — an assertion that something does not happen is
+        worth nothing unless something else proves the mechanism exists.
+        """
+        engine = _make_engine_and_load(mock_backend=_make_mock_backend())
+        engine._pipeline_workers = 2
+        engine._batch_size = 1
+
+        seen: list[bool] = []
+        lock = threading.Lock()
+        real_run_gpu = engine._run_gpu
+
+        def _recording(*args: object, **kwargs: object) -> object:
+            seen.append(lock.locked())
+            return real_run_gpu(*args, **kwargs)
+
+        frames = [_make_frame(0)]
+
+        class _Reader:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                self._items: list[Frame | None] = [*frames, None]
+
+            def start(self) -> None: ...
+
+            def stop(self) -> None: ...
+
+            def get(self, timeout: float = 0.0) -> Frame | None:
+                return self._items.pop(0) if self._items else None
+
+            @property
+            def is_exhausted(self) -> bool:
+                return not self._items
+
+        with (
+            patch("yowo._streaming.threading", _ThreadingShim(lock)),
+            patch("yowo._streaming.ThreadedFrameReader", _Reader),
+            patch.object(engine, "_run_gpu", _recording),
+        ):
+            list(engine._stream_pipeline(self._Source()))  # type: ignore[arg-type]
+
+        assert seen, "_run_gpu was never reached — the fixture drove nothing"
+        assert all(seen), "the inference lock was NOT held during _run_gpu"
