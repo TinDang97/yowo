@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 3
+delta_seq: 4
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q4 · open · 2026-09-11] A parametrised check proves nothing about ORDER if the parameters are already in the order the bug would impose. I wrote test_query_keys_and_their_order_survive over the keys 'alpha' and 'beta' and asserted alpha comes before beta. A sorted() injected into the implementation is indistinguishable from preserving order on that input, so the mutation SURVIVED — a check whose entire subject is ordering, passing under the exact change it exists to catch. Found by refuting, not by reading: the check reads correct, and rereading it a third time would not have found it. Fixed with 'zulu' and 'alpha'. The general rule: when a check asserts that some property is PRESERVED, the fixture must be one where the most likely wrong implementation would visibly differ — sorted input cannot test sorting, an already-deduplicated list cannot test deduplication, an idempotent value cannot test idempotence. Choose the fixture adversarially, then prove it by injecting the wrong implementation and watching the check go red. (evidence: tasks/query-string-credentials.d/runs/1.md — mutation 'A5: reorder query keys' -> 36 passed, the check survived; after changing the fixture to zulu/alpha the same mutation -> 1 failed. runs/3.md: PASS.)
 - [TDD · Q3 · open · 2026-09-09] A skipped test is green. Two fixtures pointed at one machine's filesystem, so an entire integration tier skipped for everyone else and reported success for months — hiding a version assertion frozen at 0.1.0 while the project shipped 2.5.0. Fixtures that cannot obtain their input must FAIL in CI. (evidence: /tasks/ci-weight-fixture.md)
 - [TDD · Q2 · open · 2026-09-09] A check that only asserts a symbol EXISTS passes while the symbol is dead code. load_verified_state_dict was never called by any real load path, every load still unpickled, and the check was green. Assert the call site, not the definition. (evidence: /tasks/weight-integrity.md)
 - [TDD · Q1 · open · 2026-09-08] The pyright pre-commit hook fails on EVERY commit regardless of content: it runs via 'uv run', and uv 0.10.11 rewrites uv.lock from revision 2 to 3, so pre-commit sees 'files were modified by this hook' and rolls back. pyright itself reports 0 errors. A gate that fails identically on every input is not a gate — it trains the author to pass --no-verify. Same mechanism threatens CI, where 'uv sync' can re-resolve the lock the build claims to pin. (evidence: 25e907e)

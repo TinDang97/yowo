@@ -57,9 +57,14 @@ def safe_stream_id(stream_id: str) -> str:
         collapses to ``"<unparseable url>"`` -- emitting nothing of it is the safe answer,
         at the cost of no longer distinguishing two such ids from each other.
     """
-    # An identifier with no "@" has no userinfo to remove. Short-circuiting here keeps
+    # An identifier with no "@", no "?" and no "#" has nowhere to hide a credential:
+    # no userinfo, no query, no fragment. Short-circuiting on those three keeps
     # `redact_url`'s parse-failure path -- which returns a single fixed string -- from
     # collapsing distinct credential-free ids onto one another.
-    if "@" not in stream_id:
+    #
+    # The "@" alone was not enough. `rtsp://host:abc/p?token=SECRET` has no userinfo,
+    # so it was returned BYTE-IDENTICAL and the token reached every log site, the
+    # RuntimeError, the dict keys, the thread name and the routing callback.
+    if not any(c in stream_id for c in "@?#"):
         return stream_id
     return redact_url(stream_id)

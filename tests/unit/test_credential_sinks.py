@@ -946,24 +946,25 @@ def test_box_6_is_not_ticked() -> None:
     ]
     assert len(box) == 1, f"m1 box 6 is not where it was ({len(box)} matches)"
     assert box[0].startswith("- [ ]"), (
-        "m1 box 6 is ticked. This node binds the four sinks against `user:password@` "
-        "only — `redact_url` still preserves the query string, so a signed-URL camera "
-        "reaches every one of those sinks with its secret intact. Tick it when that is "
-        "fixed too, not because these fifteen checks are green (R:TICKBOX)"
+        "m1 box 6 is ticked. The userinfo and query forms are closed, but a PATH-borne "
+        "token still survives — and that one redaction cannot fix, because the path is "
+        "the camera's identity. Ticking the box anyway is a milestone decision about "
+        "scope, not something these checks establish (R:TICKBOX)"
     )
 
-    # And the leak is real, not a worry. If this stops holding, the follow-up node
-    # landed and this check should be revisited rather than left asserting a fiction.
-    #
-    # The mixed form is the damning one. The userinfo IS stripped, so the `@` is gone
-    # and the string wears the visual signature of a redacted URL — while carrying the
-    # literal password in the query. That defeats eyeball review of a log, and defeats
-    # a reviewer diffing before against after, because the diff shows redaction
-    # happening.
+    # The reason is re-derived here, not asserted from memory. If this stops holding,
+    # the reason has changed AGAIN and must be re-derived rather than left standing.
     from yowo.pipeline._ids import safe_stream_id
 
-    leaked = safe_stream_id("rtsp://camop:hunter2@10.0.0.5:554/s?token=SECRET&password=hunter2")
-    assert "hunter2" in leaked and "@" not in leaked, (
-        f"the query-string leak no longer reproduces ({leaked!r}). The reason box 6 is "
-        "held open has changed — re-derive it rather than trusting this check"
+    leaked = safe_stream_id("rtsp://h/live/S3CR3T-signed/stream")
+    assert "S3CR3T" in leaked, (
+        f"a path-borne token no longer survives redaction ({leaked!r}). That is the "
+        "reason box 6 is held open — re-derive it rather than trusting this check"
+    )
+    # And the form that USED to hold it open is closed, so this check is not quietly
+    # standing on a stale premise while a fixed leak reopens behind it.
+    fixed = safe_stream_id("rtsp://camop:hunter2@10.0.0.5:554/s?token=SECRET&password=hunter2")
+    assert "hunter2" not in fixed and "SECRET" not in fixed, (
+        f"the query-string form has regressed ({fixed!r}) — `query-string-credentials` "
+        "closed it, and this check exists partly to notice if it reopens"
     )
