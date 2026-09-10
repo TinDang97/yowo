@@ -182,8 +182,50 @@ _ALLOWED: frozenset[tuple[str, str]] = _ALLOWED_EXACT | _ALLOWED_TORCH
 # if one is ever genuinely needed, it joins `_ALLOWED_EXACT` carrying the
 # observation that put it there, the same change-request path as every other entry.
 
-# Third-party model classes. Never constructed — stubbed, see `_InertModule`.
-_STUBBED_PREFIXES: tuple[str, ...] = ("ultralytics.", "models.")
+# ---------------------------------------------------------------------------
+# STUBBED, which is not RESOLVED
+# ---------------------------------------------------------------------------
+#
+# Everything below this line names something the loader hands an INERT stand-in.
+# That is a different and strictly weaker permission than membership of
+# `_ALLOWED` above, and the two are kept as separate constants with separate
+# comments on purpose: a resolved name is IMPORTED and its code becomes
+# reachable, a stubbed name is only STOOD IN FOR, so the stream can be walked to
+# the tensors while none of the class's own code is ever reachable. Collapsing
+# the two — folding a stubbed name into the allowlist because "it loads either
+# way" — is exactly how a stand-in becomes an admission. Frozen by ADD task
+# `non-weight-globals-are-inert` (M4).
+
+# Individual names, not namespaces: a general-purpose primitive a checkpoint
+# happens to name, where the state_dict provably does not need what it returns.
+#
+# `__builtin__.getattr` is named by every `-obb` checkpoint (observed on
+# `yolo11n-obb`, recorded in `scripts/checkpoint_globals_manifest.json`). It is
+# NOT resolved and must never be: `getattr` inside a restricted unpickler is a
+# general attribute-access primitive, so a crafted checkpoint that can call it
+# can reach any attribute of anything it can name and chain from there — the
+# classic gadget chain, and it would undo the narrowing `narrow-loader-allowlist`
+# and `storage-suffix-enumeration` performed. It is handed `_InertModule`
+# instead, which absorbs the call and returns a stand-in, so the attribute is
+# never read. `eval`, `exec`, `__import__`, `compile`, `open` and `setattr` are
+# absent from here as well as from `_ALLOWED`: nothing has observed a checkpoint
+# naming them, and a name nothing needs stays REFUSED, which is stricter than
+# inert (R:RESOLVEGADGET, E3).
+_INERT_EXACT: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("__builtin__", "getattr"),
+    }
+)
+
+# Third-party model classes and metadata riding along in the same stream. Never
+# constructed — stubbed, see `_InertModule`.
+#
+# `torchvision.` is named by every `-cls` checkpoint (observed on `yolo11n-cls`):
+# `torchvision.transforms.transforms.Compose` is the training-time preprocessing
+# pipeline stored as objects, and `Compose` holds a list of arbitrary callables.
+# It is not weights, the state_dict does not need it, and it is stubbed rather
+# than resolved for the same reason `ultralytics.` is (M2).
+_STUBBED_PREFIXES: tuple[str, ...] = ("ultralytics.", "models.", "torchvision.")
 
 
 def _inert_module_cls() -> type:
@@ -202,6 +244,46 @@ def _inert_module_cls() -> type:
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__()
 
+        # A4: absorb and continue. A stand-in that RAISES aborts the load
+        # partway, and `torch.load` reports whatever it had reached as a
+        # complete result — a truncated state_dict that looks loaded. So a
+        # call, an index or an attribute assignment on a stand-in yields
+        # another stand-in rather than an exception.
+        #
+        # `_extract_state_dict` carries the other half of A4: a load that ends
+        # with no tensors FAILS. Absorbing here can therefore never turn a
+        # malformed checkpoint into an empty success (E6).
+        def __call__(self, *args: object, **kwargs: object) -> _InertModule:
+            return self
+
+        def forward(self, *args: object, **kwargs: object) -> _InertModule:
+            return self
+
+        def __getitem__(self, key: object) -> _InertModule:
+            return self
+
+        def __setstate__(self, state: object) -> None:
+            """Restore the original object's attributes onto a live `nn.Module`.
+
+            The stream restores a stand-in with ``__new__``, never ``__init__``,
+            so without this the module containers `nn.Module` needs are simply
+            absent — and the class being stood in for need not be an
+            `nn.Module` at all (`torchvision.transforms.Compose` is not), so its
+            state does not supply them either. `.float()` on such an object then
+            fails with a bare `AttributeError` from deep inside torch instead of
+            the loader's own message. Initialising first and overlaying the
+            checkpoint's own state second leaves a genuine `nn.Module`'s
+            ``_parameters`` / ``_buffers`` / ``_modules`` exactly as they were.
+            """
+            torch.nn.Module.__init__(self)
+            attributes = state
+            if isinstance(attributes, tuple) and len(attributes) == 2:
+                attributes, slots = attributes
+                if isinstance(slots, dict):
+                    self.__dict__.update(slots)
+            if isinstance(attributes, dict):
+                self.__dict__.update(attributes)
+
     return _InertModule
 
 
@@ -217,8 +299,15 @@ def _restricted_unpickler_module(checkpoint_path: Path):
 
     class _RestrictedUnpickler(pickle.Unpickler):
         def find_class(self, module: str, name: str) -> object:
+            # A5: most specific to least, refusal last. The exact allowlist is
+            # the ONLY branch that resolves, and it is consulted first, so a
+            # broad rule can never answer a question a narrow rule already
+            # answered — consulting the prefixes first would let a namespace
+            # silently outrank the enumerated set and undo the narrowing.
             if (module, name) in _ALLOWED:
                 return super().find_class(module, name)
+            if (module, name) in _INERT_EXACT:
+                return inert
             if module.startswith(_STUBBED_PREFIXES):
                 return inert
             raise ModelLoadError(
@@ -226,9 +315,17 @@ def _restricted_unpickler_module(checkpoint_path: Path):
                 f"'{module}.{name}', which is not in the loader's allowlist of "
                 f"weights primitives. A checkpoint that names arbitrary code is not "
                 f"just weights — treat this file as untrusted rather than looking for "
-                f"a flag to disable this check. If this is a genuine new upstream "
-                f"layer type, the allowlist is widened by a change-request carrying a "
-                f"recorded observation: see .add/tasks/narrow-loader-allowlist.md and "
+                f"a flag to disable this check. There are two remedies and they are "
+                f"NOT the same permission. If the state_dict does not need this name "
+                f"— training metadata, a preprocessing pipeline, an attribute-access "
+                f"primitive — it is STUBBED: it joins _INERT_EXACT or "
+                f"_STUBBED_PREFIXES and is handed an inert stand-in that constructs "
+                f"nothing and executes nothing. Only a genuine new upstream layer "
+                f"type the weights actually hang off is RESOLVED, by widening the "
+                f"allowlist. Either takes a change-request carrying a recorded "
+                f"observation taken through this loader: see "
+                f".add/tasks/narrow-loader-allowlist.md, "
+                f".add/tasks/non-weight-globals-are-inert.md and "
                 f"scripts/measure_checkpoint_globals.py."
             )
 
@@ -279,6 +376,22 @@ def _safe_load(checkpoint_path: Path) -> object:
         ) from exc
 
 
+def _no_tensors(checkpoint_path: Path, detail: str) -> ValueError:
+    """The other half of A4: absorbing a call must not absorb a malformed file.
+
+    A stand-in answers a call instead of raising, so the stream can be walked
+    all the way to the weights. The cost of that is a checkpoint carrying no
+    weights at all walking to the end just as quietly and returning ``{}`` —
+    which every caller downstream reads as a complete load of a model with no
+    parameters. So an empty result is an error here, always (E6).
+    """
+    return ValueError(
+        f"Checkpoint at {checkpoint_path} yielded no tensors: {detail}. A stand-in "
+        f"absorbs a call so the stream can be walked to the weights; it must never "
+        f"turn a checkpoint with no weights in it into an empty success."
+    )
+
+
 def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     """Load checkpoint and extract the float32 state_dict.
 
@@ -286,17 +399,27 @@ def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
     - Prefers EMA weights (``ckpt['ema']``) over training weights.
     - Converts to float32 (ultralytics may store FP16).
     - Handles both full checkpoint dicts and raw state_dicts.
+
+    Raises:
+        ModelLoadError: If the file cannot be read, or names a global that is
+            not a weights primitive.
+        ValueError: If the checkpoint format is unrecognised, or carries no
+            tensors at all.
     """
     import torch
 
     ckpt = _safe_load(checkpoint_path)
 
-    # Raw state_dict (unlikely but handle gracefully)
-    if isinstance(ckpt, dict) and all(isinstance(v, torch.Tensor) for v in ckpt.values()):
+    # Raw state_dict (unlikely but handle gracefully). `ckpt` must be non-empty:
+    # `all()` over an empty mapping is True, so an empty file used to return `{}`
+    # from here as a successful load of nothing.
+    if isinstance(ckpt, dict) and ckpt and all(isinstance(v, torch.Tensor) for v in ckpt.values()):
         return {k: v.float() for k, v in ckpt.items()}
 
     # Standard ultralytics checkpoint format
     if isinstance(ckpt, dict):
+        if not ckpt:
+            raise _no_tensors(checkpoint_path, "the checkpoint is an empty mapping")
         model_obj = ckpt.get("ema") or ckpt.get("model")
         if model_obj is None:
             raise ValueError(
@@ -306,10 +429,20 @@ def _extract_state_dict(checkpoint_path: Path) -> dict[str, _torch.Tensor]:
         # model_obj is an nn.Module — extract state_dict
         if hasattr(model_obj, "state_dict"):
             model_obj = model_obj.float()
-            return dict(model_obj.state_dict())
+            state = dict(model_obj.state_dict())
+            if not state:
+                raise _no_tensors(
+                    checkpoint_path,
+                    f"the {type(model_obj).__name__} under 'ema'/'model' holds no "
+                    "parameters or buffers",
+                )
+            return state
         # model_obj is already a dict
         if isinstance(model_obj, dict):
-            return {k: v.float() for k, v in model_obj.items()}
+            tensors = {k: v.float() for k, v in model_obj.items()}
+            if not tensors:
+                raise _no_tensors(checkpoint_path, "the mapping under 'ema'/'model' is empty")
+            return tensors
 
     raise ValueError(
         f"Unrecognised checkpoint format at {checkpoint_path}. "
