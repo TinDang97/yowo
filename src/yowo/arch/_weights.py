@@ -323,16 +323,23 @@ def _sidecar_path(checkpoint_path: Path) -> Path:
 
 
 def _raw_digest(path: Path) -> str:
-    """SHA-256 of the raw checkpoint, used ONLY to key its converted sidecar.
+    """SHA-256 of the raw checkpoint — the measurement both trust questions use.
 
-    This is never the security check, and it structurally cannot be one: a digest
-    computed from the file under test matches that file by construction, so
-    comparing the two proves only that SHA-256 is deterministic. The value exists
-    to key the sidecar to the exact bytes it was derived from, so a re-fetched or
-    re-pinned weight regenerates it instead of silently serving old tensors.
+    It cannot authenticate the file to itself: a digest computed from the file
+    under test matches that file by construction, so comparing the two proves
+    only that SHA-256 is deterministic. Authenticating the FILE is
+    `verify_digest` against a value that came from the REGISTRY.
 
-    Authentication is `verify_digest` against a value that came from the
-    REGISTRY, and the two must never be allowed to meet — see
+    What it does authenticate is the converted `.state_dict.pt` SIDECAR, which is
+    a different artifact and a different question. A sidecar is believed only
+    when it names the digest the raw bytes actually have right now, so a
+    re-fetched or re-pinned weight regenerates it instead of silently serving old
+    tensors — and a sidecar planted by anything with write access to the cache
+    cannot name a value it has no way to compute without the real file.
+
+    One call answers both questions: this measurement is compared to the
+    sidecar's claim, and handed to `verify_digest` as its ``measured`` argument
+    so the pin comparison costs no second read. See
     :func:`load_verified_state_dict`.
     """
     h = hashlib.sha256()
@@ -355,59 +362,94 @@ def load_verified_state_dict(
     ``weights_only=True`` and executes nothing.
 
     The sidecar stores the raw file's digest alongside the tensors and is only
-    trusted when that digest matches. A re-pinned or re-fetched weight therefore
-    regenerates it automatically, and a stale sidecar from an earlier version can
-    never serve old weights under a new pin. A missing or mismatched sidecar
-    falls back to verify-and-reconvert — never to loading it unchecked.
+    trusted when that digest matches the bytes on disk RIGHT NOW. A re-pinned or
+    re-fetched weight therefore regenerates it automatically, and a stale sidecar
+    from an earlier version can never serve old weights under a new pin. A
+    missing or mismatched sidecar falls back to verify-and-reconvert — never to
+    loading it unchecked.
 
     ``resolve_weights`` verified this path against the pin before returning it,
     but that was a separate open at a separate moment. Anything with write access
-    to the weight cache in between can substitute the file, and the substitution
-    is self-concealing: the new bytes key to a different sidecar, so the sidecar
-    misses and the attacker's checkpoint goes straight to the reader that can
-    execute. So when a pin is supplied, it is compared again here — immediately
-    before the conversion, and only on the calls that would actually convert.
+    to the weight cache in between can substitute the file — or, since the cache
+    also holds the sidecar, forge the sidecar directly. So the file is measured
+    once here, unconditionally, and that one measurement answers both questions:
+
+    * The PIN authenticates the FILE. ``raw_digest`` came from the registry, so
+      comparing it to the measurement says whether these are the bytes upstream
+      published.
+    * The FILE'S OWN DIGEST authenticates the SIDECAR. A converted sidecar is a
+      claim about specific bytes; believing it means checking that those bytes
+      are the ones actually there.
+
+    Neither may borrow the other's authority, and the pin in particular may never
+    stand in for the measurement. Every registry pin is PUBLIC — printed in
+    ``yowo.models._registry`` — so a sidecar accepted because it names the pin is
+    a sidecar that authenticated itself with a value anyone can read. That was
+    this function's defect: it keyed the sidecar cache on the pin and returned
+    from the fast path before the raw file was ever opened, so a planted
+    ``.state_dict.pt`` carrying the published digest served arbitrary tensors
+    with no error and no read of the checkpoint at all.
 
     Args:
-        checkpoint_path: The raw ``.pt``, already digest-verified by the caller.
+        checkpoint_path: The raw ``.pt``. Must exist: with the file absent there
+            is nothing to measure, so a sidecar beside it cannot be
+            authenticated at all and is refused rather than promoted.
         raw_digest: The digest the REGISTRY pins for this model. ``None`` means
             genuinely unpinned — an explicit ``spec.weights_path``, or a registry
-            entry carrying ``sha256=None`` — in which case there is nothing to
-            authenticate against and the sidecar is keyed on the file's own bytes.
+            entry carrying ``sha256=None`` — in which case no claim is made about
+            whose weights these are. The sidecar is still authenticated against
+            the file's own bytes, which is the only question that branch can ask.
+
+    Raises:
+        ModelNotFoundError: If ``checkpoint_path`` does not exist.
+        WeightIntegrityError: If the file's bytes do not match ``raw_digest``.
     """
     import torch
 
-    # Two values, deliberately never merged. `pin` authenticates and may only
-    # ever come from the caller's registry lookup; `sidecar_key` addresses a
-    # cache entry and may be computed from the file. Collapsing them into one
-    # variable is exactly how this function came to "verify" a file against
-    # itself, so the separation is the control, not a style choice.
-    pin = raw_digest
-    sidecar_key = pin if pin is not None else _raw_digest(checkpoint_path)
+    from yowo.errors import ModelNotFoundError
 
+    pin = raw_digest
+
+    # M1/A3: measure FIRST, once, before anything the cache says is read back.
+    # Deferring this until after the sidecar was consulted is what let a forged
+    # sidecar be believed; deferring it until after the sidecar is deserialised
+    # would still mean attacker-controlled bytes were read on attacker terms.
+    if not checkpoint_path.is_file():
+        raise ModelNotFoundError(
+            f"Checkpoint not found: {checkpoint_path}\n"
+            f"A converted {_sidecar_path(checkpoint_path).name} cannot stand in for it: a "
+            "sidecar is authenticated by the raw file's own bytes, and with the raw file "
+            "absent there is nothing to authenticate it against."
+        )
+    raw = _raw_digest(checkpoint_path)
+
+    # The pin authenticates the FILE, against the measurement just taken. Handing
+    # `verify_digest` that measurement instead of letting it hash again keeps one
+    # load to one read of the checkpoint (M3/R:REHASH) while keeping one
+    # integrity message for one event, wherever it was caught.
+    if pin is not None:
+        verify_digest(checkpoint_path, pin, measured=raw)
+
+    # The file's own digest authenticates the SIDECAR. `raw` cannot be forged
+    # without the real file, which is exactly what the public pin could not say.
     sidecar = _sidecar_path(checkpoint_path)
     if sidecar.exists():
         try:
             blob = torch.load(sidecar, map_location="cpu", weights_only=True)
         except Exception:
             blob = None  # unreadable or written by an older torch — reconvert
-        if isinstance(blob, dict) and blob.get("raw_sha256") == sidecar_key:
-            tensors = blob.get("tensors")
-            if isinstance(tensors, dict):
-                # Served without touching the raw file. A sidecar keyed on the
-                # pin was produced from bytes that hashed to the pin, and it
-                # loads with weights_only=True, so there is nothing left to
-                # authenticate — and re-hashing 5-110 MB on every steady-state
-                # load would tax the exact fast path this sidecar exists to be.
-                return tensors
-
-    # Past this point the raw file WILL be read by the executing reader, so this
-    # is the last moment a substitution can still be refused. Order is the whole
-    # control: converting first would run the payload the comparison exists to
-    # reject. Reuses verify_digest so a mismatch reads identically whether it was
-    # caught during resolution or here — one event, one message.
-    if pin is not None:
-        verify_digest(checkpoint_path, pin)
+        tensors = blob.get("tensors") if isinstance(blob, dict) else None
+        if isinstance(blob, dict) and blob.get("raw_sha256") == raw and isinstance(tensors, dict):
+            return tensors
+        # M4/A6: a sidecar left over from a previous pin is the ordinary case,
+        # not an attack, so it is discarded rather than raised on — and said
+        # plainly enough that an operator reads housekeeping, not a break-in.
+        logger.info(
+            "Discarded the cached conversion %s: it does not describe the current "
+            "bytes of %s. Reconverting the checkpoint; nothing else is affected.",
+            sidecar.name,
+            checkpoint_path.name,
+        )
 
     state = _extract_state_dict(checkpoint_path)
     logger.info(
@@ -416,7 +458,7 @@ def load_verified_state_dict(
     )
     try:
         tmp = sidecar.with_suffix(".tmp")
-        torch.save({"raw_sha256": sidecar_key, "tensors": state}, tmp)
+        torch.save({"raw_sha256": raw, "tensors": state}, tmp)
         tmp.replace(sidecar)
     except OSError:
         # A read-only or full cache directory must not break loading; the only

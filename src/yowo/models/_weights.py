@@ -74,7 +74,7 @@ def file_digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def verify_digest(path: Path, expected: str) -> None:
+def verify_digest(path: Path, expected: str, measured: str | None = None) -> None:
     """Raise unless ``path`` hashes to ``expected``.
 
     The message carries the model path, the expected digest and the actual one,
@@ -82,8 +82,17 @@ def verify_digest(path: Path, expected: str) -> None:
     re-deriving either. There is deliberately no non-raising variant: a
     verification failure must never be downgraded to a warning or a fallback to
     the unverified file (R:SILENT), and offering a soft mode is how that happens.
+
+    ``measured`` exists for the one caller that has ALREADY hashed ``path`` on
+    this call for another reason -- `load_verified_state_dict`, which needs the
+    file's own digest to authenticate its converted sidecar and must not read
+    5-110 MB a second time to also compare it to the pin (R:REHASH). It is a way
+    to avoid re-reading the file, never a way to supply the answer: the only
+    legal value is a digest of ``path`` taken during this same call. Passing
+    anything else -- a caller's parameter, a cached value, a number out of a
+    sidecar -- turns this check into the tautology R:SELFKEYED forbids.
     """
-    actual = file_digest(path)
+    actual = file_digest(path) if measured is None else measured
     if actual != expected:
         raise WeightIntegrityError(
             f"Weight failed integrity check: {path}\n"

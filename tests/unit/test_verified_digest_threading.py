@@ -172,13 +172,22 @@ def test_conversion_is_never_reached_on_a_mismatch(genuine: tuple[Path, str]) ->
 
 
 def test_sidecar_hit_on_the_pin_does_not_rehash_the_raw_file(genuine: tuple[Path, str]) -> None:
-    """covers: M5 -- the steady-state path must not pay for a 5-110 MB hash.
+    """covers: M5 -- the steady-state path pays for ONE hash of the raw file, never two.
 
-    A sidecar whose stored `raw_sha256` equals the pin was produced from bytes
-    that hashed to the pin, and it loads with `weights_only=True`. There is
-    nothing left to authenticate, so neither the pin comparison nor the sidecar
-    keying may touch the raw file. Re-hashing here would tax the exact fast path
-    `weight-integrity` built.
+    Partly superseded by ADD task `sidecar-not-self-attesting`, and the name is
+    kept only so this node's gate can still find it. As first written this check
+    asserted the pinned fast path touched the raw file at all -- neither hashing
+    it nor comparing it to the pin. That turned out to be the defect rather than
+    the invariant: the sidecar was then keyed on the PIN, which is public and
+    printed in `_registry.py`, so anything able to write the weight cache could
+    plant a `.state_dict.pt` naming the published digest and have arbitrary
+    tensors served with no read of the checkpoint at all. The raw file is now
+    measured once, unconditionally, and the sidecar is believed only when it
+    names that measurement.
+
+    What survives, and is what this check was really defending, is the cost
+    bound: ONE read of the raw file per load. `verify_digest` must consume the
+    measurement already taken rather than hashing 5-110 MB a second time.
     """
     from yowo.arch import _weights as arch_weights
 
@@ -186,15 +195,25 @@ def test_sidecar_hit_on_the_pin_does_not_rehash_the_raw_file(genuine: tuple[Path
     tensors = {"model.0.conv.weight": torch.zeros(1)}
     torch.save({"raw_sha256": pinned, "tensors": tensors}, path.with_suffix(".state_dict.pt"))
 
+    hashed: list[Path] = []
+    real_digest = arch_weights._raw_digest
+
+    def _spy(target: Path) -> str:
+        hashed.append(target)
+        return real_digest(target)
+
+    # A tripwire rather than a stub: the whole point of the sidecar is that the
+    # executing reader runs once ever, so reaching it here is the failure.
+    tripwire = AssertionError("the fast path fell through to the executing reader")
     with (
-        patch.object(arch_weights, "verify_digest") as verify,
-        patch.object(arch_weights, "_raw_digest") as rehash,
+        patch.object(arch_weights, "_raw_digest", side_effect=_spy),
+        patch.object(arch_weights, "_extract_state_dict", side_effect=tripwire) as convert,
     ):
         got = arch_weights.load_verified_state_dict(path, raw_digest=pinned)
 
     assert set(got) == set(tensors), "the sidecar did not serve the load"
-    verify.assert_not_called()
-    rehash.assert_not_called()
+    convert.assert_not_called()
+    assert hashed == [path], f"the raw file was hashed {len(hashed)}x on the fast path"
 
 
 def test_stale_sidecar_falls_through_to_the_pin_comparison(genuine: tuple[Path, str]) -> None:
