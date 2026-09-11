@@ -32,7 +32,18 @@ class EngineMetrics:
         inference_p99_ms: Rolling p99 backend.infer() latency.
         fps: Frames per second (frames_total / uptime_s).
         uptime_s: Seconds since collector creation or last reset.
-        frames_dropped: Frames silently dropped due to a full async queue.
+        frames_dropped: Frames dropped because a queue was full — from the
+            synchronous reader's drop policy as well as the async queue.
+            Both report here: a count an operator has to assemble from two
+            places is a count that reads zero.
+        events_dropped: Events the bus discarded because its queue was full.
+            Counted by the bus and reported here, so the snapshot is the one
+            object an operator has to read.
+        degradations_total: Cumulative count of degradation events — OOM
+            batch-halving, precision fallback, backend fallback. Cumulative
+            deliberately: ``health`` is a LEVEL that reads READY again after
+            recovery, so a stream that degraded forty times and recovered
+            reads identically to one that never did.
     """
 
     frames_total: int
@@ -44,6 +55,8 @@ class EngineMetrics:
     fps: float
     uptime_s: float
     frames_dropped: int = 0
+    events_dropped: int = 0
+    degradations_total: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +122,10 @@ class MetricsCollector:
     """
 
     __slots__ = (
+        "_degradations_total",
         "_enabled",
         "_errors_total",
+        "_events_dropped",
         "_frames_dropped",
         "_frames_total",
         "_inference_hist",
@@ -123,6 +138,8 @@ class MetricsCollector:
         self._frames_total: int = 0
         self._errors_total: int = 0
         self._frames_dropped: int = 0
+        self._events_dropped: int = 0
+        self._degradations_total: int = 0
         self._inference_hist = _RollingHistogram(window=1000)
         self._start_time: float = time.monotonic()
         self._last_frame_time: float = 0.0
@@ -196,6 +213,29 @@ class MetricsCollector:
     # Snapshot + reset (called by operators, not on hot path)
     # ------------------------------------------------------------------
 
+    def record_events_dropped(self, count: int = 1) -> None:
+        """Report events the bus discarded because its queue was full.
+
+        The bus counts these itself; this brings them into the snapshot so an
+        operator reads one object rather than knowing to also check a separate
+        engine property.
+        """
+        if not self._enabled:
+            return
+        self._events_dropped += count
+
+    def record_degradation(self) -> None:
+        """Count one degradation event.
+
+        Cumulative and never decremented. ``health`` already reports the current
+        LEVEL and returns to READY on recovery, so without this a stream that
+        degraded and recovered forty times is indistinguishable from one that
+        never degraded at all.
+        """
+        if not self._enabled:
+            return
+        self._degradations_total += 1
+
     def snapshot(self) -> EngineMetrics:
         """Return a frozen immutable snapshot of current metrics."""
         elapsed = time.monotonic() - self._start_time
@@ -205,6 +245,8 @@ class MetricsCollector:
             frames_total=self._frames_total,
             errors_total=self._errors_total,
             frames_dropped=self._frames_dropped,
+            events_dropped=self._events_dropped,
+            degradations_total=self._degradations_total,
             inference_mean_ms=mean,
             inference_p50_ms=p50,
             inference_p95_ms=p95,
@@ -284,6 +326,8 @@ class MetricsCollector:
         self._frames_total = 0
         self._errors_total = 0
         self._frames_dropped = 0
+        self._events_dropped = 0
+        self._degradations_total = 0
         self._inference_hist.clear()
         self._start_time = time.monotonic()
         self._last_frame_time = 0.0

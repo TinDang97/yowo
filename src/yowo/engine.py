@@ -364,11 +364,23 @@ class BaseEngine(StreamingMixin):
     @property
     def metrics(self) -> EngineMetrics:
         """Snapshot of current engine metrics."""
+        self._sync_event_drops()
         return self._metrics.snapshot()
 
     def reset_metrics(self) -> None:
         """Zero all metric counters and the latency histogram."""
         self._metrics.reset()
+
+    def _sync_event_drops(self) -> None:
+        """Bring the bus's drop count into the collector before a snapshot.
+
+        The bus owns the count; the collector is what an operator reads. Syncing
+        at read time keeps the emit path free of a second increment.
+        """
+        dropped = self._event_bus.events_dropped
+        already = self._metrics.snapshot().events_dropped
+        if dropped > already:
+            self._metrics.record_events_dropped(dropped - already)
 
     def health_report(self) -> HealthReport:
         """Return a frozen :class:`HealthReport` snapshot of current engine state.
@@ -376,6 +388,7 @@ class BaseEngine(StreamingMixin):
         ``memory_pct`` is ``None`` unless the engine is running on a CUDA device.
         GPU memory reads are best-effort; any failure returns ``None``.
         """
+        self._sync_event_drops()
         snap = self._metrics.snapshot()
 
         memory_pct: float | None = None
@@ -475,6 +488,7 @@ class BaseEngine(StreamingMixin):
                 self._validate_warmup_output()
                 if bt != self._selection.backend:
                     logger.warning("Using fallback backend: %s", bt.value)
+                    self._record_backend_fallback()
                     _fs = select_backend(
                         self._hw, model_size=self._spec.size.value, backend_override=bt.value
                     )
@@ -657,12 +671,13 @@ class BaseEngine(StreamingMixin):
             )
         self._oom_recovering = True
         self._health_state = HealthStatus.DEGRADED
+        self._metrics.record_degradation()
         self._event_bus.emit("health_change", HealthStatus.DEGRADED)
-        logger.warning(
-            "OOM monitor: GPU %.1f%% — batch size halved to %d",
-            0.0,
-            self._batch_size,
-        )
+        # The percentage used to be printed here as a literal 0.0 — a fabricated
+        # measurement, in the line an operator reads while diagnosing an OOM. The
+        # reading that triggered this lives in the caller; this line reports only
+        # what it actually knows.
+        logger.warning("OOM monitor: batch size halved to %d", self._batch_size)
 
     def _try_precision_fallback(self) -> None:
         """Tier-2 recovery: attempt FP16 precision fallback if backend supports it."""
@@ -674,7 +689,19 @@ class BaseEngine(StreamingMixin):
                 logger.warning("OOM monitor: precision fallback failed: %s", exc)
         else:
             logger.debug("OOM monitor: precision fallback not supported by this backend")
+        # Counted even when the fallback itself failed: the engine entered a
+        # degraded state either way, and a failed recovery is the more important
+        # one to be able to see.
         self._health_state = HealthStatus.DEGRADED
+        self._metrics.record_degradation()
+
+    def _record_backend_fallback(self) -> None:
+        """Count a load-time fallback to a different backend.
+
+        The engine keeps running, so ``health`` never leaves READY and nothing
+        else records that the backend it is using is not the one selected.
+        """
+        self._metrics.record_degradation()
 
     def _evict_lowest_activity_streams(self) -> None:
         """Tier-3 recovery: evict lowest-activity FrameCollector streams.

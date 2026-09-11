@@ -78,6 +78,10 @@ class StreamingMixin:
             policy=self._frame_drop_policy,  # type: ignore[attr-defined]
             preprocess_fn=pp_fn,
             target_size=target_size,
+            # Without this the reader counts drops nobody reads, and
+            # engine.metrics.frames_dropped stays 0 while the queue discards
+            # frames — measured at 298 dropped against 0 reported.
+            on_drop=self._metrics.record_frame_dropped,  # type: ignore[attr-defined]
         )
         _stop = threading.Event()
         with self._shutdown_lock:  # type: ignore[attr-defined]
@@ -133,6 +137,7 @@ class StreamingMixin:
             source,
             max_queue_size=self._batch_size * 2,  # type: ignore[attr-defined]
             policy=FrameDropPolicy.NONE,
+            on_drop=self._metrics.record_frame_dropped,  # type: ignore[attr-defined]
         )
         reader.start()
         concurrent = self._pipeline_workers > 1  # type: ignore[attr-defined]
