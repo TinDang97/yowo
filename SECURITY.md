@@ -49,9 +49,12 @@ are shipped today, not planned:
   executes nothing. Where the model registry pins a digest, the raw file is compared
   against that pin again immediately before conversion — not only earlier, when it
   was first resolved.
-- **Credential redaction on emit.** `redact_url` in `src/yowo/io/_redact.py` strips
-  userinfo from any URL yowo prints or raises in an error message, so a credentialed
-  RTSP or download URL never reaches a log line or a CLI table verbatim.
+- **Credential redaction at the boundary.** `redact_url` in `src/yowo/io/_redact.py`
+  strips the userinfo, every query value and the whole fragment from a source URL
+  where the identifier is first accepted — not at each place it is emitted — so a
+  credentialed RTSP or download URL never reaches a log line, an exception message,
+  a result payload or a cache key verbatim. What it does not cover, and why, is
+  below under *Credentials in a source URL*.
 
 This is deliberately not an enumerated threat model: two related hardening items are
 still open work in this project (narrowing the checkpoint's allowed classes further,
@@ -59,3 +62,62 @@ and extending digest verification to the export path), and a threat model commit
 to today would already be behind them. What is above names code that exists — verify
 it against `src/yowo/arch/_weights.py`, `src/yowo/models/_weights.py`, and
 `src/yowo/io/_redact.py` directly rather than trusting this prose.
+
+## Credentials in a source URL
+
+A camera URL often carries its own secret. yowo redacts that secret where the
+identifier is first accepted, so it does not reach a log line, an exception message,
+a result payload, or a feature-cache key. **Three of the four places a URL can carry
+one are covered. The path is not.**
+
+```
+userinfo   rtsp://camop:hunter2@camera-01:554/stream       -> rtsp://camera-01:554/stream
+query      rtsp://10.0.0.5:554/live/stream?token=S3CR3T-signed -> rtsp://10.0.0.5:554/live/stream?token=#q58cf83e5
+fragment   rtsp://10.0.0.5:554/stream#S3CR3T-signed        -> rtsp://10.0.0.5:554/stream#qf17831c8
+path       rtsp://10.0.0.5:554/live/S3CR3T-signed/stream   -> unchanged
+```
+
+Query keys and their order survive so a log stays readable, and the `#q…` suffix is a
+one-way digest of the original query and fragment. It is an **identity** control, not a
+security one: it exists so that `?channel=1` and `?channel=2` remain two distinct stream
+ids rather than collapsing onto one.
+
+### Why the path cannot be redacted
+
+The path **is** the camera's identity. `rtsp://10.0.0.5:554/live/front-door` and
+`rtsp://10.0.0.5:554/live/car-park` are two cameras, and the only thing telling them
+apart is the path. Empty it and they become one stream id — and `DetectionRouter.register`
+overwrites a duplicate key without complaint, so the front door's detections would be
+delivered to the car park's callback. Redacting the path would trade a credential that
+appears in logs for silent, wrong inference output on every multi-camera deployment.
+
+So yowo does not redact the path, deliberately. That is not a trade it makes on your
+behalf, which means this one is yours to handle.
+
+### What to do instead
+
+**Move the secret into the query.** Most cameras and CDN-fronted streams accept it there,
+and yowo redacts every query value whatever the key is called:
+
+```
+rtsp://10.0.0.5:554/live/S3CR3T-signed/stream        # leaks — the secret is in the path
+rtsp://10.0.0.5:554/live/stream?token=S3CR3T-signed  # redacted
+```
+
+**If you cannot** — some cameras hard-code the token into the path and offer no query
+form — then treat the stream id itself as secret-bearing, because it is. Specifically:
+
+- every **log** line naming that stream carries the token, at whatever level;
+- the `RuntimeError` raised when all streams fail carries it;
+- `Frame.source_id` carries it into any result payload you serialise;
+- the **cache** keys derived from it hold it in memory for the process lifetime, which
+  survives log scrubbing entirely.
+
+Scrubbing logs is not sufficient on its own. Restrict who can read them, and treat a
+process dump or a serialised result the same way you would treat the password itself.
+
+### Scope
+
+This section is about **URL** sources. A local file path, a directory, a webcam index and
+a plain name carry nothing yowo could redact and are returned byte-identical — if you see
+one rewritten, that is a bug, not a redaction.
