@@ -6,6 +6,7 @@ Dispatch by file extension and scheme.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,6 +18,29 @@ import numpy as np
 from yowo.errors import SourceError, SourceTimeoutError
 from yowo.io._redact import redact_url
 from yowo.types import IMAGE_EXTS, RTSP_SCHEMES, VIDEO_EXTS, Frame
+
+logger = logging.getLogger(__name__)
+
+
+class _ClosedCapture:
+    """Stands in between a failed reopen and the next attempt.
+
+    The loop needs *something* to call `read()` and `release()` on while the camera is
+    away. A `None` here would mean a branch on every use; this reports "no frame" and
+    lets the outage clock -- not an exception -- decide when the stream ends.
+    """
+
+    def read(self) -> tuple[bool, None]:
+        return False, None
+
+    def release(self) -> None:
+        return None
+
+    def isOpened(self) -> bool:
+        return False
+
+
+_CLOSED_CAP = _ClosedCapture()
 
 
 @runtime_checkable
@@ -279,7 +303,7 @@ class RTSPStreamSource:
         self,
         url: str,
         *,
-        reconnect_timeout_s: float = 30.0,
+        reconnect_timeout_s: float | None = 30.0,
         max_frames: int | None = None,
         frame_skip: int = 0,
         open_timeout_ms: int | None = None,
@@ -377,6 +401,9 @@ class RTSPStreamSource:
         frame_index = 0
         yielded = 0
         retry_count = 0
+        # None while the stream is healthy; the monotonic time of the first failure
+        # of the current outage otherwise.
+        outage_started: float | None = None
         skip_mod = self._frame_skip + 1
 
         try:
@@ -386,6 +413,15 @@ class RTSPStreamSource:
 
                 ok, bgr = cap.read()
                 if ok:
+                    if outage_started is not None:
+                        # A silent recovery is indistinguishable from a stall of the same
+                        # length, and an operator has no way to tell which they had.
+                        logger.info(
+                            "RTSP stream %s recovered after %.1fs",
+                            self._safe_url,
+                            time.monotonic() - outage_started,
+                        )
+                        outage_started = None
                     retry_count = 0
                     # Always drain the buffer (cap.read) to avoid RTSP lag,
                     # but only yield every (frame_skip+1)th frame.
@@ -400,18 +436,40 @@ class RTSPStreamSource:
                     frame_index += 1
                 else:
                     cap.release()
-                    # Reset deadline on each disconnect so the timeout measures
-                    # the per-reconnect-attempt window, not the stream lifetime.
-                    deadline = time.monotonic() + self._reconnect_timeout_s
+                    # The clock starts at the FIRST failure of a contiguous outage and is
+                    # cleared by a successful read, so `reconnect_timeout_s` measures how
+                    # long the camera has been away -- not how long this one attempt took.
+                    # Resetting it on every disconnect is what made it unable to
+                    # accumulate, so 30 and 60 behaved identically.
+                    if outage_started is None:
+                        outage_started = time.monotonic()
+
                     wait = min(2**retry_count, 10)
-                    if time.monotonic() + wait > deadline:
-                        raise SourceTimeoutError(
-                            f"RTSP stream {self._safe_url} timed out after "
-                            f"{self._reconnect_timeout_s}s"
-                        )
+                    if self._reconnect_timeout_s is not None:
+                        elapsed = time.monotonic() - outage_started
+                        # The BOUND wins over the backoff: if the next sleep would carry
+                        # us past the deadline we stop now rather than sleeping through it
+                        # and noticing late. The old guard compared `wait` to the bound,
+                        # which reduces to `wait > timeout` -- and `wait` never exceeds 10,
+                        # so nothing at or above 10 could ever fire it.
+                        if elapsed + wait > self._reconnect_timeout_s:
+                            raise SourceTimeoutError(
+                                f"RTSP stream {self._safe_url} timed out after "
+                                f"{elapsed:.1f}s of a {self._reconnect_timeout_s}s "
+                                "reconnect budget"
+                            )
+
                     time.sleep(wait)
                     retry_count += 1
-                    cap = self._open_cap()
+                    try:
+                        cap = self._open_cap()
+                    except SourceError:
+                        # A reopen that fails while the camera reboots is a RETRY, not the
+                        # end of the stream. This raise propagating out of the generator is
+                        # what killed a stream on a single blip: two frames, one failed
+                        # reopen, permanently dead. The outage clock above is what ends it.
+                        cap = _CLOSED_CAP
+                        continue
                     self._active_cap = cap
         finally:
             cap.release()
@@ -561,7 +619,10 @@ def open_source(
         loop: Repeat video file when exhausted (VideoFileSource only).
         frame_skip: Skip N frames between yields (0 = no skip).
         max_frames: Stop after this many yielded frames; ``None`` is unlimited.
-        reconnect_timeout_s: Max seconds for RTSP reconnect attempts.
+        reconnect_timeout_s: Max seconds a contiguous RTSP outage may last before
+            `SourceTimeoutError`. The clock starts at the first failure and resets on
+            the next successful read. ``0`` makes the first failure terminal; ``None``
+            retries without bound.
         open_timeout_ms: Milliseconds to wait for a NETWORK capture to open. ``None``
             leaves the backend's own default in force — measured at ~30s, which is what
             every caller got before this parameter existed. ``0`` is a different request:
