@@ -926,43 +926,57 @@ def test_no_check_here_answers_its_own_question() -> None:
 
 
 def test_box_6_is_not_ticked() -> None:
-    """covers: R:TICKBOX — box 6 stays open, and there is a live reason.
+    """covers: R:TICKBOX — box 6 names what redaction covers, and this holds the exception.
 
-    This node binds the four sinks against the `user:password@` credential form. It
-    does not close box 6, because `redact_url` preserves the query string:
+    The name is historical and kept deliberately: this node is closed and its CHECKS cite
+    it, so renaming would dangle that citation. What it guards has changed.
 
-        rtsp://cam/s?token=SUPERSECRET   ->   rtsp://cam/s?token=SUPERSECRET
-        rtsp://u:p@cam/s?auth=SECRET     ->   rtsp://cam/s?auth=SECRET
+    Box 6 used to read "No credential reaches a log ...". That was unsatisfiable — a
+    secret in the URL *path* survives, and redaction cannot take it, because the path IS
+    the camera's identity. The box was amended on 2026-09-11 to enumerate what redaction
+    does cover, with the path named in its body as a residual risk. Measured, not
+    remembered:
 
-    A signed-URL camera — HLS, `?auth=`, `?sig=` — therefore reaches all four sinks
-    with its secret intact. A query token is a credential. Pre-existing and outside
-    this node's frozen scope, but box 6 says "no credential", and it means it.
+        rtsp://cam/s?token=SUPERSECRET -> rtsp://cam/s?token=#q8ac22574
+        rtsp://h/live/S3CR3T-signed/stream -> unchanged
+
+    This check no longer asserts the tick state. Ticking is an `add check` act that lands
+    after the gate, so a check demanding it would be red for the whole build and green
+    only by accident of ordering. What it asserts instead is that the *reason* is still
+    true and still written down.
     """
+    from yowo.pipeline._ids import safe_stream_id
+
     milestone = (_REPO_ROOT / ".add/milestones/m1-trust-the-ship.md").read_text()
+    # Located by citation, not by prose. The old locator was a phrase from the box's own
+    # wording, so amending the wording made it match nothing -- and a locator that matches
+    # nothing turns "the box is wrong" into "the box is fine".
     box = [
         line
         for line in milestone.splitlines()
-        if line.startswith("- [") and "No credential reaches a log" in line
+        if line.startswith("- [") and "\u2190 rtsp-credential-redaction" in line
     ]
     assert len(box) == 1, f"m1 box 6 is not where it was ({len(box)} matches)"
-    assert box[0].startswith("- [ ]"), (
-        "m1 box 6 is ticked. The userinfo and query forms are closed, but a PATH-borne "
-        "token still survives — and that one redaction cannot fix, because the path is "
-        "the camera's identity. Ticking the box anyway is a milestone decision about "
-        "scope, not something these checks establish (R:TICKBOX)"
+
+    assert "RESIDUAL RISK" in box[0], (
+        "m1 box 6 has lost its residual-risk clause. The box enumerates userinfo, query "
+        "and fragment; without the clause naming the path it reads as covering every "
+        "credential a URL can carry, which is the wording the amendment removed"
     )
 
     # The reason is re-derived here, not asserted from memory. If this stops holding,
-    # the reason has changed AGAIN and must be re-derived rather than left standing.
-    from yowo.pipeline._ids import safe_stream_id
-
+    # path redaction was added -- and that collapses every camera on a host onto one
+    # stream id, so `DetectionRouter.register` silently cross-delivers one camera's
+    # detections to another's callback. Revert it; do not update this assertion.
     leaked = safe_stream_id("rtsp://h/live/S3CR3T-signed/stream")
     assert "S3CR3T" in leaked, (
-        f"a path-borne token no longer survives redaction ({leaked!r}). That is the "
-        "reason box 6 is held open — re-derive it rather than trusting this check"
+        f"a path-borne token no longer survives redaction ({leaked!r}). Two cameras that "
+        "differ only in their path now collapse onto one stream id, and detections "
+        "cross-deliver. That trade is worse than the leak — revert rather than updating "
+        "this line, and re-derive box 6's residual risk if it was deliberate"
     )
-    # And the form that USED to hold it open is closed, so this check is not quietly
-    # standing on a stale premise while a fixed leak reopens behind it.
+    # And the forms the box DOES claim are closed, so this check is not quietly standing
+    # on a stale premise while a fixed leak reopens behind it.
     fixed = safe_stream_id("rtsp://camop:hunter2@10.0.0.5:554/s?token=SECRET&password=hunter2")
     assert "hunter2" not in fixed and "SECRET" not in fixed, (
         f"the query-string form has regressed ({fixed!r}) — `query-string-credentials` "

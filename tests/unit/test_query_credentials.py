@@ -290,7 +290,21 @@ def test_redaction_still_happens_only_at_the_two_boundaries() -> None:
 
 
 def test_box_6_is_not_ticked_until_this_is_green() -> None:
-    """covers: R:TICKBOX — box 6 says 'no credential', and a query token is a credential."""
+    """covers: R:TICKBOX — the query form is one of the three box 6 now names.
+
+    The name is historical and kept deliberately: this node is closed and its CHECKS
+    cite it by name, so renaming would dangle that citation (method M12).
+
+    When this node ran, box 6 read "No credential reaches a log ..." and the query form
+    held it open. That form is closed now, and the box was amended on 2026-09-11 to
+    enumerate what redaction actually covers — userinfo, query, fragment — because a
+    path-borne secret survives and redaction cannot take it without collapsing two
+    cameras onto one stream id.
+
+    So this check no longer asserts the box is unticked. It asserts that the query form
+    this node closed is one of the three the box names, and that the box still carries
+    the clause naming what it does not.
+    """
     from pathlib import Path
 
     root = Path(__file__).parent.parent.parent
@@ -298,12 +312,34 @@ def test_box_6_is_not_ticked_until_this_is_green() -> None:
     box = [
         line
         for line in milestone.splitlines()
-        if line.startswith("- [") and "No credential reaches a log" in line
+        if line.startswith("- [") and "\u2190 rtsp-credential-redaction" in line
     ]
     assert len(box) == 1, f"m1 box 6 is not where it was ({len(box)} matches)"
-    assert box[0].startswith("- [ ]"), (
-        "m1 box 6 is ticked. Tick it when the sinks are green against the query form "
-        "too — not because the userinfo form is handled (R:TICKBOX)"
+
+    assert "QUERY" in box[0], (
+        "m1 box 6 no longer names the QUERY form among the components redaction covers. "
+        "This node closed that form; if the box has stopped claiming it, either the claim "
+        "was dropped by mistake or the guarantee regressed — check which"
+    )
+    assert "RESIDUAL RISK" in box[0], (
+        "m1 box 6 has lost the clause naming what redaction does NOT cover. Without it "
+        "the box reads as covering every credential a URL can carry, which is exactly the "
+        "wording that could not be satisfied"
+    )
+
+    # Re-derived against the running code rather than trusting the box. The query form is
+    # closed, and the path form is why the box needs a residual risk at all: redacting the
+    # path would collapse two cameras on one host onto one id, and `register` overwrites
+    # silently, so detections would cross-deliver.
+    assert TOKEN not in safe_stream_id(MIXED), (
+        f"the query form has regressed ({safe_stream_id(MIXED)!r}) — this node closed it, "
+        "and box 6 claims it stays closed"
+    )
+    path_borne = "rtsp://h/live/S3CR3T-signed/stream"
+    assert safe_stream_id(path_borne) == path_borne, (
+        f"a path-borne token is now redacted ({safe_stream_id(path_borne)!r}). Two cameras "
+        "differing only in path have collapsed onto one stream id and detections "
+        "cross-deliver — revert, and re-derive box 6's residual-risk clause"
     )
 
 
