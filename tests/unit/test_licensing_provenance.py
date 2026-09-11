@@ -216,6 +216,52 @@ def test_contributing_clean_claim_is_qualified() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Reading a Markdown document as PROSE
+# ---------------------------------------------------------------------------
+#
+# Both SECURITY.md scans below used to read the raw file, and both reported findings
+# that were not there. `"lts" not in text` matched inside `results`; the email regex
+# matched `hunter2@10.0.0.5` in an RTSP userinfo example, because a credential on a
+# dotted host is indistinguishable from an address to that pattern.
+#
+# Neither scan is loosened here. What changes is WHAT they read and HOW they match: a
+# document reduced to prose, and a term matched as a word. A check that fires on correct
+# content does not make the document safer -- it teaches the author to edit the document
+# until the check is happy, which is what happened (quality lesson Q5).
+
+_FENCED_CODE = re.compile(r"^```.*?^```", re.DOTALL | re.MULTILINE)
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
+def _prose_of(markdown: str) -> str:
+    """`markdown` with fenced blocks and inline code removed.
+
+    A credential, a URL and a command belong in code; a reporting address a reader is
+    meant to write to belongs in prose. Scanning prose is what separates the example
+    from the thing the example is about.
+    """
+    return _INLINE_CODE.sub(" ", _FENCED_CODE.sub(" ", markdown))
+
+
+def _promises_lts(markdown: str) -> bool:
+    """True if the document promises long-term support.
+
+    `\b` matters: without it this matches inside `results`, `faults` and `consults`,
+    and a policy document is very likely to contain one of them.
+    """
+    return bool(re.search(r"\blts\b", _prose_of(markdown), re.IGNORECASE))
+
+
+def _names_an_email_intake(markdown: str) -> bool:
+    """True if the document's prose names an email address to report to."""
+    return bool(re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", _prose_of(markdown)))
+
+
+# A document that reduces to nothing would make every scan above vacuously clean, so
+# the reducer is held to leaving prose behind -- see test_the_prose_reducer_leaves_prose.
+
+
+# ---------------------------------------------------------------------------
 # S3 -- SECURITY.md
 # ---------------------------------------------------------------------------
 
@@ -227,9 +273,7 @@ def test_security_md_names_a_private_reporting_channel() -> None:
     lower = text.lower()
     assert "security advisories" in lower
     assert "github" in lower
-    assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text), (
-        "SECURITY.md must not name an email reporting address"
-    )
+    assert not _names_an_email_intake(text), "SECURITY.md must not name an email reporting address"
     assert "triag" in lower or "receiv" in lower
 
 
@@ -264,7 +308,100 @@ def test_security_md_names_supported_versions() -> None:
     version = config["project"]["version"]
     major, minor = version.split(".")[:2]
     assert f"{major}.{minor}" in text, f"must name the current minor line {major}.{minor}"
-    assert "lts" not in text.lower(), "no LTS promise on a personal project"
+    assert not _promises_lts(text), "no LTS promise on a personal project"
+
+
+def test_the_lts_scan_reads_a_word_not_a_substring() -> None:
+    """covers: G1 -- `results` is not a long-term-support promise.
+
+    The exact false positive: SECURITY.md said "silent, wrong inference results" and the
+    check reported an LTS promise. I changed the word to "output" to get green, which is
+    the author editing correct content to satisfy a wrong check (Q5).
+    """
+    for innocent in (
+        "Redacting the path would give silent, wrong inference results.",
+        "A stale pin faults on the next upgrade.",
+        "The maintainer consults the advisory before triaging.",
+    ):
+        assert not _promises_lts(innocent), (
+            f"{innocent!r} was read as an LTS promise. `lts` is a substring of an "
+            "ordinary English word here, not a support commitment"
+        )
+
+
+def test_the_lts_scan_still_catches_a_real_promise() -> None:
+    """covers: G1 -- the fix must not turn the check off.
+
+    A false negative here is worse than the false positive it replaced: the check exists
+    so a personal project does not accidentally advertise a support line it cannot staff.
+    """
+    for promise in (
+        "The 2.4.x line is an LTS release.",
+        "lts branches receive fixes for 24 months.",
+        "Long-term support (LTS) is offered on request.",
+    ):
+        assert _promises_lts(promise), (
+            f"{promise!r} promises long-term support and was not caught. The word "
+            "boundary must not have narrowed the scan into uselessness"
+        )
+
+
+def test_the_email_scan_ignores_a_credential_example_in_code() -> None:
+    """covers: G1 -- a credential in a fenced block is an example, not an intake channel.
+
+    `hunter2@10.0.0.5` is an RTSP userinfo. The regex cannot tell it from an address, so
+    the fix is to scan prose rather than to make the pattern cleverer.
+    """
+    doc = (
+        "Report privately through GitHub Security Advisories.\n\n"
+        "```\n"
+        "rtsp://camop:hunter2@10.0.0.5:554/stream -> rtsp://10.0.0.5:554/stream\n"
+        "```\n\n"
+        "The userinfo is stripped at the boundary.\n"
+    )
+    assert not _names_an_email_intake(doc), (
+        "a credential example inside a fenced code block was read as an email reporting "
+        "address. That is what forced SECURITY.md to use an undotted host"
+    )
+    assert not _names_an_email_intake("Contact `security@example.com` — no, use Advisories."), (
+        "an address inside inline code was read as an intake channel"
+    )
+
+
+def test_the_email_scan_still_catches_an_address_in_prose() -> None:
+    """covers: G1 -- the half that makes the fix safe rather than merely convenient."""
+    for doc in (
+        "Report vulnerabilities to security@example.com.",
+        "Mail the maintainer at tin.dang+security@example.co.uk and wait.",
+        "Send details to\nsecurity@yowo.dev\nwithin 24 hours.",
+    ):
+        assert _names_an_email_intake(doc), (
+            f"{doc!r} names an email intake channel in prose and was not caught. A "
+            "personal-project inbox silently rots, and a rotted channel looks live"
+        )
+
+
+def test_the_prose_reducer_leaves_prose() -> None:
+    """covers: G1 -- a reducer returning "" makes every scan above vacuously clean.
+
+    This is the failure mode that would hide the other four checks passing for no reason,
+    so it is asserted directly rather than assumed.
+    """
+    doc = (
+        "Report through GitHub Security Advisories.\n\n"
+        "```\nrtsp://u:p@h/s\n```\n\n"
+        "Only the current minor line is supported.\n"
+    )
+    prose = _prose_of(doc)
+    assert "GitHub Security Advisories" in prose
+    assert "current minor line" in prose
+    assert "rtsp://u:p@h/s" not in prose, "the fenced block survived the reduction"
+
+    real = _prose_of(SECURITY_PATH.read_text(encoding="utf-8"))
+    assert len(real.split()) > 100, (
+        f"reducing the real SECURITY.md left only {len(real.split())} words. The scans "
+        "that read this would pass because there is nothing left to find"
+    )
 
 
 # ---------------------------------------------------------------------------
