@@ -246,11 +246,16 @@ def test_open_source_signature_and_raised_type_are_unchanged(tmp_path: Path) -> 
         "frame_skip",
         "max_frames",
         "reconnect_timeout_s",
+        # Added by `capture-timeouts`, by human decision: keyword-only with a `None`
+        # default, so every existing call is unaffected and the backend's own ~30s
+        # default stays in force unless a caller states otherwise.
+        "open_timeout_ms",
+        "read_timeout_ms",
     ]
     assert parameters[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
     assert parameters[0].default is inspect.Parameter.empty
     assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in parameters[1:])
-    assert [p.default for p in parameters[1:]] == [False, 0, None, 30.0]
+    assert [p.default for p in parameters[1:]] == [False, 0, None, 30.0, None, None]
 
     # The raised type is unchanged.
     error = _raised_by_open_source(VIDEO_URL)
