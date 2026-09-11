@@ -19,10 +19,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    import numpy as np
+# Imported at runtime, not only for typing: `_empty_raw_output` builds the
+# failure sentinel with it, and that path runs when a backend dies mid-stream.
+import numpy as np
 
 from yowo.backends import InferenceBackend
 from yowo.config import OBBConfig
@@ -197,6 +198,18 @@ class OBBEngine(BaseEngine):
             raise WarmupValidationError(
                 "OBB class scores outside [0, 1] — sigmoid may have been applied twice"
             )
+
+    def _empty_raw_output(self, batch_size: int) -> np.ndarray[Any, Any]:
+        """A failed OBB inference stands in with ZERO anchors.
+
+        ``(B, 4+nc+1, 0)`` is the OBBHead output contract with no instances; the
+        base class's ``(B, 0, 6)`` raised ``max(): Expected reduction dim 1 to
+        have non-zero size``. Zero anchors rather than one zero-filled anchor:
+        the latter yields no boxes only because it falls under the confidence
+        threshold, so dropping the threshold would start emitting a phantom box.
+        """
+        nc = self._spec.num_classes or 15
+        return np.zeros((batch_size, 4 + nc + 1, 0), dtype=np.float32)
 
     def _process_batch(
         self,

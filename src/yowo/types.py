@@ -415,8 +415,16 @@ class ClassificationResult:
     """Inference result for a single frame from a classification model.
 
     Attributes:
-        top1_class_id: Integer class index with the highest probability.
-        top1_score: Probability of the top-1 class in [0, 1].
+        top1_class_id: Integer class index with the highest probability, or
+            ``-1`` meaning NO PREDICTION — inference failed and this result is
+            a placeholder, not something the model said. Paired with
+            ``top1_score == 0.0``; a real prediction can produce neither value,
+            so either one alone identifies a degraded result.
+        top1_score: Probability of the top-1 class in [0, 1], or ``0.0`` when
+            ``top1_class_id`` is ``-1``. Softmax cannot produce 0.0, which is
+            what makes the pair unambiguous: a degraded result must not be
+            mistakable for a real low-confidence one, or a threshold filter
+            hides the outage instead of revealing it.
         topk_class_ids: Top-k class indices sorted descending by score.
         topk_scores: Corresponding probabilities for top-k classes.
         all_probs: Full probability vector (length == num_classes).
