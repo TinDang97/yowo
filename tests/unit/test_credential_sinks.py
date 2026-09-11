@@ -690,8 +690,11 @@ def test_the_mutation_that_leaks_turns_every_sink_check_red() -> None:
     # E2 -- the exception sink binds to :322, not to :346.
     with _module_with(
         source_path,
-        'raise SourceError(f"Cannot open RTSP stream: {self._safe_url}")',
-        'raise SourceError(f"Cannot open RTSP stream: {self._url}")',
+        # Re-derived 2026-09-11: `capture-timeouts` appended the bound to this message,
+        # and this check refused to run on a mutation string that no longer appears --
+        # exactly as its own failure text instructs. The leak it proves is unchanged.
+        'raise SourceError(f"Cannot open RTSP stream: {self._safe_url} [{self._bounds()}]")',
+        'raise SourceError(f"Cannot open RTSP stream: {self._url} [{self._bounds()}]")',
         "e2_exception",
     ) as mutant:
         _refute(

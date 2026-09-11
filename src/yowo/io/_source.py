@@ -282,6 +282,8 @@ class RTSPStreamSource:
         reconnect_timeout_s: float = 30.0,
         max_frames: int | None = None,
         frame_skip: int = 0,
+        open_timeout_ms: int | None = None,
+        read_timeout_ms: int | None = None,
     ) -> None:
         # The connectable URL stays private and is never interpolated into a
         # message or published as an identifier. `safe_url` is what everything
@@ -291,6 +293,13 @@ class RTSPStreamSource:
         self._reconnect_timeout_s = reconnect_timeout_s
         self._max_frames = max_frames
         self._frame_skip = frame_skip
+        # `None` means "leave the backend's own default in place", which is what every
+        # caller got before these existed -- measured 30.08s against both an unroutable
+        # host and a server that accepts and never speaks. It is NOT the same request as
+        # `0`, which FFmpeg reads as "no timeout". Conflating them turns "never time out"
+        # into "wait thirty seconds", or the reverse.
+        self._open_timeout_ms = open_timeout_ms
+        self._read_timeout_ms = read_timeout_ms
         self._active_cap: cv2.VideoCapture | None = None
 
     @property
@@ -316,10 +325,50 @@ class RTSPStreamSource:
         """Always None for RTSP streams (unknown until connected)."""
         return None
 
+    def _capture_params(self) -> list[int] | None:
+        """The timeout properties to build the capture with, or None for the default.
+
+        These bind at CONSTRUCTION. `cap.set()` afterwards is too late to bound the open,
+        which is the wait that matters when a camera is simply gone.
+        """
+        params: list[int] = []
+        if self._open_timeout_ms is not None:
+            params += [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self._open_timeout_ms]
+        if self._read_timeout_ms is not None:
+            params += [cv2.CAP_PROP_READ_TIMEOUT_MSEC, self._read_timeout_ms]
+        return params or None
+
+    def _new_cap(self) -> cv2.VideoCapture:
+        """The ONE place a capture for this stream is constructed.
+
+        Every site routes through here so that a site added later is bounded by
+        construction rather than by whoever remembers. Unconfigured, the call is
+        byte-identical to what it always was.
+        """
+        params = self._capture_params()
+        if params is None:
+            return cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        return cv2.VideoCapture(self._url, cv2.CAP_FFMPEG, params)
+
+    def _bounds(self) -> str:
+        """What the operator needs in the message: which bound was in force."""
+        parts = [
+            f"open {self._open_timeout_ms}ms"
+            if self._open_timeout_ms is not None
+            else "open backend default",
+            f"read {self._read_timeout_ms}ms"
+            if self._read_timeout_ms is not None
+            else "read backend default",
+        ]
+        return ", ".join(parts)
+
     def _open_cap(self) -> cv2.VideoCapture:
-        cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        cap = self._new_cap()
         if not cap.isOpened():
-            raise SourceError(f"Cannot open RTSP stream: {self._safe_url}")
+            cap.release()
+            # A stall with no output is indistinguishable from a hung process, so an
+            # operator kills it and loses the diagnosis. Name the camera and the bound.
+            raise SourceError(f"Cannot open RTSP stream: {self._safe_url} [{self._bounds()}]")
         return cap
 
     def __iter__(self) -> Iterator[Frame]:
@@ -378,10 +427,13 @@ class RTSPStreamSource:
         if cap is None:
             return
         cap.release()
-        new_cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        # Built through `_new_cap` like every other site: a bound applied only to the
+        # obvious construction leaves the PERIODIC reconnect unbounded, and that is the
+        # one that runs unattended (R:PARTIAL).
+        new_cap = self._new_cap()
         if not new_cap.isOpened():
             # Fallback: re-open original — let the iterator handle retry
-            new_cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+            new_cap = self._new_cap()
         self._active_cap = new_cap
 
     def close(self) -> None:
@@ -491,6 +543,8 @@ def open_source(
     frame_skip: int = 0,
     max_frames: int | None = None,
     reconnect_timeout_s: float = 30.0,
+    open_timeout_ms: int | None = None,
+    read_timeout_ms: int | None = None,
 ) -> FrameSource:
     """Factory: inspect *source* and return the appropriate FrameSource.
 
@@ -508,12 +562,21 @@ def open_source(
         frame_skip: Skip N frames between yields (0 = no skip).
         max_frames: Stop after this many yielded frames; ``None`` is unlimited.
         reconnect_timeout_s: Max seconds for RTSP reconnect attempts.
+        open_timeout_ms: Milliseconds to wait for a NETWORK capture to open. ``None``
+            leaves the backend's own default in force — measured at ~30s, which is what
+            every caller got before this parameter existed. ``0`` is a different request:
+            FFmpeg reads it as no timeout at all. Note the unit: ``reconnect_timeout_s``
+            beside it is in SECONDS.
+        read_timeout_ms: Milliseconds to wait for a frame from a NETWORK capture, same
+            conventions. This is the bound that matters when a camera completes the TCP
+            handshake and then says nothing — the case a port check calls healthy.
 
     Returns:
         Appropriate FrameSource implementation.
 
     Raises:
-        SourceError: If no source type matches or the resource is unavailable.
+        SourceError: If no source type matches, the resource is unavailable, a timeout
+            is negative, or a capture timeout is given for a non-network source.
     """
     source_str = str(source)
     # One redaction, at the boundary, before any branch can build a message and
@@ -524,6 +587,30 @@ def open_source(
     # having to remember it. A value with no userinfo is returned byte for byte,
     # so plain paths and webcam indices are unaffected.
     safe_source = redact_url(source_str)
+
+    # Validated here, at the boundary, while the caller can still see their own call. A
+    # negative timeout deep inside a capture surfaces as a hang, which is the one symptom
+    # this whole node exists to remove.
+    for name, value in (("open_timeout_ms", open_timeout_ms), ("read_timeout_ms", read_timeout_ms)):
+        if value is not None and value < 0:
+            # `safe_source` and only `safe_source`: every raise in this factory reads
+            # the redacted form, so a branch added later inherits redaction instead of
+            # having to remember it. `test_every_raise_in_open_source_reads_the_redacted_form`
+            # enforces that, and caught this raise when it named neither.
+            raise SourceError(f"{name} must be >= 0, got {value} (for source {safe_source!r})")
+
+    # These are FFMPEG capture properties. A file, directory, image or webcam source is
+    # opened through a different backend that does not honour them, so accepting them
+    # there would hand the caller a parameter that silently does nothing -- worse than
+    # one that is absent, because they would believe they were protected.
+    if (open_timeout_ms is not None or read_timeout_ms is not None) and not source_str.startswith(
+        RTSP_SCHEMES
+    ):
+        raise SourceError(
+            f"open_timeout_ms/read_timeout_ms apply to network (rtsp://, rtsps://) "
+            f"sources only; {safe_source!r} is not one. Its backend does not honour "
+            "these properties, so setting them here would do nothing."
+        )
 
     # Integer webcam index (e.g. open_source(0)).
     if isinstance(source, int):
@@ -540,6 +627,8 @@ def open_source(
             reconnect_timeout_s=reconnect_timeout_s,
             max_frames=max_frames,
             frame_skip=frame_skip,
+            open_timeout_ms=open_timeout_ms,
+            read_timeout_ms=read_timeout_ms,
         )
 
     path = Path(source_str)

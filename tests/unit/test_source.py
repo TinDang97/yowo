@@ -125,6 +125,10 @@ class TestOpenSourceFrameSkipWiring:
                 reconnect_timeout_s=30.0,
                 max_frames=None,
                 frame_skip=3,
+                # Passed through by `capture-timeouts`. `None` means "leave the backend
+                # default in force", so this call behaves exactly as it did before.
+                open_timeout_ms=None,
+                read_timeout_ms=None,
             )
 
     def test_video_file_receives_frame_skip(self, tmp_path: Path) -> None:
