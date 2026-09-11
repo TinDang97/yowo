@@ -396,8 +396,7 @@ class RTSPStreamSource:
         return cap
 
     def __iter__(self) -> Iterator[Frame]:
-        cap = self._open_cap()
-        self._active_cap = cap
+        self._active_cap = self._open_cap()
         frame_index = 0
         yielded = 0
         retry_count = 0
@@ -410,6 +409,16 @@ class RTSPStreamSource:
             while True:
                 if self._max_frames is not None and yielded >= self._max_frames:
                     break
+
+                # Re-read the handle the SOURCE holds, every pass. Binding it once as
+                # a local is what made `reconnect()` invisible here: it released this
+                # capture, opened a replacement and rebound `_active_cap`, and the loop
+                # went on reading the released one -- orphaning the replacement and then
+                # opening a third from the retry path. A count check cannot see that,
+                # because the orphan is replaced and the tally balances.
+                cap = self._active_cap
+                if cap is None:  # pragma: no cover - set before the loop, reassigned on every path
+                    raise SourceError(f"RTSP stream {self._safe_url} lost its capture")
 
                 ok, bgr = cap.read()
                 if ok:
@@ -462,17 +471,17 @@ class RTSPStreamSource:
                     time.sleep(wait)
                     retry_count += 1
                     try:
-                        cap = self._open_cap()
+                        self._active_cap = self._open_cap()
                     except SourceError:
                         # A reopen that fails while the camera reboots is a RETRY, not the
                         # end of the stream. This raise propagating out of the generator is
                         # what killed a stream on a single blip: two frames, one failed
                         # reopen, permanently dead. The outage clock above is what ends it.
-                        cap = _CLOSED_CAP
+                        self._active_cap = _CLOSED_CAP
                         continue
-                    self._active_cap = cap
         finally:
-            cap.release()
+            if self._active_cap is not None:
+                self._active_cap.release()
             self._active_cap = None
 
     def reconnect(self) -> None:
