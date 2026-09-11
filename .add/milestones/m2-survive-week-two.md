@@ -3,7 +3,11 @@ type: Milestone
 title: A live deployment stays correct and bounded, unattended, and says so
 status: direction
 generated: { by: add/3.5.0, at: 2026-09-08 }
-verified: []
+verified:
+  - { by: "Tin Dang", at: 2026-09-11, act: check, authority: process, via: process, boxes: "EXIT:2" }
+  - { by: "Tin Dang", at: 2026-09-11, act: check, authority: process, via: process, boxes: "EXIT:1" }
+  - { by: "Tin Dang", at: 2026-09-11, act: check, authority: process, via: process, boxes: "EXIT:3" }
+  - { by: "Tin Dang", at: 2026-09-11, act: check, authority: process, via: process, boxes: "EXIT:4" }
 advised_by: milestone-planner
 ---
 ## CARD
@@ -23,10 +27,10 @@ risks:
   - Changing reconnect semantics changes how long a stream survives a camera reboot — both directions are user-visible.
 
 ## EXIT
-- [ ] A structural check (lint or grep gate) fails on any bare `cap.read()`, `queue.get()` or `thread.join()` without a timeout argument in the I/O path, AND a wedged-source test raises rather than hangs   (← capture-timeouts)
-- [ ] RTSP retry bounds and the terminal error are asserted with a fake clock, and a brief camera outage recovers instead of permanently killing the stream   (← rtsp-reconnect-correctness)
-- [ ] Thread, fd and capture counts return to baseline after N acquire/release cycles   (← reader-shutdown)
-- [ ] An iterator observes a `reconnect()` rebind — or `reconnect()` cannot be called while an iterator holds a capture. A count check cannot catch this: `_source.py:374` rebinds `self._active_cap` while `__iter__` reads its own local, so counts balance while the iterator reads a released handle   (← reader-shutdown)
+- [x] Every network capture in the I/O path is CONSTRUCTED with an open and a read timeout, asserted by a structural check that fails on a construction omitting either; no bare `queue.get()` or `thread.join()` exists in the I/O path; AND a wedged-source test raises rather than hangs. AMENDED 2026-09-11 from "a structural check fails on any bare `cap.read()`, `queue.get()` or `thread.join()` without a timeout argument" by human decision: `cv2.VideoCapture.read` is `read([, image]) -> retval, image` and has NO timeout argument — a read timeout is a construction property — so that clause was unsatisfiable by any code, while the other two were already satisfied before the task began. Measured: a bare construction fails an unroutable host after 30.08s (FFmpeg's own default); with the properties set to 2000ms it fails after 2.02s. The four bare `cap.read()` calls that remain are correct — the capture is bounded, not the call   (← capture-timeouts)
+- [x] RTSP retry bounds and the terminal error are asserted with a fake clock, and a brief camera outage recovers instead of permanently killing the stream   (← rtsp-reconnect-correctness)
+- [x] Thread and capture counts return to baseline after N acquire/release cycles. AMENDED 2026-09-11 from "Thread, fd and capture counts" by human decision: no check counts file descriptors, and the cycle check mocks `cv2.VideoCapture` so none are ever opened — a descriptor assertion against that harness would pass while measuring nothing, which is worse than its absence. RESIDUAL, named rather than hidden: descriptor counts are NOT covered. They become checkable once a check drives a real capture, which `real-backend-smoke` is the node that introduces   (← reader-shutdown)
+- [x] An iterator observes a `reconnect()` rebind — or `reconnect()` cannot be called while an iterator holds a capture. A count check cannot catch this: `RTSPStreamSource.reconnect` rebinds `self._active_cap` while `__iter__` read its own local, so counts balance while the iterator reads a released handle. AMENDED 2026-09-11 by human decision: the citation was `_source.py:374`, which the file has since moved past — the rebind is in `RTSPStreamSource.reconnect`, and a symbol survives an edit where a line number rots and sends a reviewer into unrelated code. The FIRST arm was taken: the loop now re-reads the handle the source holds, so the rebind is observed   (← reader-shutdown)
 - [ ] RSS slope is below a stated threshold over a stated duration for a live source through the CLI (baseline to beat: OOM in ~2 min at 1080p/25fps, `review-runtime.md` R6), with the measurement recorded   (← cli-bounded-memory)
 - [ ] An inventory test walks the metrics snapshot and the health document and asserts every field has a named producer; every drop and degradation increments a counter the operator can reach   (← metrics-truth)
 - [ ] At least one real backend is constructed and executed by a test — no mock — giving the two non-backend-independent tasks below something to regress against   (← real-backend-smoke)
