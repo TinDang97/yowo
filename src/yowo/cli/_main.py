@@ -117,6 +117,22 @@ def benchmark_command(
         click.echo(json_mod.dumps(result_dict, indent=2))
 
 
+def _warn_output_unreachable(kind: str) -> None:
+    """Say why a requested output cannot be produced for a live source.
+
+    ``--output`` and ``--save-frames`` are written AFTER the streaming loop, and
+    a live stream has no end, so the writer is never reached. Before this the
+    CLI accumulated every frame to feed it anyway — ~5.9 MB per 1080p frame,
+    ~147 MB/s at 25 fps — and the user got no file and no message.
+    """
+    click.echo(
+        f"Warning: {kind} is written when the stream ends, and a live source has no end — "
+        f"no file will be written. Streaming results to stdout instead; "
+        f"use a file or directory source to write {kind}.",
+        err=True,
+    )
+
+
 @cli.command("detect")
 @click.argument("source")
 @click.option("--model", "-m", default="yolo26n", help="Model name, e.g. yolo26n")
@@ -266,12 +282,23 @@ def detect_command(
             auto_letterbox=auto_letterbox,
         )
 
-    detections = []
+    detections: list = []
     try:
         with InferenceEngine(config) as engine:
             src = open_source(source)
+            # A Detection holds its Frame, and a Frame holds the full decoded BGR
+            # array. Retaining one per frame grew ~5.9 MB/frame at 1080p and was
+            # OOM-killed within a couple of minutes on a live source (review R6).
+            # Keep results only when something downstream will actually read
+            # them: the writers below run after this loop, so on a live source
+            # they are never reached and the list is pure cost.
+            wants_output = bool(output or save_frames)
+            retain = wants_output and not src.is_live
+            if wants_output and src.is_live:
+                _warn_output_unreachable("--output" if output else "--save-frames")
             for det in engine.stream(src):
-                detections.append(det)
+                if retain:
+                    detections.append(det)
                 if json_output:
                     click.echo(det.to_json())
                 else:
@@ -394,8 +421,14 @@ def detect_obb_command(
     try:
         with OBBEngine(config) as engine:
             src = open_source(source)
+            # Identical to the detect path above, and identically unbounded
+            # before this: OBBDetection holds its Frame too.
+            retain = bool(output) and not src.is_live
+            if output and src.is_live:
+                _warn_output_unreachable("--output")
             for det in engine.stream_obb(src):
-                detections.append(det)
+                if retain:
+                    detections.append(det)
                 if json_output:
                     import json as _json
 
