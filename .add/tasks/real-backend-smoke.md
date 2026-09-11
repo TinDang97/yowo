@@ -26,6 +26,8 @@ verified:
   - { by: "cli", at: 2026-09-11, act: brief, authority: process, brief: "sha256:106d603d4285087b" }
   - { by: "process:run", at: 2026-09-11, act: run, authority: process, outcome: PASS, receipt: /tasks/real-backend-smoke.d/runs/1.md }
   - { by: "Tin Dang", at: 2026-09-11, act: gate, authority: human, outcome: PASS, receipt: /tasks/real-backend-smoke.d/runs/1.md, brief: "sha256:2b877a78a377b00c" }
+  - { by: "process:run", at: 2026-09-11, act: run, authority: process, outcome: PASS, receipt: /tasks/real-backend-smoke.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-11, act: gate, authority: human, outcome: PASS, receipt: /tasks/real-backend-smoke.d/runs/2.md, brief: "sha256:e8d7553b3704e8ca" }
 advised_by: inference-parity-engineer
 ---
 ## CARD

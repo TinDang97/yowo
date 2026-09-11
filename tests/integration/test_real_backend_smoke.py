@@ -171,9 +171,7 @@ def test_a_black_frame_does_not_satisfy_this_smoke(
 
 def test_a_backend_that_cannot_load_the_weight_says_so(verified_weight: Path) -> None:
     """covers: E6 — a load failure is attributed to the backend, not seen as an empty result."""
-    onnx = pytest.importorskip(
-        "yowo.backends._onnx", reason="ONNX backend module unavailable"
-    )
+    onnx = pytest.importorskip("yowo.backends._onnx", reason="ONNX backend module unavailable")
     backend = onnx.OnnxBackend(get_hardware_profile())
     with pytest.raises((BackendLoadError, BackendError)) as excinfo:
         backend.load(verified_weight)
