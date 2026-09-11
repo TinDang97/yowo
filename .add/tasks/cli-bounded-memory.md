@@ -21,6 +21,10 @@ verified:
   - { by: "cli", at: 2026-09-11, act: brief, authority: process, brief: "sha256:cc5e528198c147a5" }
   - { by: "process:run", at: 2026-09-11, act: run, authority: process, outcome: PASS, receipt: /tasks/cli-bounded-memory.d/runs/1.md }
   - { by: "Tin Dang", at: 2026-09-11, act: gate, authority: process, outcome: PASS, receipt: /tasks/cli-bounded-memory.d/runs/1.md, brief: "sha256:e9db4ac83d976431" }
+  - { by: "Tin Dang", at: 2026-09-12, act: refreeze, authority: human, direction: "sha256:cc8bcb55306501e9", binding: "sha256:d93b096cff9e6026" }
+  - { by: "cli", at: 2026-09-12, act: brief, authority: process, brief: "sha256:391d9cf84f6d602d" }
+  - { by: "process:run", at: 2026-09-12, act: run, authority: process, outcome: PASS, receipt: /tasks/cli-bounded-memory.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-12, act: gate, authority: process, outcome: PASS, receipt: /tasks/cli-bounded-memory.d/runs/2.md, brief: "sha256:391d9cf84f6d602d" }
 advised_by: inference-perf-auditor
 ---
 ## CARD
@@ -109,7 +113,7 @@ strategy: red-first — the measurement check fails on the current tree at ~5.9 
 - tests.unit.test_cli_bounded_memory::test_a_finite_source_with_output_writes_the_same_file · covers: M5, E4 · the working path is pinned before the fix touches it.
 - tests.unit.test_cli_bounded_memory::test_the_obb_path_is_bounded_too · covers: M7 · the identical defect at `_main.py:393-398`.
 - tests.unit.test_cli_bounded_memory::test_box_5_records_that_it_was_amended · covers: M6, A21, R:SILENTREWRITE, E8 · an undated rewrite reads as the original.
-- tests.unit.test_cli_bounded_memory::test_box_5_states_a_number_a_check_enforces · covers: M6, A20, E8 · "a stated threshold" must be a number this suite actually holds.
+- tests.unit.test_cli_bounded_memory::test_box_5_states_a_number_a_check_enforces · covers: M6, A20, E8 · "a stated threshold" must be a number this suite actually holds — the bound, the frame count, the baseline beaten, and the control's slope, which is what makes the bound meaningful rather than arbitrary.
 - tests.unit.test_cli_bounded_memory::test_box_5_names_the_residual_it_does_not_cover · covers: M6, A22, A24 · a finite source WITH output still retains every frame.
 red-first: every check MUST fail first.
 

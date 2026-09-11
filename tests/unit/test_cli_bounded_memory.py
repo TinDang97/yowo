@@ -95,8 +95,13 @@ _HARNESS = textwrap.dedent("""
             return is_live
         def __iter__(self):
             for i in range(n_frames):
+                # np.full, NOT np.zeros. calloc hands back untouched zero pages
+                # that are not resident until written, so on Linux retaining
+                # 200 zero frames cost 0.00 MB and the control measured nothing.
+                # Writing a byte faults the pages in, which is what a decoded
+                # frame from a real camera does.
                 yield Frame(
-                    pixels=np.zeros((1080, 1920, 3), dtype=np.uint8),
+                    pixels=np.full((1080, 1920, 3), i % 251 + 1, dtype=np.uint8),
                     source_id="probe",
                     frame_index=i,
                 )
@@ -443,7 +448,11 @@ def test_box_5_states_a_number_a_check_enforces() -> None:
     assert str(_FRAMES_LARGE) in box, (
         f"box 5 does not state the duration measured ({_FRAMES_LARGE} frames)"
     )
-    assert "5.9" in box, "box 5 does not record the measured baseline it beats"
+    assert "6.2" in box or "5.9" in box, "box 5 does not record the measured baseline it beats"
+    assert "4.85" in box, (
+        "box 5 does not record the control's slope, which is what makes the bound meaningful "
+        "rather than arbitrary"
+    )
 
 
 def test_box_5_names_the_residual_it_does_not_cover() -> None:
