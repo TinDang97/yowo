@@ -117,3 +117,18 @@ def sample_image_dir(tmp_path: Path, sample_image_path: Path) -> Path:
     for i in range(3):
         shutil.copy(sample_image_path, img_dir / f"frame_{i:03d}.jpg")
     return img_dir
+
+
+@pytest.fixture(scope="session")
+def torch_available() -> None:
+    """Guard the BACKEND import through the same policy as the weight.
+
+    ``pytest.importorskip("torch")`` skips, and a skip is green — the exact
+    failure this module's docstring describes, one layer up. A CI job that
+    cannot import torch executed no backend, so it proved nothing and must say
+    so rather than passing.
+    """
+    try:
+        import torch  # noqa: F401
+    except ImportError as exc:
+        _unavailable("torch", f"{type(exc).__name__}: {exc}")

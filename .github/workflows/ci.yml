@@ -147,3 +147,50 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_engine_integration.py -q --tb=short
         timeout-minutes: 15
+
+  # Appended by ADD task `real-backend-smoke`. A seventh appender the pr-ci-gate
+  # contract did not foresee, added under its APPEND rule rather than by widening
+  # an existing job: the `weights` job above states that which integration tests
+  # run is `integration-tier-revival`'s call, and that task is an unauthored
+  # scaffold in a later milestone. m2 box 7 cannot wait behind it.
+  #
+  # What this job asserts that `weights` does not: the backend executed is the one
+  # the test ASKED for rather than whatever survived a fallback, the input is a
+  # real image rather than a black frame, and the assertions are ones a backend
+  # returning nothing would fail.
+  backend-smoke:
+    name: Real Backend Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      # Same key as the `weights` job: both read the same two stores, so a hit
+      # here is a hit there. Keyed on the pinned digests, not on a model name.
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+
+      # CI: "true" is what turns a missing weight, image or torch from a green
+      # skip into a failure. Without it this job can report success having
+      # executed no backend at all — the defect this task was written to close.
+      - name: A real backend executes on a real image
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_real_backend_smoke.py -q --tb=short
+        timeout-minutes: 15
