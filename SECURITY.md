@@ -71,7 +71,7 @@ a result payload, or a feature-cache key. **Three of the four places a URL can c
 one are covered. The path is not.**
 
 ```
-userinfo   rtsp://camop:hunter2@camera-01:554/stream       -> rtsp://camera-01:554/stream
+userinfo   rtsp://camop:hunter2@10.0.0.5:554/stream        -> rtsp://10.0.0.5:554/stream
 query      rtsp://10.0.0.5:554/live/stream?token=S3CR3T-signed -> rtsp://10.0.0.5:554/live/stream?token=#q58cf83e5
 fragment   rtsp://10.0.0.5:554/stream#S3CR3T-signed        -> rtsp://10.0.0.5:554/stream#qf17831c8
 path       rtsp://10.0.0.5:554/live/S3CR3T-signed/stream   -> unchanged
@@ -89,7 +89,7 @@ The path **is** the camera's identity. `rtsp://10.0.0.5:554/live/front-door` and
 apart is the path. Empty it and they become one stream id — and `DetectionRouter.register`
 overwrites a duplicate key without complaint, so the front door's detections would be
 delivered to the car park's callback. Redacting the path would trade a credential that
-appears in logs for silent, wrong inference output on every multi-camera deployment.
+appears in logs for silent, wrong inference results on every multi-camera deployment.
 
 So yowo does not redact the path, deliberately. That is not a trade it makes on your
 behalf, which means this one is yours to handle.
