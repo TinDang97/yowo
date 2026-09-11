@@ -271,9 +271,25 @@ class ThreadedFrameReader:
             self._deque.clear()
             self._not_empty.notify_all()
             self._not_full.notify_all()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                # A leaked reader thread is invisible until the process runs out of
+                # them, so a join that did not take must say so rather than returning
+                # as though it had.
+                logger.warning(
+                    "ThreadedFrameReader thread did not join within 2.0s; "
+                    "it is still alive and its resources are not released"
+                )
             self._thread = None
+
+        # The SOURCE is deliberately not closed here. `_streaming.py` calls
+        # `source.close()` immediately after `stop()` on every streaming path, so
+        # closing here would be a second call. Ownership stays with whoever opened
+        # it. RESIDUAL, named rather than hidden: a ThreadedFrameReader driven
+        # directly, outside the engine, still relies on refcounting to free the
+        # capture when the generator is collected.
 
     def __enter__(self) -> ThreadedFrameReader:
         return self
