@@ -776,12 +776,31 @@ class BaseEngine(StreamingMixin):
     # Retry delays for _infer_with_retry: 100ms, 200ms, 400ms
     _RETRY_DELAYS = (0.1, 0.2, 0.4)
 
+    def _empty_raw_output(self, batch_size: int) -> NDArray[np.float32]:
+        """The raw output a failed inference stands in with, for THIS engine.
+
+        Shape is a property of the task, not of the base class: detection wants
+        ``(B, 0, 6)``, classification ``(B, nc)``, OBB ``(B, 4+nc+1, 0)``. A
+        single hardcoded shape crashed the two engines that did not share it —
+        ``Expected 2-D output (batch, nc), got ndim=3`` for classification, and
+        ``max(): Expected reduction dim 1 to have non-zero size`` for OBB — so
+        each engine overrides this. The default is the detection shape, which is
+        what ``DetectionEngine`` is.
+
+        Args:
+            batch_size: Number of frames in the failed batch. The result must be
+                sized to it: a batch of N that comes back as one result drops
+                N-1 frames, and downstream a dropped frame is indistinguishable
+                from one that was never sent.
+        """
+        return np.zeros((batch_size, 0, 6), dtype=np.float32)
+
     def _infer_with_retry(self, tensor: PreprocessedTensor) -> NDArray[np.float32]:
         """Call backend.infer() with exponential backoff retry.
 
         Retries up to 3 times on any exception (100ms, 200ms, 400ms backoff).
-        On exhaustion: records error, emits "error" event, returns an empty
-        result array so the engine does not crash.
+        On exhaustion: records error, emits "error" event, returns this engine's
+        empty raw output so the engine does not crash.
 
         Must be called with ``_infer_lock`` already held (called from _run_gpu).
 
@@ -813,7 +832,7 @@ class BaseEngine(StreamingMixin):
                     )
                     self._metrics.record_error()
                     self._event_bus.emit("error", last_exc)
-        return np.zeros((1, 0, 6), dtype=np.float32)
+        return self._empty_raw_output(int(tensor.data.shape[0]))
 
     def _run_gpu(
         self,

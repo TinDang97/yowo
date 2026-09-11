@@ -176,6 +176,19 @@ class ClassificationEngine(BaseEngine):
                     f"classification output values outside [0, 1] range for sample {i}"
                 )
 
+    def _empty_raw_output(self, batch_size: int) -> NDArray[np.float32]:
+        """A failed classification stands in with a zero probability vector.
+
+        ``(B, nc)`` is what ``postprocess_classify`` reads; the base class's
+        detection-shaped ``(B, 0, 6)`` raised ``Expected 2-D output (batch, nc),
+        got ndim=3``. The vector is all zeros deliberately: an all-zero row is
+        what ``postprocess_classify`` reads as "no prediction", so a degraded
+        result comes back as ``top1_class_id=-1`` rather than as the last class
+        at uniform probability.
+        """
+        nc = self._model_meta.num_classes
+        return np.zeros((batch_size, nc), dtype=np.float32)
+
     def _process_batch(
         self,
         raw_output: NDArray[np.float32],
