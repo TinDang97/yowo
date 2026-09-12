@@ -78,6 +78,7 @@ class ThreadedFrameReader:
         "_max_size",
         "_not_empty",
         "_not_full",
+        "_on_drop",
         "_policy",
         "_preprocess_fn",
         "_reconnect_interval",
@@ -96,6 +97,7 @@ class ThreadedFrameReader:
         preprocess_fn: Callable[[list[Frame], tuple[int, int]], PreprocessedTensor] | None = None,
         target_size: tuple[int, int] | None = None,
         reconnect_interval_sec: float = 300.0,
+        on_drop: Callable[[], None] | None = None,
     ) -> None:
         if max_queue_size < 1:
             raise ValueError(f"max_queue_size must be >= 1, got {max_queue_size}")
@@ -114,9 +116,25 @@ class ThreadedFrameReader:
         self._exhausted = False
         self._frames_read = 0
         self._frames_dropped = 0
+        # Where drops are REPORTED, as opposed to merely counted. Without this
+        # the reader tallied drops nothing outside this file ever read, and
+        # engine.metrics.frames_dropped stayed 0 while the queue discarded
+        # frames — measured at 298 dropped against 0 reported.
+        self._on_drop = on_drop
         self._reconnect_interval = reconnect_interval_sec
         self._last_reconnect = time.monotonic()
         self._thread: threading.Thread | None = None
+
+    def _report_drops(self, count: int) -> None:
+        """Forward ``count`` drops to whoever is counting for the operator.
+
+        A drop that only this object knows about is a drop the operator cannot
+        see, which is indistinguishable from a healthy stream.
+        """
+        if count <= 0 or self._on_drop is None:
+            return
+        for _ in range(count):
+            self._on_drop()
 
     # ------------------------------------------------------------------
     # Background reader thread
@@ -150,11 +168,13 @@ class ThreadedFrameReader:
                         # preprocessing, this item is stale — drop it.
                         if seq_before is not None and self._enqueue_seq != seq_before:
                             self._frames_dropped += 1
+                            self._report_drops(1)
                             continue
                         # Drop everything queued; keep only this latest frame.
                         dropped = len(self._deque)
                         self._deque.clear()
                         self._frames_dropped += dropped
+                        self._report_drops(dropped)
                         self._deque.append(item)
                         self._enqueue_seq += 1
                         self._not_empty.notify()
@@ -162,6 +182,7 @@ class ThreadedFrameReader:
                         if len(self._deque) >= self._max_size:
                             self._deque.popleft()
                             self._frames_dropped += 1
+                            self._report_drops(1)
                         self._deque.append(item)
                         self._not_empty.notify()
                     else:  # FrameDropPolicy.NONE — backpressure
@@ -267,7 +288,9 @@ class ThreadedFrameReader:
         self._stop_event.set()
         with self._not_empty:
             # Count remaining queued frames as dropped on shutdown.
-            self._frames_dropped += len(self._deque)
+            _discarded = len(self._deque)
+            self._frames_dropped += _discarded
+            self._report_drops(_discarded)
             self._deque.clear()
             self._not_empty.notify_all()
             self._not_full.notify_all()
