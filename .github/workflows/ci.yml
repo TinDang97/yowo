@@ -241,3 +241,13 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_backend_conformance.py -q --tb=short
         timeout-minutes: 20
+
+      # The default export invocation wrote zero files until 2026-09-13 and no
+      # job would have noticed: every export check in the unit suite mocks the
+      # exporter. This step runs a REAL export at the DEFAULT precision and
+      # loads the result back, which is the only thing that binds that path.
+      - name: The default export precision produces a loadable artifact
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_export_default_precision.py -q --tb=short
+        timeout-minutes: 20
