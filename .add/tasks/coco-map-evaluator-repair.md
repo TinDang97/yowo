@@ -19,6 +19,9 @@ verified:
   - { by: "cli", at: 2026-09-13, act: brief, authority: process, brief: "sha256:8b655083c3b0d3fd" }
   - { by: "process:run", at: 2026-09-13, act: run, authority: process, outcome: PASS, receipt: /tasks/coco-map-evaluator-repair.d/runs/2.md }
   - { by: "Tin Dang", at: 2026-09-13, act: gate, authority: process, outcome: PASS, receipt: /tasks/coco-map-evaluator-repair.d/runs/2.md, brief: "sha256:8b655083c3b0d3fd" }
+  - { by: loop, at: 2026-09-13, act: reopen, to: verify, reason: "ruff format reformatted tests/unit/test_coco_map_evaluator.py after the gate, so the receipt's freshness claim no longer held; re-running on the formatted bytes" }
+  - { by: "process:run", at: 2026-09-13, act: run, authority: process, outcome: PASS, receipt: /tasks/coco-map-evaluator-repair.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-13, act: gate, authority: process, outcome: PASS, receipt: /tasks/coco-map-evaluator-repair.d/runs/3.md, brief: "sha256:dd183adad8616242" }
 advised_by: security-reviewer
 ---
 ## CARD

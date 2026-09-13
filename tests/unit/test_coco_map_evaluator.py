@@ -54,10 +54,7 @@ def gt_path(tmp_path: Path) -> Path:
 
 def _preds(image_ids: list[int]) -> list[dict[str, object]]:
     """Perfect predictions for exactly these image ids."""
-    return [
-        {"image_id": i, "category_id": 1, "bbox": list(_BOX), "score": 0.99}
-        for i in image_ids
-    ]
+    return [{"image_id": i, "category_id": 1, "bbox": list(_BOX), "score": 0.99} for i in image_ids]
 
 
 def test_a_model_that_misses_images_scores_lower(gt_path: Path) -> None:
