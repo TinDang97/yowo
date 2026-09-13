@@ -93,7 +93,18 @@ class TestOomMonitorLifecycle:
         assert engine._oom_thread.daemon is True
         engine._oom_stop.set()
 
-    def test_oom_monitor_not_started_on_cpu(self) -> None:
+    def test_oom_monitor_not_started_on_cpu(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A CPU engine with no memory budget gets no monitor.
+
+        The cgroup root is pointed somewhere empty on purpose: a CPU engine
+        under a cgroup memory LIMIT now does get a monitor (see
+        test_container_memory_ladder.py), so leaving this to the machine
+        running it would make the test's subject depend on whether CI happened
+        to be containerised.
+        """
+        monkeypatch.setattr("yowo.hardware._cgroup.DEFAULT_CGROUP_ROOT", tmp_path / "no-cgroup")
         mock = _make_mock_backend()
         engine = DetectionEngine(backend_instance=mock)  # CPU by default
         _load_engine(engine)

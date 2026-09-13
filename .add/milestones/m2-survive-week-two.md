@@ -1,7 +1,7 @@
 ---
 type: Milestone
 title: A live deployment stays correct and bounded, unattended, and says so
-status: direction
+status: done
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-11, act: check, authority: process, via: process, boxes: "EXIT:2" }
