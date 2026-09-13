@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 9
+delta_seq: 10
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q10 · open · 2026-09-13] An xfail binds a rule but reports neither pass nor fail, so a gate that requires a passing check per rule will refuse it - and that refusal is correct. An expected failure is evidence about a GAP, not about the behaviour. Bind the gap's rule to a check that asserts the marker is strict and carries the measured number: that is what makes an xfail tracking rather than hiding, because strict turns the eventual fix into a red suite instead of a silent XPASS nobody notices. (evidence: /tasks/backend-conformance-suite.md)
 - [TDD · Q9 · open · 2026-09-13] A module constant bound as a DEFAULT ARGUMENT is frozen at import and cannot be redirected by any caller or fixture. `def read(root: Path = DEFAULT_ROOT)` looks identical to `def read(root: Path | None = None)` with a call-time resolve in the body, but only the second is testable: monkeypatching the module global has no effect on the first, and the failure is silent — the tests pass against the real filesystem instead of the fixture. Resolve environment-facing defaults inside the body. (evidence: /tasks/container-aware-sizing.md)
 - [TDD · Q8 · open · 2026-09-13] A check that drives the fix's MECHANISM proves nothing about its INTEGRATION. Four nodes running, the surviving mutation was the same shape: the helper was exercised directly while the call site that should invoke it was never driven. The counter-check is cheap and must be written in the same sitting — assert the real entry point reaches the helper (source-level is enough when the real path is too heavy to drive), so deleting the wiring fails something. This node wrote that check first and all twelve mutations died. (evidence: /tasks/container-aware-sizing.md)
 - [TDD · Q7 · open · 2026-09-12] A memory check must allocate pages the OS actually backs. cli-bounded-memory built probe frames with np.zeros; calloc returns untouched zero pages that stay non-resident until written, so on Linux retaining 200 1080p frames cost 0.00 MB and the control measured no retention. macOS faulted them in, so it passed locally and failed in CI. np.full writes real bytes. The control is what caught it — a measurement check without one reports green about nothing. (evidence: /tasks/cli-bounded-memory.md)

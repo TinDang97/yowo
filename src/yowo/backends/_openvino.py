@@ -29,6 +29,53 @@ if TYPE_CHECKING:
 __all__ = ["OpenVinoBackend"]
 
 
+def _import_core() -> type:
+    """Return OpenVINO's ``Core``, from whichever module this version publishes it.
+
+    ``openvino.runtime`` was REMOVED in OpenVINO 2025. Importing it on 2025+
+    raises, and reporting that as "install openvino" told a user to install a
+    package they already had — measured 2026-09-13 on openvino 2026.3.1, where
+    ``ov.Core()`` reports ``['CPU']`` and both ``read_model`` and
+    ``compile_model`` succeed in the same process that raised
+    ``DependencyError``. That single stale import is why this module sat at 21%
+    coverage: nothing could execute it.
+
+    Raises:
+        DependencyError: OpenVINO genuinely is not installed.
+    """
+    try:
+        from openvino import Core  # type: ignore[import-untyped]
+
+        return Core
+    except ImportError:
+        pass
+    try:
+        from openvino.runtime import Core  # type: ignore[import-untyped]
+
+        return Core
+    except ImportError as exc:
+        raise DependencyError("openvino", "uv add openvino") from exc
+
+
+def _static_dims(node: object) -> list[int | None]:
+    """Return a node's dimensions, with None for any that is dynamic.
+
+    ``node.shape`` raises ``to_shape was called on a dynamic shape`` the moment
+    ANY dimension is dynamic — and ``export_model`` defaults to
+    ``dynamic_batch=True``, so yowo's own OpenVINO export produced an IR this
+    backend could not read. Measured 2026-09-13: the IR loads and compiles
+    fine; only reading the shape threw.
+
+    The partial shape is the dynamic-safe accessor. Height and width stay static
+    under a dynamic batch, which is all this backend needs from it.
+    """
+    try:
+        partial = node.get_partial_shape()  # type: ignore[attr-defined]
+    except Exception:
+        return []
+    return [int(d.get_length()) if d.is_static else None for d in partial]
+
+
 class OpenVinoBackend:
     """OpenVINO backend using ``openvino.Core``.
 
@@ -99,10 +146,7 @@ class OpenVinoBackend:
         self._kv_shapes = {}
         self._kv_zeros = {}
 
-        try:
-            from openvino.runtime import Core  # type: ignore[import-untyped]
-        except ImportError as exc:
-            raise DependencyError("openvino", "uv add openvino") from exc
+        Core = _import_core()
 
         xml_path = self._resolve_xml(Path(model_path))
 
@@ -119,9 +163,9 @@ class OpenVinoBackend:
             if all_inputs:
                 input_node = all_inputs[0]
                 self._input_name = input_node.get_any_name()  # type: ignore[attr-defined]
-                shape = input_node.shape
-                if len(shape) == 4:
-                    self._input_shape = (int(shape[2]), int(shape[3]))
+                dims = _static_dims(input_node)
+                if len(dims) == 4 and dims[2] is not None and dims[3] is not None:
+                    self._input_shape = (dims[2], dims[3])
             kv_inputs = [
                 n
                 for n in all_inputs
@@ -130,8 +174,13 @@ class OpenVinoBackend:
             if kv_inputs:
                 self._has_kv_io = True
                 self._kv_input_names = [n.get_any_name() for n in kv_inputs]  # type: ignore[attr-defined]
+                # Dynamic dims stand in as 1: a KV tensor whose batch is dynamic
+                # still needs a concrete cold-start allocation, and batch 1 is
+                # what every other cold-start path here assumes.
                 self._kv_shapes = {
-                    n.get_any_name(): tuple(int(d) for d in n.shape)  # type: ignore[attr-defined]
+                    n.get_any_name(): tuple(  # type: ignore[attr-defined]
+                        1 if d is None else d for d in _static_dims(n)
+                    )
                     for n in kv_inputs
                 }
                 self._kv_output_names = [
