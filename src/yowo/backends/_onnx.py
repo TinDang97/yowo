@@ -44,6 +44,9 @@ class OnnxBackend:
             )
         self._hw = hw_profile
         self._session: Any = None  # ort.InferenceSession at runtime
+        # Providers ORT actually bound, read back at load(). Empty tuple
+        # rather than None so a caller on the error path can iterate it.
+        self._active_providers: tuple[str, ...] = ()
         self._input_name: str = ""
         self._input_shape: tuple[int, int] = (640, 640)
         self._output_names: list[str] = []
@@ -157,7 +160,8 @@ class OnnxBackend:
             # OrtValue zero-copy path: only beneficial on CUDA/TRT EPs
             # where it avoids host→device copy.  On CPU/CoreML the numpy
             # round-trip through OrtValue adds Python overhead with no gain.
-            _active = self._session.get_providers()
+            self._record_active_providers()
+            _active = self._active_providers
             _has_gpu_ep = any("CUDA" in p or "TensorRT" in p for p in _active)
             self._use_ortvalue = _has_gpu_ep and hasattr(self._session, "run_with_ort_values")
             if self._use_ortvalue:
@@ -282,6 +286,8 @@ class OnnxBackend:
         """Release the ONNX Runtime session."""
         self._kv_state = {}
         self._session = None
+        # The bound providers describe a session that no longer exists.
+        self._active_providers = ()
 
     def warmup(self, batch_size: int = 1) -> None:
         """Run a dummy inference to prime the execution provider.
@@ -342,14 +348,41 @@ class OnnxBackend:
         opts.execution_mode = ort_mod.ExecutionMode.ORT_SEQUENTIAL
         return opts
 
+    @property
+    def active_providers(self) -> tuple[str, ...]:
+        """The execution providers ORT actually bound, in its precedence order.
+
+        Read back from the live session, never the list that was requested —
+        a reported provider derived from the request is the same class of lie
+        as a reported precision that does not execute. Empty before ``load()``.
+        """
+        return self._active_providers
+
+    def _record_active_providers(self) -> None:
+        """Capture the bound providers from the live session."""
+        try:
+            self._active_providers = tuple(self._session.get_providers())
+        except Exception:  # pragma: no cover - defensive; a session without the API
+            self._active_providers = ()
+
     def _select_providers(self, device: str) -> list[str | tuple[str, dict[str, str]]]:
         """Return the ordered execution provider list.
 
+        An EXPLICITLY requested device is honoured. Only ``"auto"`` delegates
+        the choice.
+
         Selection priority:
         1. CUDA EP — when device is ``"cuda"`` or ``"auto"`` + GPU detected.
-        2. CoreML EP — when device is ``"auto"`` or ``"cpu"`` and CoreML is
-           available (macOS with Apple Silicon).
-        3. CPU EP — universal fallback, always appended.
+        2. CPU EP alone — when device is explicitly ``"cpu"``. CoreML computes
+           in FP16, so serving an explicit CPU request from the Neural Engine
+           made ``selection`` report ``cpu/fp32`` while half precision ran:
+           measured 2026-09-13, 0.82116699 px from PyTorch via CoreML against
+           0.00012207 px with the CPU EP pinned, with every CoreML-path
+           confidence landing exactly on the float16 grid.
+        3. CoreML EP — when device is ``"auto"`` and CoreML is available
+           (macOS with Apple Silicon). The 4-5x speedup is kept for the
+           default; it is only explicit requests that stop being overridden.
+        4. CPU EP — universal fallback, always appended.
 
         Args:
             device: Requested device string.
@@ -366,6 +399,10 @@ class OnnxBackend:
 
         if use_cuda:
             return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+        # An explicit CPU request is honoured, never substituted.
+        if device.lower() == "cpu":
+            return ["CPUExecutionProvider"]
 
         # CoreML EP: 4-5x faster than CPU on Apple Silicon (Neural Engine)
         libs = self._hw.libraries
