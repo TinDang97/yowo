@@ -158,8 +158,10 @@ def evaluate_coco_map(
         gt_ann_path: Path to COCO ``instances_val2017.json`` annotations file.
         predictions: List of COCO-format result dicts (from
             :func:`detections_to_coco_results`).
-        subset: Unused (kept for API compatibility). Image scope is determined
-            by the unique image IDs present in *predictions*.
+        subset: Evaluate only the first *subset* ground-truth image IDs, in
+            sorted order, so a pinned subset is reproducible across runs and
+            machines. ``None`` evaluates every image in the ground truth.
+            Values above the dataset size are clamped.
 
     Returns:
         Dict with keys ``mAP_50_95``, ``mAP_50``, ``mAP_75``.
@@ -178,14 +180,26 @@ def evaluate_coco_map(
         ) from exc
 
     if not predictions:
+        # 0.0 here is what the evaluated path computes for predictions that
+        # match nothing — pycocotools' loadRes() rejects an empty list, so the
+        # value is returned directly rather than measured. It is a score, not
+        # a "did not run" sentinel; test_empty_predictions_score_zero_by_
+        # evaluation pins it to the evaluated result.
         return {"mAP_50_95": 0.0, "mAP_50": 0.0, "mAP_75": 0.0}
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_gt = COCO(str(gt_ann_path))
 
-    # Restrict evaluation to only the images that have predictions so that
-    # unscored images don't drag down recall across the full val set.
-    evaluated_img_ids = sorted({int(p["image_id"]) for p in predictions})  # type: ignore[arg-type]
+    # Scope the evaluation to the GROUND TRUTH, never to the predictions.
+    # Deriving it from predictions deletes every missed image from the
+    # denominator instead of counting it as a recall miss: measured
+    # 2026-09-13, a model detecting in 1 of 10 images scored 0.99999999
+    # against a perfect model's 1.0, so degrading recall RAISED the score and
+    # a regression gate on it rewarded a model that stopped detecting.
+    # Sorted so a pinned subset selects the same images on every run.
+    evaluated_img_ids = sorted(coco_gt.getImgIds())
+    if subset is not None:
+        evaluated_img_ids = evaluated_img_ids[:subset]
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_dt = coco_gt.loadRes(predictions)  # type: ignore[arg-type]
