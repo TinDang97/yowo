@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.errors import BackendLoadError, DependencyError, DeviceError, InferenceError
-from yowo.hardware import HardwareProfile
+from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.models._weights import WeightIntegrityError
 from yowo.types import BackendType, ModelSpec, PreprocessedTensor
 
@@ -160,21 +160,8 @@ class PyTorchBackend:
                 "Pass model_spec when creating the backend."
             )
 
-        # Cap CPU thread pool to avoid memory-bandwidth saturation on
-        # machines with many cores (e.g. Apple Silicon M-series).
-        # Use half the logical CPUs for compute threads; keep interop low.
         if not resolved.startswith("cuda"):
-            import os
-
-            cpu_count = os.cpu_count() or 4
-            # set_num_interop_threads() errors if called after parallel work
-            # has started (e.g. a second load() call in the same process).
-            # Silently skip — threads are already configured.
-            try:
-                torch.set_num_threads(max(1, cpu_count // 2))
-                torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
-            except RuntimeError:
-                pass
+            self._configure_cpu_threads()
 
         try:
             # Build native model from spec — branch on task type
@@ -282,6 +269,30 @@ class PyTorchBackend:
         except Exception as exc:
             self._model = None
             raise BackendLoadError(f"PyTorchBackend: failed to load model: {exc}") from exc
+
+    def _configure_cpu_threads(self) -> None:
+        """Cap the CPU thread pool to the CPUs this process may actually use.
+
+        Half the available CPUs for compute, interop lower still — this avoids
+        memory-bandwidth saturation on many-core machines and scheduling onto
+        efficiency cores on Apple Silicon.
+
+        The count is the cgroup quota where one exists, not the host's core
+        count: measured 2026-09-13, a container limited to 2 CPUs has the host
+        probes reporting 6, which would spawn 3 compute threads onto 2 CPUs'
+        worth of runtime, where the kernel then throttles them.
+        """
+        import torch
+
+        cpu_count = effective_cpu_count()
+        # set_num_interop_threads() errors if called after parallel work has
+        # started (e.g. a second load() call in the same process). Silently
+        # skip — threads are already configured.
+        try:
+            torch.set_num_threads(max(1, cpu_count // 2))
+            torch.set_num_interop_threads(max(1, min(2, cpu_count // 4)))
+        except RuntimeError:
+            pass
 
     def set_source_id(self, source_id: str) -> None:
         """Set the source identifier for feature cache keying.

@@ -7,6 +7,8 @@ Public API
 - ``HardwareProfile``: frozen snapshot of the system hardware state.
 - ``get_hardware_profile()``: returns the cached profile; runs detection once.
 - ``clear_cache()``: invalidates the cache (for test isolation only).
+- ``effective_cpu_count()``: CPUs this process may use — the cgroup quota, not the host.
+- ``detect_system_memory_mb()``: memory budget — the cgroup limit, not the host's RAM.
 """
 
 from __future__ import annotations
@@ -15,12 +17,20 @@ import threading
 from dataclasses import dataclass
 
 from yowo.hardware._capabilities import InstalledLibraries, detect_libraries
-from yowo.hardware._detect import detect_cpu_device, detect_cpu_features, detect_gpus
+from yowo.hardware._cgroup import effective_cpu_count
+from yowo.hardware._detect import (
+    detect_cpu_device,
+    detect_cpu_features,
+    detect_gpus,
+    detect_system_memory_mb,
+)
 from yowo.hardware._device import Device
 
 __all__ = [
     "HardwareProfile",
     "clear_cache",
+    "detect_system_memory_mb",
+    "effective_cpu_count",
     "get_hardware_profile",
 ]
 

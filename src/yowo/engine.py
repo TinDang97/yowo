@@ -58,6 +58,7 @@ from yowo.errors import (
 )
 from yowo.events import EventBus
 from yowo.hardware import get_hardware_profile
+from yowo.hardware._cgroup import read_memory_limit_bytes, read_memory_usage_bytes
 from yowo.io import (
     FrameSource,
     PreprocessBuffer,
@@ -385,31 +386,19 @@ class BaseEngine(StreamingMixin):
     def health_report(self) -> HealthReport:
         """Return a frozen :class:`HealthReport` snapshot of current engine state.
 
-        ``memory_pct`` is ``None`` unless the engine is running on a CUDA device.
-        GPU memory reads are best-effort; any failure returns ``None``.
+        ``memory_pct`` is the fraction of the memory budget in use — VRAM on a
+        CUDA device, the cgroup limit inside a container — and ``None`` when no
+        budget is knowable. Reads are best-effort; any failure returns ``None``.
         """
         self._sync_event_drops()
         snap = self._metrics.snapshot()
-
-        memory_pct: float | None = None
-        if self._is_cuda:
-            try:
-                import torch
-
-                device_index = self._selection.device_index
-                reserved = torch.cuda.memory_reserved(device_index)
-                total = torch.cuda.get_device_properties(device_index).total_memory
-                if total > 0:
-                    memory_pct = reserved / total
-            except Exception:
-                memory_pct = None
 
         return HealthReport(
             status=self.health,
             uptime_s=snap.uptime_s,
             errors_total=snap.errors_total,
             frames_total=snap.frames_total,
-            memory_pct=memory_pct,
+            memory_pct=self._memory_pressure(),
             stream_count=len(self._active_streams),
             batch_size_current=self._batch_size,
             precision_current=self._selection.precision.value,
@@ -581,12 +570,64 @@ class BaseEngine(StreamingMixin):
         """True when the active backend is running on a CUDA device."""
         return self._selection.device_type == DeviceType.CUDA
 
-    def _start_oom_monitor(self) -> None:
-        """Start the OOM monitor daemon thread (CUDA backends only).
+    def _memory_pressure(self) -> float | None:
+        """Fraction of the memory budget currently in use, or None if unknowable.
 
-        No-op for CPU, ONNX-CPU, CoreML, and other non-CUDA backends.
+        CUDA reports reserved VRAM over device total. Everything else reports
+        the cgroup's ``memory.current`` over ``memory.max`` — the budget a
+        container was actually given.
+
+        Returns None when no budget can be read, and that is load-bearing: with
+        no cgroup limit the only denominator available is ``/proc/meminfo``,
+        which describes the host rather than this process. Degrading against it
+        would invent the number the OOM ladder acts on.
         """
-        if not self._is_cuda:
+        if self._is_cuda:
+            try:
+                import torch
+
+                device_index = self._selection.device_index
+                reserved = torch.cuda.memory_reserved(device_index)
+                total = torch.cuda.get_device_properties(device_index).total_memory
+                return reserved / total if total > 0 else None
+            except Exception:
+                return None
+
+        limit = read_memory_limit_bytes()
+        if limit is None or limit <= 0:
+            return None
+        usage = read_memory_usage_bytes()
+        if usage is None:
+            return None
+        return usage / limit
+
+    def _memory_budget_label(self) -> str:
+        """Name the budget a pressure reading was taken against, for the log.
+
+        Decoration on a recovery path, so it swallows everything: a label that
+        cannot be built must not stop the batch from being halved.
+        """
+        try:
+            if self._is_cuda:
+                return f"CUDA device {self._selection.device_index} VRAM"
+            limit = read_memory_limit_bytes()
+            if limit is None:
+                return "no memory budget"
+            return f"cgroup memory limit {limit // (1024 * 1024)} MB"
+        except Exception:
+            return "unknown budget"
+
+    def _start_oom_monitor(self) -> None:
+        """Start the memory-pressure monitor daemon thread.
+
+        Runs for any CUDA backend, and for a non-CUDA backend whose cgroup
+        states a memory limit — a CPU container was previously OOM-killed
+        rather than degraded, because the ladder was gated on the device type
+        instead of on whether a budget could be measured.
+
+        No-op when no budget is readable: there is nothing to degrade against.
+        """
+        if not self._is_cuda and self._memory_pressure() is None:
             return
         self._oom_stop.clear()
         self._oom_thread = threading.Thread(
@@ -597,25 +638,21 @@ class BaseEngine(StreamingMixin):
         self._oom_thread.start()
 
     def _oom_monitor_loop(self) -> None:
-        """Poll GPU memory utilisation every 5 s and apply recovery as needed.
+        """Poll memory pressure every 5 s and apply recovery as needed.
 
         Uses Event.wait() so the daemon exits quickly when _oom_stop is set.
-        GPU memory reads are thread-safe (no _infer_lock needed per RESEARCH.md).
-        """
-        try:
-            import torch
-        except ImportError:
-            logger.warning("OOM monitor: torch not available, exiting")
-            return
+        Both memory reads are thread-safe (no _infer_lock needed per
+        RESEARCH.md; the cgroup read is two small file reads).
 
-        device_index = self._selection.device_index
+        A tick that cannot take a reading is skipped, never escalated: a
+        transient read failure must not become a batch halving.
+        """
         while not self._oom_stop.wait(timeout=5.0):
             try:
-                reserved = torch.cuda.memory_reserved(device_index)
-                total = torch.cuda.get_device_properties(device_index).total_memory
-                if total > 0:
-                    pct = reserved / total
-                    self._apply_oom_recovery(pct)
+                pct = self._memory_pressure()
+                if pct is None:
+                    continue
+                self._apply_oom_recovery(pct)
             except Exception as exc:
                 logger.warning("OOM monitor error: %s", exc)
 
@@ -677,7 +714,11 @@ class BaseEngine(StreamingMixin):
         # measurement, in the line an operator reads while diagnosing an OOM. The
         # reading that triggered this lives in the caller; this line reports only
         # what it actually knows.
-        logger.warning("OOM monitor: batch size halved to %d", self._batch_size)
+        logger.warning(
+            "OOM monitor: batch size halved to %d (budget: %s)",
+            self._batch_size,
+            self._memory_budget_label(),
+        )
 
     def _try_precision_fallback(self) -> None:
         """Tier-2 recovery: attempt FP16 precision fallback if backend supports it."""

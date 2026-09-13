@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from yowo.hardware import effective_cpu_count
+
 if TYPE_CHECKING:
     from yowo.hardware import HardwareProfile
 
@@ -76,7 +78,7 @@ def compute_fingerprint(hw: HardwareProfile) -> str:  # type: ignore[name-define
         ``SHA-256("{name}|{vram_bytes}|{cuda_version}")[:8]``
 
     CPU-only path:
-        ``SHA-256("cpu|{cpu_count}|{platform_string}")[:8]``
+        ``SHA-256("cpu|{effective_cpu_count}|{platform_string}")[:8]``
 
     Args:
         hw: Hardware profile returned by ``get_hardware_profile()``.
@@ -90,7 +92,10 @@ def compute_fingerprint(hw: HardwareProfile) -> str:  # type: ignore[name-define
         cuda_ver = hw.libraries.cuda_version or "none"
         raw = f"{gpu.name}|{vram_bytes}|{cuda_ver}"
     else:
-        raw = f"cpu|{os.cpu_count()}|{platform.platform()}"
+        # The CPUs this process may use, not the host's core count. Two
+        # containers with different quotas on one host tune to different
+        # batch sizes and must not share a cache entry.
+        raw = f"cpu|{effective_cpu_count()}|{platform.platform()}"
 
     return hashlib.sha256(raw.encode()).hexdigest()[:8]
 

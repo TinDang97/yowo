@@ -11,7 +11,6 @@ on machines without onnxruntime installed.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
-from yowo.hardware import HardwareProfile
+from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.types import BackendType, PreprocessedTensor
 
 if TYPE_CHECKING:
@@ -324,7 +323,7 @@ class OnnxBackend:
     def _build_session_options(self, ort: object) -> ort.SessionOptions:  # type: ignore[name-defined]
         """Build session options with all optimisations and thread parallelism.
 
-        Thread counts are capped at half the logical CPUs to avoid
+        Thread counts are capped at half the CPUs this process may use to avoid
         scheduling onto slow efficiency cores (Apple Silicon) and
         memory-bandwidth saturation on many-core machines.
         """
@@ -332,7 +331,10 @@ class OnnxBackend:
 
         opts = ort_mod.SessionOptions()
         opts.graph_optimization_level = ort_mod.GraphOptimizationLevel.ORT_ENABLE_ALL
-        cpu_count = os.cpu_count() or 1
+        # The cgroup quota, not the host's core count: a container limited to
+        # 2 CPUs reports 6 from os.cpu_count() and would size 3 compute threads
+        # onto 2 CPUs' worth of runtime.
+        cpu_count = effective_cpu_count()
         opts.intra_op_num_threads = max(1, cpu_count // 2)
         opts.inter_op_num_threads = max(1, cpu_count // 4)
         opts.enable_mem_pattern = True

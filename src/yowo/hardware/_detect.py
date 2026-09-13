@@ -14,6 +14,7 @@ import platform
 import subprocess
 from pathlib import Path
 
+from yowo.hardware._cgroup import read_memory_limit_bytes, read_memory_usage_bytes
 from yowo.hardware._device import Device
 from yowo.types import CPUArch, DeviceType, GPUArch
 
@@ -51,22 +52,57 @@ def detect_cpu_arch() -> CPUArch:
     return CPUArch.X86_64
 
 
-def detect_system_memory_mb() -> tuple[int, int]:
-    """Return (total_mb, available_mb) of system RAM.
+def detect_system_memory_mb(root: Path | None = None) -> tuple[int, int]:
+    """Return (total_mb, available_mb) of memory this process may actually use.
+
+    Where a cgroup memory limit is present, that limit IS the budget — measured
+    2026-09-13, a container limited to 512 MB reads 12017 MB out of
+    /proc/meminfo, a 23x overstatement of what it can allocate before the OOM
+    killer arrives. Where no limit is present the host reading is returned
+    exactly as before; an unlimited process must never be sized down.
 
     Linux: reads /proc/meminfo.
     macOS: uses ``sysctl -n hw.memsize`` for total; ``vm_stat`` for available.
     Returns (0, 0) on any error — never raises.
+
+    Args:
+        root: Cgroup root to read. Defaults to the real one, resolved at call
+            time so a caller (or a test) can redirect it.
     """
     system = platform.system()
+    total_mb = 0
+    available_mb = 0
     try:
         if system == "Linux":
-            return _read_proc_meminfo()
-        if system == "Darwin":
-            return _read_macos_memory()
+            total_mb, available_mb = _read_proc_meminfo()
+        elif system == "Darwin":
+            total_mb, available_mb = _read_macos_memory()
     except Exception:
         _log.debug("detect_system_memory_mb: probe failed", exc_info=True)
-    return (0, 0)
+
+    return _apply_cgroup_limit(total_mb, available_mb, root)
+
+
+def _apply_cgroup_limit(total_mb: int, available_mb: int, root: Path | None) -> tuple[int, int]:
+    """Cap a host memory reading by the cgroup budget, where one exists."""
+    limit_bytes = read_memory_limit_bytes(root)
+    if limit_bytes is None:
+        return (total_mb, available_mb)
+
+    limit_mb = limit_bytes // (1024 * 1024)
+    # A limit above physical RAM is not a budget the machine can honour, so the
+    # host reading still caps the total.
+    total = min(total_mb, limit_mb) if total_mb else limit_mb
+
+    usage_bytes = read_memory_usage_bytes(root)
+    if usage_bytes is None:
+        return (total, min(available_mb, limit_mb) if available_mb else limit_mb)
+
+    # Headroom comes from the cgroup's own accounting rather than from
+    # min(host, cgroup): the host's MemAvailable describes a machine this
+    # process cannot see, and mixing it in would make this number disagree with
+    # the memory_pct the OOM ladder computes from the same two files.
+    return (total, max(0, limit_mb - usage_bytes // (1024 * 1024)))
 
 
 def _read_proc_meminfo() -> tuple[int, int]:

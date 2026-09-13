@@ -11,7 +11,6 @@ on machines without TensorRT installed.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.errors import BackendError, BackendLoadError, DependencyError, InferenceError
-from yowo.hardware import HardwareProfile
+from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.types import BackendType, PreprocessedTensor
 
 logger = logging.getLogger(__name__)
@@ -351,7 +350,7 @@ class TensorRTBackend:
 
         opts = ort_mod.SessionOptions()
         opts.graph_optimization_level = ort_mod.GraphOptimizationLevel.ORT_ENABLE_ALL
-        cpu_count = os.cpu_count() or 1
+        cpu_count = effective_cpu_count()
         opts.intra_op_num_threads = max(1, cpu_count // 2)
         opts.inter_op_num_threads = max(1, cpu_count // 4)
         opts.enable_mem_pattern = True
