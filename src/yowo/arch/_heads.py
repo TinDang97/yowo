@@ -356,7 +356,14 @@ class Detect(nn.Module):
         max_feat = feat_sizes.max()
         # copy_ preserves the buffer's tensor identity + dispatch keys so
         # torch.compile doesn't trigger recompilation guards.
-        self.stride.copy_((max_feat / feat_sizes * 8.0).to(x[0].device))
+        # Cast to the buffer's dtype BEFORE copy_: torch.export functionalizes
+        # this mutation, so a downstream read of self.stride sees the value
+        # written here, not the buffer. Under .half() an fp32 value here makes
+        # make_anchors' .to(dtype=half) raise "Expected: torch.float16, Got:
+        # torch.float32" and the whole default-precision export fails.
+        self.stride.copy_(
+            (max_feat / feat_sizes * 8.0).to(dtype=self.stride.dtype, device=x[0].device)
+        )
         self._strides_initialized = True
         # Reset anchor cache when strides change (e.g. after device migration)
         self._anchor_cache_key = None
