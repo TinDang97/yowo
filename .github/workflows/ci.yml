@@ -194,3 +194,50 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_real_backend_smoke.py -q --tb=short
         timeout-minutes: 15
+
+  # Appended by ADD task `backend-conformance-suite` under the pr-ci-gate APPEND
+  # rule. An eighth appender, added as a new job rather than by widening
+  # `backend-smoke`: that job proves ONE backend executes at all, this one proves
+  # three agree. Merging them would make a conformance failure read as a smoke
+  # failure, and they have different owners.
+  #
+  # `--extra openvino` is what makes the roster's claim true. Measured
+  # 2026-09-13: openvino installs on ubuntu CPU (openvino==2026.3.1, 2
+  # packages), so listing OpenVINO unverified would record a choice as a
+  # limitation. It is also the backend this task found to be completely dead —
+  # twice — so it is the one most worth re-proving on every PR.
+  conformance:
+    name: Backend Conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev --extra openvino
+
+      # Same key as `weights` and `backend-smoke`: all three read the same two
+      # stores, so a hit in one is a hit in the others.
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+
+      # CI: "true" turns a missing weight or image from a green skip into a
+      # failure. Without it this job can report success having executed nothing.
+      - name: Three backends agree, or the difference is reported
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_backend_conformance.py -q --tb=short
+        timeout-minutes: 20
