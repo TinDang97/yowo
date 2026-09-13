@@ -14,23 +14,28 @@ generated: { by: add/3.5.0, at: 2026-09-13 }
 verified: []
 ---
 ## CARD
-goal: Either close the PyTorch-ONNX coordinate divergence, or state plainly why 0.33 px is the right answer.
-why: Measured 2026-09-13 by `backend-conformance-suite`, PyTorch vs ONNX on bus.jpg, both pinned cpu/fp32,
-  both loading from ONE artifact chain rooted in the same digest-verified weight: detection counts 5 and 5,
-  class-id mismatches 0, max box-coordinate deviation **0.33050537 px**, max confidence deviation
-  **0.00726026**. The declared tolerance was 1e-3 on coordinates; the measured deviation is 330x it. The
-  models are the same model — the arithmetic differs. UNCONFIRMED hypothesis, recorded so the next person
-  does not start from zero: the PyTorch backend applies `fuse_conv_and_bn`, folding BN scale and shift into
-  the conv weights, while the exported graph does not, and ~0.05% on 640 px coordinates is the magnitude
-  that fusion difference produces. That was NOT verified — do not build on it without checking.
-  Ruled OUT by measurement: it is not a precision artifact. The exported ONNX is genuinely fp32 (208 FLOAT
-  initializers, zero FLOAT16, inputs and outputs FLOAT, sidecar reports `"precision": "fp32"`), and pinning
-  both backends to cpu/fp32 produced the identical deviation to letting each choose.
+goal: Explain — or bound — why PyTorch and ONNX agree on x86_64 and disagree by 0.33 px on Apple Silicon.
+why: RE-SCOPED 2026-09-13 after CI refuted the premise this task was first filed on. The original
+  filing said PyTorch and ONNX diverge by 0.33050537 px against a 1e-3 bound, measured on the
+  author's machine. CI then measured the same comparison, same code, same weight, same artifact
+  chain, on ubuntu-latest x86_64: **0.00015450 px — INSIDE the bound**. There is no general
+  PyTorch-ONNX divergence. What exists is a **platform split of ~2100x**:
+      ubuntu-latest x86_64   0.00015450 px
+      macOS 15 arm64         0.33050537 px
+  Counts (5 and 5) and every class id agree on both, so it is the same model on both; only arm64's
+  coordinate arithmetic drifts. The BN-fusion hypothesis recorded in the original filing is
+  STRUCK: fusion is platform-independent and would show on x86_64 too.
+  What is NOT yet known, and what this task is for: whether the arm64 path differs in kernel
+  selection (PyTorch CPU on ARM via NEON/Accelerate vs onnxruntime's own kernels), in
+  accumulation order, or in something that would also affect accuracy rather than only agreement.
+  Ruled OUT by measurement: it is not precision. The exported ONNX is genuinely fp32 (208 FLOAT
+  initializers, zero FLOAT16) and pinning both backends to cpu/fp32 reproduced the identical
+  deviation on each platform.
   `tests/integration/test_backend_conformance.py::test_pytorch_and_onnx_agree_within_the_declared_bound`
-  holds the bound as `xfail(strict=True)`, so closing this turns that suite RED until the marker is removed
-  — that is the signal this task is done, and it is deliberate.
-  m3 box 2 stays unchecked until this closes.
-beat: scaffold · next: author pytorch-onnx-numeric-divergence's RULES, ASSUMPTIONS and CHECKS, then add freeze pytorch-onnx-numeric-divergence
+  carries `xfail(strict=True)` scoped to macOS arm64, so x86_64 must pass and arm64 must fail —
+  closing this turns that suite RED on arm64 until the marker is removed, which is the signal this
+  task is done and is deliberate.
+  m3 box 2 IS ticked: its words scope it to "the backends CI can run", and on x86_64 they conform.
 
 ## RULES
 <must>

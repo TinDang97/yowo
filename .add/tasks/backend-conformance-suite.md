@@ -32,6 +32,14 @@ verified:
   - { by: "cli", at: 2026-09-13, act: brief, authority: process, brief: "sha256:c1c682f34cc3bd61" }
   - { by: "process:run", at: 2026-09-13, act: run, authority: process, outcome: PASS, receipt: /tasks/backend-conformance-suite.d/runs/3.md }
   - { by: "Tin Dang", at: 2026-09-13, act: gate, authority: human, outcome: PASS, receipt: /tasks/backend-conformance-suite.d/runs/3.md, brief: "sha256:c1c682f34cc3bd61" }
+  - { by: loop, at: 2026-09-13, act: reopen, to: direction, reason: "CI refuted the node's central measurement after the gate. The 1e-3 bound was declared correctly, but the deviation recorded against it - 0.33050537 px - was measured on macOS arm64 and pinned in the suite as though it were a property of the code. ubuntu x86_64 measured 0.00015450 for the same code, same weight, same artifact chain: the strict xfail XPASSed and the pinned-deviation check failed, both correctly. The general PyTorch-ONNX divergence this node reported does not exist; a ~2100x PLATFORM split does. The contract moved - CHECKS changed and m3 box 2 went from not-ticked to ticked - so this reopens rather than being edited under a closed gate." }
+  - { by: "Tin Dang", at: 2026-09-13, act: refreeze, authority: human, direction: "sha256:da9303b0ef9293bd", binding: "sha256:60b3aed15d2d819b" }
+  - { by: "cli", at: 2026-09-13, act: brief, authority: process, brief: "sha256:5eafb0e9f802a1e5" }
+  - { by: "process:run", at: 2026-09-13, act: run, authority: process, outcome: PASS, receipt: /tasks/backend-conformance-suite.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-13, act: refreeze, authority: human, direction: "sha256:7e2028e132122e91", binding: "sha256:60b3aed15d2d819b" }
+  - { by: "cli", at: 2026-09-13, act: brief, authority: process, brief: "sha256:1f5f462523e2eb00" }
+  - { by: "process:run", at: 2026-09-13, act: run, authority: process, outcome: PASS, receipt: /tasks/backend-conformance-suite.d/runs/5.md }
+  - { by: "Tin Dang", at: 2026-09-13, act: gate, authority: human, outcome: PASS, receipt: /tasks/backend-conformance-suite.d/runs/5.md, brief: "sha256:1f5f462523e2eb00" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
@@ -41,6 +49,10 @@ why: Measured 2026-09-13. `create_backend()` returns FIVE backends; exactly one 
   `_tensorrt.py` 73%, `_onnx.py` 77% — and there is no `test_pytorch_backend.py` at all. The runtimes
   for `pytorch` and `onnx` are already in the dev group; `openvino>=2024.0` is a declared extra that
   installs cleanly on this platform (openvino==2026.3.1, 2 packages).
+  CORRECTED 2026-09-13: this CARD first reported a general PyTorch-ONNX divergence of 0.33 px. CI
+  refuted it — x86_64 measures 0.00015450 for the same code and weight. There is no general
+  divergence; there is a ~2100x platform split, owned by `pytorch-onnx-numeric-divergence` in m4,
+  and the BN-fusion hypothesis is struck because fusion is platform-independent.
   And OpenVINO cannot run at all: `_openvino.py:102` does `from openvino.runtime import Core`, a module
   REMOVED in OpenVINO 2025+, so on 2026.3.1 the import raises and the handler at :105 relabels it
   `DependencyError("openvino", "uv add openvino")` — telling a user to install a package they already
@@ -59,9 +71,15 @@ beat: done · next: add status
   than assumed to — asserting output shape, dtype, behaviour on an empty-detection input, class
   mapping, and the error type raised on bad input.
 - M3 The numeric tolerance is declared BEFORE the run — 1e-3 absolute on box coordinates, exact on
-  class ids — and the deviation actually measured is reported against it. Measured 2026-09-13,
-  PyTorch vs ONNX on bus.jpg, both pinned cpu/fp32, same weights: coords **0.33050537**, confidence
-  **0.00726026**, class-id mismatches **0**, counts 5 and 5. The bound is not moved to fit that.
+  class ids — and the deviation actually measured is reported against it. The bound is not moved to
+  fit a result, AND no observed value is asserted as a constant: a figure measured on one machine is
+  a property of that machine. CORRECTED 2026-09-13 after CI refuted the first version, which pinned
+  0.33050537 as if it were the code's behaviour. PyTorch vs ONNX on bus.jpg, both pinned cpu/fp32,
+  same weights, same artifact chain — counts 5 and 5 and **0** class-id mismatches on both, and a
+  ~2100x PLATFORM split on coordinates: **ubuntu x86_64 0.00015450 (inside the bound)**, **macOS
+  arm64 0.33050537 (330x it)**. The suite asserts the bound on whatever platform runs, records both
+  figures as documentation, and scopes a strict xfail to macOS arm64 so x86_64 must PASS and arm64
+  must FAIL — either flipping is a red.
 - M4 `OpenVinoBackend.load` imports `Core` from the module OpenVINO actually publishes on >=2025,
   falling back to the pre-2025 path, and a load failure that is NOT a missing package stops being
   reported as one.
@@ -188,14 +206,19 @@ contract: `tests/integration/test_backend_conformance.py` holds a session fixtur
   divergence.
 - test_the_declared_tolerance_is_one_thousandth_of_a_pixel · covers: M3, R:LOOSENED, A5, A6 · the
   bound is pinned as a constant a reader can find, and pinned again in the milestone box.
+- test_the_arm64_expectation_is_strict_and_platform_scoped · covers: E6 · the gap is pinned on both
+  sides — strict, so arm64 conforming turns red; platform-scoped, so x86_64 must pass on its own.
+  An xfail cannot bind E6 itself, because an expected failure never reports as passing (Q10).
 - test_pytorch_and_onnx_agree_within_the_declared_bound · covers: M3, A10 · the declared bound,
-  asserted. Carried as a strict xfail with the measured 0.33050537, so it binds the rule while
-  reporting neither pass nor fail.
-- test_the_numeric_xfail_is_strict · covers: E6 · and THAT is what makes the xfail evidence rather
-  than a hiding place: closing the divergence turns the suite red. An xfail cannot bind E6 itself,
-  because an expected failure never reports as passing.
-- test_the_measured_deviation_is_reported_not_only_asserted · covers: M3, A14 · the failure message
-  names both backends, the axis and the value.
+  asserted on whatever platform runs. Passes on x86_64 at 0.00015450; carries a strict xfail scoped
+  to macOS arm64, which measures 0.33050537. Both sides are pinned: either flipping is a red.
+- test_a_disagreement_names_both_backends_the_axis_and_the_value · covers: M3, A14 · what a reader
+  sees when two backends disagree, checked without needing a disagreement and without pinning a
+  machine's number.
+- test_both_platform_measurements_are_documented_not_asserted · covers: M3, A6 · the two platform
+  figures are recorded for a reader and never asserted against a live measurement. Added after CI
+  refuted the first version, which pinned the arm64 figure as though it were a property of the
+  code (lesson Q11).
 - test_class_ids_match_exactly_across_backends · covers: M3, A5 · measured 0 mismatches; this half
   of the tolerance is not xfailed.
 - test_openvino_imports_core_from_the_published_module · covers: M4, E7 · the modern path first,
