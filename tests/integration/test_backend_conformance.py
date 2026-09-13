@@ -62,7 +62,15 @@ COORD_TOLERANCE_PX = 1e-3
 #: are recorded for a reader, NOT asserted: a number measured on one machine is
 #: not a property of the code, and asserting one here is what CI rejected.
 OBSERVED_COORD_DEVIATION_X86_64 = 0.00015450
-OBSERVED_COORD_DEVIATION_ARM64 = 0.33050537
+OBSERVED_COORD_DEVIATION_ARM64 = 0.00024414
+
+#: What arm64 measured BEFORE `pytorch-onnx-numeric-divergence` landed. It was
+#: filed twice as a platform fact — first as a general PyTorch-ONNX divergence,
+#: then as arm64 arithmetic — before anyone checked which execution provider had
+#: run. It was neither: `_select_providers` served an explicit `device="cpu"`
+#: from the CoreML EP, which computes in FP16. Honouring the requested device
+#: took arm64 from this figure to the one above, inside the bound.
+SUPERSEDED_ARM64_DEVIATION_VIA_COREML = 0.33050537
 
 _FIXTURE_FAMILY = ModelFamily.YOLO26
 _FIXTURE_SIZE = ModelSize.NANO
@@ -277,25 +285,17 @@ def test_class_ids_match_exactly_across_backends(
 _IS_MACOS_ARM64 = platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
-@pytest.mark.xfail(
-    _IS_MACOS_ARM64,
-    strict=True,
-    reason=(
-        f"macOS arm64 measures {OBSERVED_COORD_DEVIATION_ARM64} px against a declared "
-        f"bound of {COORD_TOLERANCE_PX}, while x86_64 measures "
-        f"{OBSERVED_COORD_DEVIATION_X86_64} and conforms — a ~2100x platform split. "
-        "The bound is NOT loosened. strict, so if arm64 starts conforming this turns "
-        "red and the change is noticed. Owned by pytorch-onnx-numeric-divergence in m4."
-    ),
-)
 def test_pytorch_and_onnx_agree_within_the_declared_bound(
     artifact_chain: dict[BackendType, Path], real_frame: Frame
 ) -> None:
     """covers: M3, A10, E6 — the declared bound, asserted on whatever platform runs.
 
-    E6 is now history rather than hypothesis: the first version of this check
-    carried a strict xfail recording a gap measured on arm64, and CI's x86_64
-    run turned it into an XPASS failure. The backends conform here.
+    E6 twice over. This check first pinned a deviation measured on one machine
+    and CI refuted it. It then carried a strict xfail scoping the gap to macOS
+    arm64 — and that marker did its job: when `pytorch-onnx-numeric-divergence`
+    made arm64 honour an explicit `device="cpu"`, the xfail turned into an XPASS
+    failure and the change was noticed rather than absorbed. Both platforms now
+    conform on their own merits, so no marker excuses either.
     """
     a = _sorted_boxes(_run(artifact_chain, BackendType.PYTORCH, real_frame))
     b = _sorted_boxes(_run(artifact_chain, BackendType.ONNX, real_frame))
@@ -311,10 +311,12 @@ def test_pytorch_and_onnx_agree_within_the_declared_bound(
     )
     assert deviation <= COORD_TOLERANCE_PX, (
         deviation_message("pytorch", "onnx", "box-coordinate", deviation, COORD_TOLERANCE_PX)
-        + f". Counts agree ({len(a)} vs {len(b)}) and class ids agree, so this is the "
-        "same model with different arithmetic. Observed by platform: "
-        f"x86_64 {OBSERVED_COORD_DEVIATION_X86_64}, arm64 {OBSERVED_COORD_DEVIATION_ARM64} "
-        "— a ~2100x split owned by pytorch-onnx-numeric-divergence in m4."
+        + f". Counts agree ({len(a)} vs {len(b)}) and class ids agree. Observed by "
+        f"platform: x86_64 {OBSERVED_COORD_DEVIATION_X86_64}, arm64 "
+        f"{OBSERVED_COORD_DEVIATION_ARM64}. If arm64 has regressed toward "
+        f"{SUPERSEDED_ARM64_DEVIATION_VIA_COREML}, check which execution provider "
+        "bound the graph: that figure is the CoreML EP computing in FP16, not "
+        "arm64 arithmetic."
     )
 
 
@@ -350,6 +352,8 @@ def test_both_platform_measurements_are_documented_not_asserted() -> None:
     The first version of this suite asserted the arm64 figure and CI rejected
     it: 0.00015450 on x86_64 against 0.33050537 on arm64, a factor of ~2100.
     A number measured on one machine is not a property of the code (Q7, Q11).
+    That split is now closed — it was the CoreML EP computing in FP16, not the
+    platform — but the rule outlives the split: these figures stay documentation.
     """
     import tests.integration.test_backend_conformance as module
 
@@ -358,8 +362,9 @@ def test_both_platform_measurements_are_documented_not_asserted() -> None:
     assert OBSERVED_COORD_DEVIATION_X86_64 < COORD_TOLERANCE_PX, (
         "on the platform CI runs the backends conform; that is what box 2 claims"
     )
-    assert OBSERVED_COORD_DEVIATION_ARM64 > COORD_TOLERANCE_PX, (
-        "the arm64 gap is real and is owned by pytorch-onnx-numeric-divergence in m4"
+    assert OBSERVED_COORD_DEVIATION_ARM64 < COORD_TOLERANCE_PX, (
+        "arm64 conforms too since pytorch-onnx-numeric-divergence honoured the "
+        "requested device; the superseded CoreML figure is kept separately"
     )
     # Neither figure may be COMPARED against a live measurement. Two forms are
     # legitimate and must not trip this, or the scanner starts editing correct
@@ -396,41 +401,46 @@ def test_openvino_actually_executes_on_a_real_weight(
     )
 
 
-def test_the_arm64_expectation_is_strict_and_platform_scoped() -> None:
-    """covers: E6 — the gap is pinned on BOTH sides, so neither can change quietly.
+def test_no_marker_excuses_either_platform() -> None:
+    """covers: E6 — the conformance claim stands on its own on every platform.
 
-    An xfail reports neither pass nor fail, so it cannot bind this rule itself
-    (lesson Q10). What makes it evidence rather than a hiding place is two
-    properties, both checkable on any platform:
+    This check has now been wrong in both directions, and E6 is the record of
+    that. First it PINNED a deviation measured on one machine, and CI refuted
+    it. Then it carried a strict xfail scoping the gap to macOS arm64 — correct
+    at the time, and the marker earned its keep: when the execution-provider
+    fix landed, strict turned the newly-conforming arm64 run into an XPASS
+    failure instead of letting it pass unnoticed.
 
-      strict   — if arm64 starts conforming, the marker turns red instead of
-                 silently becoming an XPASS nobody reads.
-      scoped   — the condition is macOS arm64 only, so on x86_64 the check must
-                 pass on its own merits. A blanket xfail would have hidden the
-                 conformance claim this suite exists to make.
+    What must hold now is the opposite of what E6 once asserted: no xfail,
+    skipif, or other marker may excuse the bound on any platform. An expected
+    failure that outlives the defect it recorded is indistinguishable from a
+    suite that never checked.
     """
-    marks = [
-        m
-        for m in test_pytorch_and_onnx_agree_within_the_declared_bound.pytestmark
-        if m.name == "xfail"
-    ]
+    marks = list(getattr(test_pytorch_and_onnx_agree_within_the_declared_bound, "pytestmark", []))
+    excusing = [m for m in marks if m.name in ("xfail", "skip", "skipif")]
 
-    assert marks, "the arm64 gap must be recorded as an expected failure, not deleted"
-    mark = marks[0]
+    assert not excusing, (
+        f"{[m.name for m in excusing]} excuses the declared bound. Both platforms "
+        f"conform on their own merits — x86_64 {OBSERVED_COORD_DEVIATION_X86_64} px, "
+        f"arm64 {OBSERVED_COORD_DEVIATION_ARM64} px, against a bound of "
+        f"{COORD_TOLERANCE_PX}. A marker left behind after the divergence closed "
+        "would hide the next one."
+    )
 
-    assert mark.kwargs.get("strict") is True, (
-        "without strict, arm64 conforming would pass silently and nobody would "
-        "learn the divergence had closed"
+
+def test_the_superseded_measurement_is_kept_as_history() -> None:
+    """The 0.33 px figure must stay readable, and stay labelled as superseded.
+
+    It was filed twice as a platform property before anyone checked which
+    execution provider had run. Deleting it loses the lesson; asserting it
+    would re-pin a machine measurement. So it is recorded, named for what it
+    actually was, and never compared against.
+    """
+    assert SUPERSEDED_ARM64_DEVIATION_VIA_COREML == 0.33050537
+    assert SUPERSEDED_ARM64_DEVIATION_VIA_COREML > COORD_TOLERANCE_PX, (
+        "the superseded figure should sit outside the bound — that is why it "
+        "needed an xfail at the time"
     )
-    assert mark.args and mark.args[0] is _IS_MACOS_ARM64, (
-        "the expectation must be conditioned on the platform that actually "
-        "diverges — an unconditional xfail would also excuse x86_64, where the "
-        "backends demonstrably conform at "
-        f"{OBSERVED_COORD_DEVIATION_X86_64} px"
-    )
-    reason = mark.kwargs.get("reason", "")
-    assert str(OBSERVED_COORD_DEVIATION_ARM64) in reason
-    assert str(OBSERVED_COORD_DEVIATION_X86_64) in reason, (
-        "the reason must carry BOTH figures, or a reader cannot see that this is "
-        "a platform split rather than a broken backend"
+    assert OBSERVED_COORD_DEVIATION_ARM64 < COORD_TOLERANCE_PX, (
+        "arm64 must now conform; if it does not, the EP fix regressed"
     )
