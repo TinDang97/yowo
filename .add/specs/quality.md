@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 12
+delta_seq: 13
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q13 · open · 2026-09-13] A metric that scopes itself to the model's own output measures precision and calls it accuracy. evaluate_coco_map restricted COCOeval to images that had predictions, removing every miss from the denominator, so a model detecting in 1 of 10 images scored 0.99999999 against a perfect model's 1.0 — degrading recall RAISED the score. The comment above the line stated the choice aloud ('so unscored images don't drag down recall') and it shipped anyway, because the only tests mocked pycocotools and never executed COCOeval. (evidence: tasks/coco-map-evaluator-repair.md)
 - [TDD · Q12 · open · 2026-09-13] A mocked exporter cannot prove an export works. Every export_model call in the unit suite patched _export_onnx and passed FP32 or INT8 — never the signature default — so the default-precision path shipped broken for every detection and OBB model, and the two lines that halve the model were the only uncovered lines in that region of a 50%-covered file. A check that never executes the default value of the argument under test does not bind that value. (evidence: tasks/export-fp16-default.md)
 - [TDD · Q11 · open · 2026-09-13] A measurement taken on one machine is not a property of the code, and asserting it as a constant makes the check a report about that machine. backend-conformance-suite pinned a 0.33050537 px PyTorch-ONNX deviation measured on Apple Silicon; CI on x86_64 measured 0.00015450 for the same code, same weight, same artifact chain - a 2100x platform split - so a strict xfail XPASSed and the pinned assertion failed. The conclusion drawn from the single-platform number (a general cross-backend divergence, hypothesised as BN fusion) was simply wrong. This is Q7 in a new costume: Q7 was an OS-dependent ALLOCATOR, this is an OS-dependent KERNEL. The rule: assert the declared BOUND, never the observed VALUE; record observed values per platform as documentation; and when an expected failure is platform-specific, scope the xfail to that platform with strict so both sides are pinned. (evidence: /tasks/backend-conformance-suite.md)
 - [TDD · Q10 · open · 2026-09-13] An xfail binds a rule but reports neither pass nor fail, so a gate that requires a passing check per rule will refuse it - and that refusal is correct. An expected failure is evidence about a GAP, not about the behaviour. Bind the gap's rule to a check that asserts the marker is strict and carries the measured number: that is what makes an xfail tracking rather than hiding, because strict turns the eventual fix into a red suite instead of a silent XPASS nobody notices. (evidence: /tasks/backend-conformance-suite.md)
