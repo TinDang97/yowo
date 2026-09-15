@@ -53,13 +53,72 @@ def test_weight_fixture_uses_the_verified_resolution_path() -> None:
     )
 
 
-def test_weight_fixture_targets_the_smallest_pinned_model() -> None:
-    """covers: A2 — a 109 MB cold download invites someone to disable the tier."""
-    src = "\n".join(_integration_sources().values())
-    assert "yolo11n" in src or "ModelSize.NANO" in src, (
-        "the fixture should resolve the smallest pinned weight"
+def _weight_pulling_suites() -> set[str]:
+    """Integration modules that resolve a real weight, by what they call.
+
+    Not by what they spell: a module that iterates `ModelSize` downloads every
+    size without ever writing one down.
+    """
+    return {
+        name
+        for name, src in _integration_sources().items()
+        if name != "conftest.py" and ("resolve_weights" in src or "verified_weight" in src)
+    }
+
+
+def test_the_shared_weight_fixture_targets_the_smallest_pinned_model() -> None:
+    """covers: A2 — a 109 MB cold download invites someone to disable the tier.
+
+    Narrowed 2026-09-16 to the shared session fixture, which is what A2 is about.
+    This previously grepped every integration source for the literal strings
+    `yolo11x` and `yolo26x`, and that proxy was already blind to the case it
+    existed to catch: `test_export_parity.py` iterates `for size in ModelSize`
+    and contains neither literal, so `parity-all` had been downloading both
+    109 MB weights since 2026-09-15 with this check green. Meanwhile
+    `test_arch_equivalence.py` compares all ten variants by design — an
+    equivalence claim with two sizes missing is a claim about eight variants.
+
+    A spelling grep sorts those two by spelling. The cost it was worried about
+    is sorted by the cache, which the second half of this check now binds.
+    """
+    conftest = (INTEGRATION / "conftest.py").read_text()
+    assert "_FIXTURE_SIZE = ModelSize.NANO" in conftest, (
+        "the shared session fixture no longer pins the smallest weight. Every "
+        "weight-dependent test that does not name its own variant pays this "
+        "download on a cold cache."
     )
-    assert "yolo11x" not in src and "yolo26x" not in src
+
+
+def test_every_suite_that_pulls_a_weight_runs_where_the_store_is_cached() -> None:
+    """covers: A2 — the cost A2 names, bound by cache rather than by spelling.
+
+    A suite may deliberately pull the largest weights; what it may not do is pay
+    a cold ~1.42 GB download on every run. That is a property of the job, and it
+    holds across every workflow — `parity.yml` escaped a `ci.yml`-only guard
+    within the hour on 2026-09-15.
+    """
+    suites = _weight_pulling_suites()
+    assert suites, "no integration suite resolves a weight — the tier stopped testing"
+
+    offenders: dict[str, str] = {}
+    for workflow in sorted((REPO_ROOT / ".github/workflows").glob("*.yml")):
+        jobs = (yaml.safe_load(workflow.read_text()) or {}).get("jobs", {}) or {}
+        for job_id, job in jobs.items():
+            steps = job.get("steps", []) or []
+            runs = " ".join(" ".join(str(s.get("run", "")).split()) for s in steps)
+            named = sorted(s for s in suites if s in runs)
+            if not named:
+                continue
+            cached = any(
+                "yowo/weights" in str((s.get("with") or {}).get("path", "")) for s in steps
+            )
+            if not cached:
+                offenders[f"{workflow.name}:{job_id}"] = ", ".join(named)
+
+    assert not offenders, (
+        f"these jobs run weight-pulling suites without restoring the weight store: "
+        f"{offenders}. Each pays a cold download of every weight it touches, every run."
+    )
 
 
 def test_ci_caches_the_weight_store_keyed_on_the_digest() -> None:
