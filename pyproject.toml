@@ -136,6 +136,34 @@ reportUnknownArgumentType = false
 reportUnknownParameterType = false
 reportMissingTypeArgument = false
 
+# Branch coverage over the WHOLE package, floor enforced by the build.
+#
+# `source` names the package rather than relying on what the tests happened to
+# import: measuring only imported modules lets DELETING a test raise the
+# percentage. Verified 2026-09-15 — 96 of 96 source files appear in the report.
+#
+# `branch = true` because line coverage alone calls a two-way branch covered
+# when only one side ever executes.
+#
+# fail_under lives HERE and nowhere else. tests/unit/test_coverage_floor.py
+# reads it back and asserts its value, so lowering it to turn a red build green
+# is a visible diff against an assertion rather than an edit to a config line.
+# Raising it is welcome — do both in the same commit.
+[tool.coverage.run]
+branch = true
+source = ["src/yowo"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
