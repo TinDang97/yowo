@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Branch coverage measured, with a floor that fails the build
-status: direction
+status: done
 depth: quick
 milestone: m3-prove-it
 scope:
@@ -21,12 +21,16 @@ verified:
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:6bf1ec80dc901892", binding: "sha256:5e7c6216742b519a" }
   - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:01a11cb96ed548fa" }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/coverage-floor.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: refreeze, authority: human, direction: "sha256:e3379409ea39abed", binding: "sha256:5e7c6216742b519a" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:6c9c034a4937b501" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/coverage-floor.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/coverage-floor.d/runs/2.md, brief: "sha256:6c9c034a4937b501" }
 advised_by: build-craftsman
 ---
 ## CARD
 goal: measure branch coverage over all of `src/yowo`, fail the build below a floor, and bind the floor so it cannot be quietly lowered.
 why: there is no coverage machinery in this repo at all. The number nobody measures is the number nobody defends.
-beat: direction · next: freeze
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -79,15 +83,21 @@ contract:
 ## CHECKS
 Names DECLARED here first and used verbatim; every id below is what `--collect-only` must print.
 
+FORMAT NOTE, learned by refusal 2026-09-15: a check line binds ONLY when it
+carries a trailing ` · <why>` after the covers list. Without it the line parses
+but binds nothing, and the gate refuses naming the rules left uncovered — here
+A2, E1-E4, M2, M3 and all three Rejects, which is exactly the set whose only
+covering lines had no trailing field.
+
 tests/unit/test_coverage_floor.py:
 - test_coverage_is_configured_with_branch_coverage_on · covers: M1,S1 · line coverage alone would call a never-taken branch covered
-- test_the_denominator_is_every_source_file_not_only_the_imported_ones · covers: M1,A2,A4,E2,R:PHANTOM_DENOMINATOR
-- test_a_floor_is_configured_and_fails_the_build · covers: M2,S1
-- test_the_configured_floor_is_the_value_this_check_expects · covers: M3,A14,A18,E4,R:FLOOR_LOWERED_TO_PASS,S3
-- test_a_missing_floor_is_not_read_as_satisfied · covers: A16,E1,S3
+- test_the_denominator_is_every_source_file_not_only_the_imported_ones · covers: M1,A2,A4,E2,R:PHANTOM_DENOMINATOR · measuring only imported modules lets deleting a test raise the percentage
+- test_a_floor_is_configured_and_fails_the_build · covers: M2,S1 · a step that reports a number and exits zero gates nothing
+- test_the_configured_floor_is_the_value_this_check_expects · covers: M3,A14,A18,E4,R:FLOOR_LOWERED_TO_PASS,S3 · lowering the floor becomes a diff against an assertion
+- test_a_missing_floor_is_not_read_as_satisfied · covers: A16,E1,S3 · deleting fail_under must not read as passing it
 - test_the_floor_is_not_above_what_ci_measured · covers: A3,A13,A15 · a floor above the measured value is a build that can never go green
-- test_ci_runs_coverage_in_the_quality_job · covers: M2,A7,A9,A11,S2
-- test_the_coverage_step_cannot_report_success_without_measuring · covers: A10,E3,R:GREEN_BY_SKIP,S2
+- test_ci_runs_coverage_in_the_quality_job · covers: M2,A7,A9,A11,S2 · a fifth quality command, beside the other four
+- test_the_coverage_step_cannot_report_success_without_measuring · covers: A10,E3,R:GREEN_BY_SKIP,S2 · no continue-on-error, no swallowed failure, no second copy of the floor
 - test_what_the_number_covers_is_stated_where_it_is_reported · covers: M4,A8,A12,A6,E5 · the unit tier only, and it says so
 
 red-first: every check MUST fail first.
