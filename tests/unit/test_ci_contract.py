@@ -32,6 +32,8 @@ FROZEN_JOB_IDS = {
     "conformance",
     "accuracy-dataset",
     "map-gate",
+    # `arch-equivalence` appended by task arch-equivalence-in-ci.
+    "arch-equivalence",
 }
 
 # The mAP gate's own budget. 500 images inferred in 20.8 s on local CPU

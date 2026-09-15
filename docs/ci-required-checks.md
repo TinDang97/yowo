@@ -13,7 +13,7 @@ Frozen by ADD task `pr-ci-gate`. Change this file and
 | Setting | Value | Why |
 |---|---|---|
 | Branch | `main` | the only protected branch; releases cut from it |
-| Required status checks | **all eight `ci.yml` jobs, plus `Export Parity`** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all eight") |
+| Required status checks | **all nine `ci.yml` jobs, plus `Export Parity`** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all nine") |
 | Strict (require branches up to date) | `false` | a solo maintainer rebasing every PR before merge is friction without a corresponding risk here |
 | `enforce_admins` | **`true`** | decided 2026-09-08. Nobody bypasses a failing check, repository owner included — an advisory gate is the state this task exists to change |
 | Required approving reviews | none | single maintainer; the gate is automated, not social |
@@ -39,6 +39,7 @@ run passed.
 | `Backend Conformance` | `ci.yml` | `conformance` | **yes** |
 | `Accuracy Dataset` | `ci.yml` | `accuracy-dataset` | **yes** |
 | `mAP Gate` | `ci.yml` | `map-gate` | **yes** |
+| `Arch Equivalence` | `ci.yml` | `arch-equivalence` | **yes** |
 | `Export Parity` | `parity.yml` | `parity-pr` | **yes** |
 | `Export Parity (all variants)` | `parity.yml` | `parity-all` | no — see below |
 | `Quality Gate (release)` | `release.yml` | `quality` | no |
@@ -69,7 +70,7 @@ nothing — and was scoped to `ci.yml`, so `parity.yml` escaped it within the
 hour, publishing `Export Parity` on every pull request while appearing in no
 table. It now covers every workflow with a `pull_request` trigger.
 
-## Why all eight, not just `Quality Gate`
+## Why all nine, not just `Quality Gate`
 
 Amended 2026-09-15 by human decision. `Real Backend Smoke`, `Backend Conformance`
 and `Accuracy Dataset` had each been running on every pull request while blocking
@@ -87,9 +88,11 @@ read the payload rather than a copy of it: `REQUIRED_CONTEXTS` was a hardcoded
 `("Quality Gate",)` while protection had required four since 2026-09-10, so the
 guard against silently un-gating the branch was itself checking a stale list.
 
-The cost is real and was accepted: a flake in any of the eight now blocks a merge,
+The cost is real and was accepted: a flake in any of the nine now blocks a merge,
 and with `enforce_admins: true` there is no bypass short of the emergency path
 below. The two slowest are `Backend Conformance` (~3m) and `mAP Gate` (~1m30s).
+`Arch Equivalence` joined them on 2026-09-16: it compares all ten variants
+against ultralytics, and the comparison itself takes under 10 s.
 
 ## Why all four, not just `Quality Gate`
 

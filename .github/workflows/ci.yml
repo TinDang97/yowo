@@ -307,6 +307,41 @@ jobs:
         run: uv run pytest tests/integration/test_coco_dataset.py -q --tb=short
         timeout-minutes: 45
 
+  # Appended by ADD task `arch-equivalence-in-ci`. `src/yowo/arch/` reimplements
+  # two model families from scratch; the harness that once proved that correct
+  # lived in `tmp/` and no longer exists. This runs the oracle — ultralytics, on
+  # the same weight file — so an architectural drift reds a pull request instead
+  # of being discovered by a user's mAP.
+  arch-equivalence:
+    name: Arch Equivalence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # ultralytics is gated on python_version >= '3.11'. On 3.10 the oracle
+          # is absent, and an absent oracle compares nothing.
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
+      - name: The native arch still computes what ultralytics computes
+        env:
+          # An absent weight or an absent oracle must fail, not skip: a skip is
+          # green, and green here would mean "equivalence confirmed".
+          CI: "true"
+        run: uv run pytest tests/integration/test_arch_equivalence.py -q --tb=short -s
+        timeout-minutes: 30
+
   # Appended by ADD task `map-regression-gate`. A separate job rather than a
   # step on `accuracy-dataset`, for two reasons: it needs the weight store as
   # well as the image store, and branch protection binds a published check

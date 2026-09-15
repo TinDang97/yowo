@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 21
+delta_seq: 22
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M22 · open · 2026-09-16] freeze does not enter the build: 'add brief <slug>' must be run to record the entry, or the gate refuses with R:UNBRIEFED after every check already passed. Hit 2026-09-16 on arch-equivalence-in-ci — three receipts recorded, all green, and the PASS was refused for a step that costs one command at the START of Build. (evidence: /tasks/arch-equivalence-in-ci.md)
 - [ADD · M21 · open · 2026-09-15] A CHECKS line binds its covers: referents ONLY when it carries a trailing ' - <why>' after the covers list. Without that third field the line parses, the test runs and passes, the receipt records 9/9 reported — but only the lines carrying the field are stored as passed, so the gate refuses naming every rule whose covering lines all lacked it. Diagnosed by reading the receipt's passed: list against the CHECKS block: exactly the three lines with a trailing field were the three recorded. (evidence: /tasks/coverage-floor.md)
 - [ADD · M20 · open · 2026-09-15] A CHECKS line binds its covers: referents ONLY when it carries a trailing ' · <why>' after the covers list. Without that third field the line parses, the test runs and passes, and the receipt records 9/9 reported — but the engine stores only the lines that had the field, so the gate refuses naming rules whose every covering line lacked it. Diagnosed by reading the receipt's passed: list against the CHECKS block: exactly the three lines with a trailing field were the three recorded. (evidence: /tasks/coverage-floor.md)
 - [ADD · M19 · open · 2026-09-15] A threshold that the gate reads but no check constrains is a switch labelled as a guarantee. The mAP baseline's tolerance was validated for presence and never for range, so editing 0.005 to 1.0 widened the band to unfalsifiable while leaving 2798 unit tests, four quality gates and pre-commit green — because the only job that reads the file was the one the widened band could no longer fail. A fixture that only a slow integration job loads is unconstrained by the fast suite that everyone actually runs; load the shipped artifact in a unit check and bound its knobs. (evidence: /tasks/map-regression-gate.md)
