@@ -61,7 +61,7 @@ jobs:
         run: uv run pyright src/yowo/
 
       - name: Unit tests
-        run: uv run pytest tests/unit/ -x -q --tb=short --timeout=60
+        run: uv run pytest tests/unit/ -x -q --tb=short --timeout=60 --cov --cov-report=term-missing:skip-covered
         timeout-minutes: 15
 
   # Appended by ADD task `sdist-manifest`. Independent of `quality` by contract (A14).
