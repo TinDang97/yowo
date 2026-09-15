@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.backends._precision import device_type_of, honoured_precision
-from yowo.errors import BackendLoadError, DependencyError, InferenceError
+from yowo.backends._precision import verify_artifact_precision
+from yowo.errors import BackendLoadError, ConfigError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, Precision, PreprocessedTensor
 
@@ -102,6 +102,8 @@ class OpenVinoBackend:
         # here can act on it: the artifact's numerics are already fixed.
         self._precision: Precision | None = precision
         self._precision_explicit: bool = precision_explicit
+        # Read FROM the artifact in load(), never from the request.
+        self._executing_precision: Precision | None = None
         self._compiled_model: object | None = None
         self._infer_request: object | None = None
         self._input_shape: tuple[int, int] = (640, 640)
@@ -131,14 +133,16 @@ class OpenVinoBackend:
 
     @property
     def executing_precision(self) -> Precision | None:
-        """Always ``None``: this backend does not determine its own precision.
+        """What the loaded artifact declares it executes, or ``None``.
 
-        The numerics belong to the compiled artifact it loads, chosen when that
-        artifact was exported. Returning a concrete ``Precision`` here would be
-        a guess about a file this backend never inspected — the exact defect
-        this member exists to remove.
+        This backend decides no precision at runtime — the artifact's numerics
+        were fixed when it was exported — so the answer is read FROM the
+        artifact at ``load()``, never guessed and never echoed back from the
+        request. ``None`` means the artifact does not settle it, which a float32
+        boundary genuinely does not: FP32 and an INT8 QDQ graph are
+        indistinguishable there. The engine reports ``"unknown"`` for that.
         """
-        return None
+        return self._executing_precision
 
     @property
     def input_shape(self) -> tuple[int, int]:
@@ -160,16 +164,6 @@ class OpenVinoBackend:
             DependencyError: ``openvino`` not installed.
             BackendLoadError: Model load or compilation failed.
         """
-        # The device is irrelevant here and deliberately so: this backend
-        # honours nothing on any device, because its numerics were fixed
-        # when the artifact was exported. An explicit request is refused;
-        # an auto-selected one resolves to None and says so.
-        honoured_precision(
-            BackendType.OPENVINO,
-            device_type_of(device),
-            self._precision,
-            explicit=self._precision_explicit,
-        )
         # Reset KV state from any previous model to prevent stale routing
         self._has_kv_io = False
         self._kv_state = {}
@@ -195,6 +189,14 @@ class OpenVinoBackend:
             if all_inputs:
                 input_node = all_inputs[0]
                 self._input_name = input_node.get_any_name()  # type: ignore[attr-defined]
+                # OpenVINO spells half precision "f16" where onnxruntime says
+                # "tensor(float16)"; one helper recognises both.
+                self._executing_precision = verify_artifact_precision(
+                    BackendType.OPENVINO,
+                    input_node.get_element_type().get_type_name(),  # type: ignore[attr-defined]
+                    self._precision,
+                    explicit=self._precision_explicit,
+                )
                 dims = _static_dims(input_node)
                 if len(dims) == 4 and dims[2] is not None and dims[3] is not None:
                     self._input_shape = (dims[2], dims[3])
@@ -225,6 +227,16 @@ class OpenVinoBackend:
                     name: np.zeros(shape, dtype=np.float32)
                     for name, shape in self._kv_shapes.items()
                 }
+        except ConfigError:
+            # A precision the user got wrong is a CONFIG fault and must leave
+            # load() as one. The broad handler below turns everything into
+            # BackendLoadError, which the engine's fallback loop reads as "this
+            # backend faulted, try the next" — so laundering it here would
+            # answer a wrongly-typed flag by quietly running a different
+            # backend, the silent coercion this node exists to remove.
+            self._compiled_model = None
+            self._infer_request = None
+            raise
         except Exception as exc:
             self._compiled_model = None
             self._infer_request = None

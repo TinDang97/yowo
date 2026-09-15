@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.backends._precision import device_type_of, honoured_precision
-from yowo.errors import BackendLoadError, DependencyError, InferenceError
+from yowo.backends._precision import verify_artifact_precision
+from yowo.errors import BackendLoadError, ConfigError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.types import BackendType, Precision, PreprocessedTensor
 
@@ -54,6 +54,8 @@ class OnnxBackend:
         # here can act on it: the artifact's numerics are already fixed.
         self._precision: Precision | None = precision
         self._precision_explicit: bool = precision_explicit
+        # Read FROM the artifact in load(), never from the request.
+        self._executing_precision: Precision | None = None
         self._session: Any = None  # ort.InferenceSession at runtime
         # Providers ORT actually bound, read back at load(). Empty tuple
         # rather than None so a caller on the error path can iterate it.
@@ -99,14 +101,16 @@ class OnnxBackend:
 
     @property
     def executing_precision(self) -> Precision | None:
-        """Always ``None``: this backend does not determine its own precision.
+        """What the loaded artifact declares it executes, or ``None``.
 
-        The numerics belong to the compiled artifact it loads, chosen when that
-        artifact was exported. Returning a concrete ``Precision`` here would be
-        a guess about a file this backend never inspected — the exact defect
-        this member exists to remove.
+        This backend decides no precision at runtime — the artifact's numerics
+        were fixed when it was exported — so the answer is read FROM the
+        artifact at ``load()``, never guessed and never echoed back from the
+        request. ``None`` means the artifact does not settle it, which a float32
+        boundary genuinely does not: FP32 and an INT8 QDQ graph are
+        indistinguishable there. The engine reports ``"unknown"`` for that.
         """
-        return None
+        return self._executing_precision
 
     @property
     def input_shape(self) -> tuple[int, int]:
@@ -127,16 +131,6 @@ class OnnxBackend:
             DependencyError: ``onnxruntime`` not installed.
             BackendLoadError: Session creation failed.
         """
-        # The device is irrelevant here and deliberately so: this backend
-        # honours nothing on any device, because its numerics were fixed
-        # when the artifact was exported. An explicit request is refused;
-        # an auto-selected one resolves to None and says so.
-        honoured_precision(
-            BackendType.ONNX,
-            device_type_of(device),
-            self._precision,
-            explicit=self._precision_explicit,
-        )
         # Reset KV state from any previous model to prevent stale routing
         self._has_kv_io = False
         self._kv_state = {}
@@ -174,6 +168,15 @@ class OnnxBackend:
             # Cache the input node name for infer()
             inputs = self._session.get_inputs()
             self._input_name = inputs[0].name if inputs else ""
+            # Ask the artifact what it executes. A half boundary settles it; a
+            # float one does not (FP32 and INT8 QDQ are identical here), and
+            # `None` is then reported as "unknown" rather than guessed at.
+            self._executing_precision = verify_artifact_precision(
+                BackendType.ONNX,
+                inputs[0].type if inputs else None,
+                self._precision,
+                explicit=self._precision_explicit,
+            )
             # Extract spatial dims from the model's input shape [B, C, H, W]
             input_shape = inputs[0].shape if inputs else None
             if (
@@ -231,6 +234,15 @@ class OnnxBackend:
                         name: ort.OrtValue.ortvalue_from_numpy(arr)
                         for name, arr in self._kv_zeros.items()
                     }
+        except ConfigError:
+            # A precision the user got wrong is a CONFIG fault and must leave
+            # load() as one. The broad handler below turns everything into
+            # BackendLoadError, which the engine's fallback loop reads as "this
+            # backend faulted, try the next" — so laundering it here would
+            # answer a wrongly-typed flag by quietly running a different
+            # backend, the silent coercion this node exists to remove.
+            self._session = None
+            raise
         except Exception as exc:
             self._session = None
             raise BackendLoadError(f"OnnxBackend: session creation failed: {exc}") from exc

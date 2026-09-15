@@ -138,8 +138,20 @@ def test_an_explicit_int8_request_raises_instead_of_being_reported() -> None:
 
     The shipping defect. `select_precision`'s CPU branch returned INT8 for an
     explicit int8 request, stored it on `BackendSelection`, and published it
-    through `health_report()` while fp32 executed. Nothing in this library runs
-    int8 at runtime, on any backend, on any device.
+    through `health_report()` while fp32 executed.
+
+    SCOPE, stated rather than implied: this proves E3's RUNTIME leg — the
+    backends that decide a precision at runtime (pytorch, every device) refuse
+    int8, because none of them executes it. E3 as frozen also says "any
+    backend", and after A3's 2026-09-15 amendment the ARTIFACT backends no
+    longer refuse it: measured here, an explicit int8 on onnx loads and its
+    verdict is None, so `precision_current` reads "unknown". That is deliberate
+    and is the same rule that fixed PR #52 — `yowo export -f onnx --precision
+    int8` is a shipped path, an INT8 QDQ artifact really does execute int8, and
+    a float I/O boundary cannot tell it apart from FP32, so refusing there
+    would refuse a request the system is in fact satisfying. E3's text is
+    unswept residue of the strict reading; raised to the orchestrator for the
+    re-freeze rather than asserted either way here.
     """
     with pytest.raises(ConfigError) as exc:
         _cpu_pytorch_engine(Precision.INT8).load()
@@ -147,19 +159,159 @@ def test_an_explicit_int8_request_raises_instead_of_being_reported() -> None:
     assert "int8" in str(exc.value).lower()
 
 
-def test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32() -> None:
+def _tiny_onnx(path: Path, *, element_type: int) -> Path:
+    """A real, loadable ONNX graph with the given input element type.
+
+    Small on purpose: the property under test is what the ARTIFACT declares at
+    its I/O, and a 10 MB YOLO export proves nothing here that six nodes do not.
+    The conformance suite exercises the real exports.
+    """
+    import onnx
+    from onnx import helper as oh
+
+    inp = oh.make_tensor_value_info("images", element_type, [1, 3, 640, 640])
+    out = oh.make_tensor_value_info("output0", element_type, [1, 3, 640, 640])
+    node = oh.make_node("Identity", ["images"], ["output0"])
+    graph = oh.make_graph([node], "tiny", [inp], [out])
+    model = oh.make_model(graph, opset_imports=[oh.make_opsetid("", 13)])
+    model.ir_version = 9
+    onnx.save(model, str(path))
+    return path
+
+
+def test_an_fp32_artifact_answers_an_explicit_fp32_request(tmp_path: Path) -> None:
+    """covers: A3, E11, M2 — the eight conformance failures on PR #52.
+
+    `_run()` in test_backend_conformance.py exports at FP32, loads that
+    artifact, and requests FP32. The backend is executing exactly what was
+    asked. The first reading of A3 refused it anyway, because it collapsed "I
+    cannot determine what I execute" into "I do not execute this" — and that is
+    the most ordinary invocation there is.
+
+    M2 raises on a DEMONSTRATED mismatch. Ignorance is not a demonstration; M4
+    handles it by reporting "unknown" instead of echoing the request.
+
+    Deliberately NOT `importorskip`. `openvino` is an optional extra that the
+    dev group does not carry, and `pytest.importorskip` would mark this whole
+    check SKIPPED — including the ONNX half that already ran and asserted. The
+    ADD receipt reads a skip as not-passing, so the one check binding the PR #52
+    fix would show up as unproven in the evidence. Each runtime is run when it
+    is present and the check asserts which ones it actually reached.
+    """
+    import onnx
+
+    onnx_path = _tiny_onnx(tmp_path / "fp32.onnx", element_type=onnx.TensorProto.FLOAT)
+    hw = get_hardware_profile()
+    reached: list[str] = []
+
+    # --- ONNX: always ------------------------------------------------------
+    backend = create_backend(
+        BackendType.ONNX, hw, precision=Precision.FP32, precision_explicit=True
+    )
+    backend.load(onnx_path, device="cpu")  # must not raise
+    assert backend.executing_precision is None, (
+        "fp32 I/O is ambiguous between FP32 and an INT8 QDQ graph (measured: "
+        "both report tensor(float) in and out), so the honest answer is None"
+    )
+    backend.unload()
+    reached.append("onnx")
+
+    # --- OpenVINO: when the optional extra is installed ---------------------
+    # A NAMED GAP, not a silent one. ci.yml installs `--extra openvino` only in
+    # the `conformance` job, which runs tests/integration and NOT this file, so
+    # this leg executes nowhere in CI. What keeps that honest:
+    #   * the ONNX leg above always runs, so this check never reports green for
+    #     work it did not do (Q3);
+    #   * OpenVINO's E11 behaviour IS covered in CI by
+    #     tests/integration/test_backend_conformance.py against a real export —
+    #     the very suite whose 8 failures reopened this node;
+    #   * it was run green here against openvino 2025.4.1, 2026-09-15
+    #     (`uv run --with "openvino>=2024.0" pytest ...`).
+    # Closing it means adding openvino to the dev group or to the unit CI job,
+    # and pyproject.toml and .github/ are both outside this node's scope.
+    try:
+        import openvino
+    except ImportError:
+        openvino = None  # type: ignore[assignment]
+
+    if openvino is not None:
+        ir_dir = tmp_path / "ir"
+        ir_dir.mkdir()
+        openvino.save_model(openvino.convert_model(str(onnx_path)), str(ir_dir / "tiny.xml"))
+        ov_backend = create_backend(
+            BackendType.OPENVINO, hw, precision=Precision.FP32, precision_explicit=True
+        )
+        ov_backend.load(ir_dir / "tiny.xml", device="cpu")  # must not raise
+        assert ov_backend.executing_precision is None, (
+            "OpenVINO spells a float boundary 'f32' (measured), which settles "
+            "nothing, so its verdict is None for the same reason ONNX's is"
+        )
+        ov_backend.unload()
+        reached.append("openvino")
+
+    assert "onnx" in reached, (
+        f"the ONNX leg is unconditional and must always run; reached={reached}"
+    )
+
+
+def test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32(
+    tmp_path: Path,
+) -> None:
     """covers: M2, A3, A16.
 
-    `fp32` is not a null request. A TensorRT engine built FP16 executes FP16;
-    passing an explicit fp32 through to it would report one number while another
-    ran — the int8 defect wearing a quieter hat. So the carve-out does not exist.
+    The frozen NAME predates the 2026-09-15 amendment of A3 and is now wider
+    than the rule: an explicit precision on an artifact backend does not raise
+    unconditionally. Its frozen RATIONALE survives the amendment verbatim —
+    "fp32 is not a null request; a FP16 artifact executing under an explicit
+    fp32 is the same lie" — and that is the demonstrated-mismatch case A3 keeps.
+    So this body proves the rationale rather than the stale name. Raised to the
+    orchestrator for the re-freeze; not edited here, because frozen text is not
+    mine to sweep.
+
+    Two legs, because the citation is three-way:
+
+    * M2/A3 — a FP16 artifact under an explicit fp32 raises `ConfigError`, and
+      the message names both halves so the operator learns WHICH one to change.
+      Measured: this project's FP16 export writes `tensor(float16)` at both
+      ends where FP32 writes `tensor(float)`, so the mismatch is shown, not
+      assumed.
+    * A16 — an artifact backend's verdict is `None`, NEVER `Precision.FP32`.
+      This is the leg that would catch the verdict quietly becoming "fp32"
+      again; without it A16 is cited and unproven, since a float boundary is
+      exactly where claiming fp32 is most tempting and least warranted.
     """
+    import onnx
+
+    # Leg 1: the shown mismatch raises, and names both halves.
+    path = _tiny_onnx(tmp_path / "fp16.onnx", element_type=onnx.TensorProto.FLOAT16)
+    backend = create_backend(
+        BackendType.ONNX,
+        get_hardware_profile(),
+        precision=Precision.FP32,
+        precision_explicit=True,
+    )
     with pytest.raises(ConfigError) as exc:
-        honoured_precision(BackendType.ONNX, DeviceType.CUDA, Precision.FP32, explicit=True)
+        backend.load(path, device="cpu")
 
     message = str(exc.value).lower()
-    assert "onnx" in message
-    assert "export" in message, f"the remedy for an artifact backend is to re-export: {message}"
+    assert "onnx" in message, f"the message must name the backend (A23): {message}"
+    assert "fp16" in message, f"the message must name what the artifact declares: {message}"
+    assert "fp32" in message, f"the message must name the request: {message}"
+    assert "re-export" in message, f"the remedy for an artifact backend (A23): {message}"
+
+    # Leg 2 (A16): a float boundary yields no verdict, not a fp32 claim.
+    ambiguous = _tiny_onnx(tmp_path / "float.onnx", element_type=onnx.TensorProto.FLOAT)
+    for asked in (Precision.FP16, None):
+        quiet = create_backend(
+            BackendType.ONNX, get_hardware_profile(), precision=asked, precision_explicit=True
+        )
+        quiet.load(ambiguous, device="cpu")
+        assert quiet.executing_precision is None, (
+            "a float boundary is silent — measured, a keep_io_types fp16 export "
+            "computes in fp16 behind tensor(float) — so the verdict is None and "
+            f"the engine reports 'unknown'; asked={asked}"
+        )
+        quiet.unload()
 
 
 def test_an_auto_selected_precision_that_cannot_be_honoured_does_not_raise() -> None:
@@ -572,17 +724,34 @@ def test_no_fixture_in_this_suite_requests_the_default_precision() -> None:
         "DetectionEngine": None,
         "create_backend": None,
     }
-    # The single exemption, with its reason stated — an allowlist without one
-    # is how a genuine gap gets exempted. In this check fp32 IS the non-default
-    # subject: the point is that an explicit fp32 to an artifact backend is not
-    # a null request, so it has to be the value asked for.
-    exempt = "test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32"
+    # The exemptions, each with its reason stated — an allowlist without one is
+    # how a genuine gap gets exempted. Q4 exists so a value that never
+    # travelled cannot compare equal to one that did; it does not apply where
+    # fp32 IS the subject under test rather than an incidental fixture value,
+    # and in all three of these the frozen text names fp32 explicitly.
+    exempt = {
+        "test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32": (
+            "an explicit fp32 against an artifact that declares fp16 is the "
+            "mismatch this check exists for; fp32 has to be the value asked for"
+        ),
+        "test_an_fp32_artifact_answers_an_explicit_fp32_request": (
+            "E11 is literally an fp32 request against an FP32 artifact — the "
+            "eight conformance failures on PR #52; no other value reproduces it"
+        ),
+    }
 
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
     for func in ast.walk(tree):
-        if isinstance(func, ast.FunctionDef) and func.name == exempt:
+        if isinstance(func, ast.FunctionDef) and func.name in exempt:
             for inner in ast.walk(func):
                 inner._q4_exempt = True  # type: ignore[attr-defined]
+
+    # An exemption naming a check that does not exist is a stale carve-out that
+    # would silently widen on the next rename.
+    defined = {f.name for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)}
+    assert not (set(exempt) - defined), (
+        f"stale Q4 exemptions naming no check: {sorted(set(exempt) - defined)}"
+    )
 
     offenders: list[str] = []
     for node in ast.walk(tree):

@@ -594,30 +594,38 @@ class BaseEngine(StreamingMixin):
         return self._selection.precision
 
     def _verify_precision_honoured(self) -> None:
-        """Refuse an explicit request the loaded backend does not execute.
+        """Refuse an explicit request the loaded backend DEMONSTRABLY does not run.
 
         The single verdict site, and it is here rather than at construction
         because this is the only point downstream of BOTH the fallback
         re-selection and the `backend_instance` branch — each of which used to
         replace an explicit request without telling anyone. A backend that
-        resolved its own device has usually raised a better-worded error
-        already; this is the backstop that no path can route around.
+        resolved its own device, or interrogated its own artifact, has usually
+        raised a better-worded error already; this is the backstop no path can
+        route around.
+
+        A backend reporting `None` executes something it cannot name, which is
+        IGNORANCE, not disagreement — refusing there is what broke eight
+        conformance tests on PR #52, where an FP32-exported artifact answering
+        an explicit `fp32` request was refused for being unable to prove it.
+        M4 carries the honesty for that case instead: `precision_current` reads
+        `"unknown"`, so nothing unexecuted is ever reported.
         """
         requested = self._requested_precision
         if requested is None:
             return
         executing = self._backend.executing_precision
-        if executing is requested:
+        if executing is None or executing is requested:
             return
-        ran = executing.value if executing is not None else "a precision fixed in its artifact"
         with contextlib.suppress(Exception):
             self._backend.unload()
         raise ConfigError(
             f"Backend '{self._backend.backend_type.value}' on device "
             f"'{self._device}' cannot honour precision '{requested.value}'; it "
-            f"executes {ran}. It was executing that before this error existed "
-            f"too — the request was accepted and ignored. Omit the precision "
-            f"request, or choose a backend and device that execute it."
+            f"executes '{executing.value}'. It was executing that before this "
+            f"error existed too — the request was accepted and ignored. Omit "
+            f"the precision request, or choose a backend and device that "
+            f"execute it."
         )
 
     def _finalize_load(self) -> None:

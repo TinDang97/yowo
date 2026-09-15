@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from yowo.backends._precision import device_type_of, honoured_precision
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
 from yowo.types import BackendType, Precision, PreprocessedTensor
@@ -44,6 +43,8 @@ class CoreMLBackend:
         # here can act on it: the artifact's numerics are already fixed.
         self._precision: Precision | None = precision
         self._precision_explicit: bool = precision_explicit
+        # Read FROM the artifact in load(), never from the request.
+        self._executing_precision: Precision | None = None
         self._model: Any = None
         self._input_shape: tuple[int, int] = (640, 640)
         self._input_name: str = "images"
@@ -65,14 +66,26 @@ class CoreMLBackend:
 
     @property
     def executing_precision(self) -> Precision | None:
-        """Always ``None``: this backend does not determine its own precision.
+        """ALWAYS ``None`` on this backend — a NAMED GAP, not a claim.
 
-        The numerics belong to the compiled artifact it loads, chosen when that
-        artifact was exported. Returning a concrete ``Precision`` here would be
-        a guess about a file this backend never inspected — the exact defect
-        this member exists to remove.
+        The other three artifact backends answer this by reading the element
+        type at the loaded artifact's I/O boundary. That does not transfer here:
+        coremltools keeps compute precision in the model spec rather than at the
+        I/O, so the one-line read that settles ONNX, TensorRT and OpenVINO has
+        no CoreML equivalent — and this backend is ``UNVERIFIED`` in
+        ``_roster.py`` (macOS only, no CI runner), so determinability written
+        here would ship unexecuted and unmeasured. Guessing a ``Precision``
+        instead would be R:REPORTS_REQUEST wearing a CoreML hat.
+
+        So the engine reports ``"unknown"`` for every CoreML load. That is the
+        honest answer until someone can run the thing: under A3's three-way
+        reading, CANNOT DETERMINE accepts the request and refuses nothing, and
+        M4 keeps anything unexecuted from being reported.
+
+        The slot is real rather than a literal ``return None`` so that closing
+        the gap is an assignment in ``load()``, not a rewrite of this property.
         """
-        return None
+        return self._executing_precision
 
     @property
     def input_shape(self) -> tuple[int, int]:
@@ -94,16 +107,6 @@ class CoreMLBackend:
             BackendLoadError: Model file invalid or cannot be loaded.
             DependencyError: coremltools not installed.
         """
-        # The device is irrelevant here and deliberately so: this backend
-        # honours nothing on any device, because its numerics were fixed
-        # when the artifact was exported. An explicit request is refused;
-        # an auto-selected one resolves to None and says so.
-        honoured_precision(
-            BackendType.COREML,
-            device_type_of(device),
-            self._precision,
-            explicit=self._precision_explicit,
-        )
         try:
             import coremltools as ct  # type: ignore[import-untyped]
         except ImportError as exc:
