@@ -1,8 +1,9 @@
 ---
 type: Task
 title: Calibrate on the inference preprocessing path; measure the delta
-status: direction
+status: done
 depth: deep
+sensitivity: architecture
 milestone: m4-honest-deployment
 scope:
   - src/yowo/export/
@@ -10,6 +11,7 @@ scope:
   - tests/unit/test_int8_decode_tail.py
   - tests/unit/test_int8_parity_gate.py
   - tests/integration/test_int8_parity.py
+  - .github/workflows/
 gives:
   - S1 decode_tail(model) -> set[str] — the post-head decode nodes, computed from the graph
   - S2 measure_int8_parity(fp32, int8, images, ...) -> ParityReport — post-NMS recall vs the FP32 source
@@ -25,12 +27,32 @@ verified:
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/2.md }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/3.md }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:1bfaee6ece662a8c", receipt: /tasks/int8-calibration-parity.d/interviews/1.md, answers: "A2=confirm|A3=confirm|A4=confirm|A6=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A14=confirm|A16=confirm|A20=confirm|A21=confirm|A22=confirm|A24=confirm|A26=confirm|A28=confirm|A30=confirm|A31=confirm|A34=confirm|A36=confirm|R:SILENTZERO=confirm|R:PARTIAL=confirm|R:HARDCODEDTAIL=confirm|R:VACUOUS=confirm|R:UNMEASURABLE=confirm" }
+  - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:471b1427462b29f8", binding: "sha256:255682ab551700d2" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:77b19d0b33ed4056" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/5.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: refreeze, authority: human, direction: "sha256:471b1427462b29f8", binding: "sha256:255682ab551700d2" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:98b8221b25f68437" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/6.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: refreeze, authority: human, direction: "sha256:d0ee7982cb584b09", binding: "sha256:255682ab551700d2" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:875d8951cdc61cee" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/7.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/7.md, brief: "sha256:875d8951cdc61cee" }
+  - { by: loop, at: 2026-09-15, act: reopen, to: verify, reason: "Rebased onto main after #51 merged; .github/workflows/ci.yml is in scope and changed in the rebase conflict resolution, so the receipt's freshness claim no longer held." }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/8.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/int8-calibration-parity.d/runs/8.md, brief: "sha256:b1c9c53136856856" }
 advised_by: artifact-integrity-steward
 ---
 ## CARD
 goal: An ONNX INT8 artifact either detects what its FP32 source detects, or it is never written.
 why: The shipping INT8 export produces a well-formed (1,84,8400) tensor of zeros — an artifact that lies, which is worse than one that crashes, because the crash is caught and the lie is deployed.
-beat: direction · next: run the CHECKS red, then add freeze int8-calibration-parity
+beat: done · next: add status
+
+sensitivity: stamped `architecture` 2026-09-15, on the executing agent's own recommendation and against the orchestrator's initial lean toward `security`. The agent's argument was accepted: this node publishes contract surfaces and changes `export_model`'s behaviour, but touches no credential or authorization boundary, and diluting the HARD-STOP lens costs the signal it exists to carry. The human floor was already unavoidable regardless — `src/yowo/export/` is listed in `.add/index.md`'s `sensitive_paths:`. One genuinely security-shaped finding did surface and was fixed in the build: the sidecar was about to ship absolute build-machine paths (`/Users/<username>/...`) to every artifact recipient, and `ParityReport.images` now stores basenames.
+
+DECIDED 2026-09-15 by the orchestrator, with the human away and both calls flagged for reversal:
+  (i) THE FLOOR GATES RECALL ONLY, for now. The repaired artifact emits 6 boxes where FP32 emits 5, at `total_recall: 1.0` — nothing refuses a false-positive flood. `int8_unmatched` RECORDS it; no rule gates it. Shipping the recall gate is the whole win (0 detections -> 5), and a precision floor picked from one image on one model would repeat the exact trap the recall floor already sits in. RESIDUAL, named not buried: the 6th box is class 7 at 0.2579, sitting just above the 0.25 default threshold, and nobody has yet established whether it is a duplicate, an NMS artifact, or a genuine weak find FP32 missed. A `parity_precision_floor` is the follow-up.
+  (ii) TWO COMBINATIONS ARE REFUSED BY NAME: INT8 + `kv_cache` (a multi-input graph the single-input quantizer cannot address) and INT8 for `classify`/`obb` (the detection decoder cannot decode either output). This is a user-visible change to `export_model`, and it is the node's own thesis applied consistently: neither path could produce a working artifact, and an artifact that loads and lies is worse than an export that refuses. The alternative — warn and silently emit FP32 — would reinstate the m4 defect wearing a different hat, since the sidecar would then have to either lie about the precision or contradict the request.
 
 ## RULES
 <must>
@@ -179,8 +201,13 @@ strategy:
 5. `_exporter.py` records `asdict(report)` at `ExportMetadata.extra["int8_parity"]` and takes the
    published path from `report.output_path`.
 
-scope: `src/yowo/export/` and the four test files named in the frontmatter. This node does NOT
-touch `src/yowo/backends/`, `src/yowo/config.py`, `src/yowo/engine.py` or `.github/workflows/`.
+scope: `src/yowo/export/`, the four test files named in the frontmatter, and `.github/workflows/`.
+This node does NOT touch `src/yowo/backends/`, `src/yowo/config.py` or `src/yowo/engine.py`.
+AMENDED 2026-09-15: `.github/workflows/` was reserved to the orchestrator while three agents ran in
+parallel, so this node never declared it — and then the orchestrator appended the node's own CI step
+to that file, which the gate correctly refused as an undeclared sensitive edit. Serializing the
+writes was right; leaving the path out of `scope:` was not. The step belongs to this node, so the
+path does too.
 
 regression floor: the four quality-gate commands clean —
 `uv run ruff check src/ tests/` · `uv run ruff format --check src/ tests/` ·
@@ -249,6 +276,7 @@ SUPPORTED — each needing its own gate — is a scope decision for the human, n
   is recorded rather than left for a reader to infer from a recall of 1.0.
 
 ## CHECKS
+- test_the_report_counts_the_int8_boxes_nobody_claimed · covers: E10 · an artifact emitting three boxes against one FP32 detection reads gated_recall 1.0 and int8_unmatched 2 — recall alone calls a hallucinating model perfect, so the unclaimed count is on the report rather than left to be inferred
 - test_decode_tail_follows_a_perturbed_graph · covers: M1,R:HARDCODEDTAIL · inserting one op between the head Conv and the output grows the tail by exactly that node, so the set is computed and not recited
 - test_decode_tail_follows_a_shortened_graph · covers: M1,R:HARDCODEDTAIL · removing one decode op shrinks the tail by exactly that node
 - test_decode_tail_stops_at_conv · covers: M1,A3 · the terminating Conv and everything above it stay out of the set

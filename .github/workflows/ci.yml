@@ -252,6 +252,17 @@ jobs:
         run: uv run pytest tests/integration/test_export_default_precision.py -q --tb=short
         timeout-minutes: 20
 
+      # INT8 shipped an artifact that loaded, inferred, returned a well-formed
+      # (1,84,8400) and detected NOTHING — every class row exactly zero while the
+      # box rows still decoded, which is why it looked healthy. No unit check
+      # could catch it: they all mock the quantizer. This runs a real export and
+      # a real quantization and asserts the artifact still detects.
+      - name: An INT8 artifact still detects what its FP32 source detects
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_int8_parity.py -q --tb=short
+        timeout-minutes: 20
+
   # COCO val2017 is 1.07 GB from a third party, so it is fetched under a SHA-256
   # pin, over the path-style S3 URL: https://images.cocodataset.org/ is fronted
   # by a certificate for s3.amazonaws.com and fails TLS verification, which is
