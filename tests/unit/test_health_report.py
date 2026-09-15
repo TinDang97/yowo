@@ -13,7 +13,7 @@ import pytest
 
 from yowo.backends import InferenceBackend
 from yowo.engine import HealthReport, InferenceEngine
-from yowo.types import BackendType, HealthStatus
+from yowo.types import BackendType, HealthStatus, Precision
 
 _RESOLVE_PATCH = "yowo.engine.resolve_weights"
 
@@ -28,6 +28,9 @@ def _make_mock_backend() -> MagicMock:
     mock.backend_type = BackendType.PYTORCH
     mock.is_loaded = False
     mock.input_shape = (640, 640)
+    # `precision_current` is produced by the EXECUTING backend now, so a mock
+    # that does not answer this returns a MagicMock where a precision belongs.
+    mock.executing_precision = Precision.FP32
 
     def _load(*args: object, **kwargs: object) -> None:
         mock.is_loaded = True

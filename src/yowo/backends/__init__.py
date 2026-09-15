@@ -19,7 +19,7 @@ from yowo.backends._selector import (
     select_backend,
 )
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendType, ModelSpec, PreprocessedTensor
+from yowo.types import BackendType, ModelSpec, Precision, PreprocessedTensor
 
 __all__ = [
     "InferenceBackend",
@@ -53,6 +53,22 @@ class InferenceBackend(Protocol):
     @property
     def input_shape(self) -> tuple[int, int]:
         """Expected (H, W) input size."""
+        ...
+
+    @property
+    def executing_precision(self) -> Precision | None:
+        """The precision this backend's own compute is executing.
+
+        ``None`` means this backend does not DETERMINE the precision — the
+        artifact it loaded does, because those numerics were fixed when the
+        artifact was exported. ``None`` is a complete and correct answer, never
+        an error and never a reason to fall back. Do **not** return a concrete
+        ``Precision`` you cannot verify: a guess here is the defect this member
+        exists to remove.
+
+        Reads ``None`` before ``load()`` on every backend: until a device is
+        resolved, the only value available is the request.
+        """
         ...
 
     def load(self, model_path: str | Path, *, device: str = "auto") -> None:
@@ -147,6 +163,8 @@ def create_backend(
     model_builder: ModelBuilder | None = None,
     feature_cache: Any | None = None,
     kv_cache: bool = False,
+    precision: Precision | None = None,
+    precision_explicit: bool = False,
 ) -> InferenceBackend:
     """Instantiate a backend (does not load a model).
 
@@ -163,6 +181,12 @@ def create_backend(
             caching (PyTorch backend only, ignored by others).
         kv_cache: Enable attention KV cache and block output cache for
             streaming inference (PyTorch backend only).
+        precision: The precision to execute at. Carried to the backend rather
+            than computed and dropped; the backend resolves what it can really
+            run inside ``load()``, once it has a device.
+        precision_explicit: ``True`` when a human asked for *precision*. An
+            explicit request a backend cannot honour raises ``ConfigError`` at
+            ``load()``; an auto-selected one is adjusted silently.
 
     Returns:
         An unloaded ``InferenceBackend`` instance.
@@ -180,20 +204,38 @@ def create_backend(
             model_builder=model_builder,
             feature_cache=feature_cache,
             kv_cache=kv_cache,
+            precision=precision,
+            precision_explicit=precision_explicit,
         )
     elif backend_type == BackendType.ONNX:
         from yowo.backends._onnx import OnnxBackend
 
-        return OnnxBackend(hw_profile)
+        return OnnxBackend(
+            hw_profile,
+            precision=precision,
+            precision_explicit=precision_explicit,
+        )
     elif backend_type == BackendType.TENSORRT:
         from yowo.backends._tensorrt import TensorRTBackend
 
-        return TensorRTBackend(hw_profile)
+        return TensorRTBackend(
+            hw_profile,
+            precision=precision,
+            precision_explicit=precision_explicit,
+        )
     elif backend_type == BackendType.OPENVINO:
         from yowo.backends._openvino import OpenVinoBackend
 
-        return OpenVinoBackend(hw_profile)
+        return OpenVinoBackend(
+            hw_profile,
+            precision=precision,
+            precision_explicit=precision_explicit,
+        )
     else:  # BackendType.COREML
         from yowo.backends._coreml import CoreMLBackend
 
-        return CoreMLBackend(hw_profile)
+        return CoreMLBackend(
+            hw_profile,
+            precision=precision,
+            precision_explicit=precision_explicit,
+        )

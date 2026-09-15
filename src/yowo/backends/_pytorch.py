@@ -16,10 +16,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import NDArray
 
+from yowo.backends._precision import device_type_of, honoured_precision
 from yowo.errors import BackendLoadError, DependencyError, DeviceError, InferenceError
 from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.models._weights import WeightIntegrityError
-from yowo.types import BackendType, ModelSpec, PreprocessedTensor
+from yowo.types import BackendType, ModelSpec, Precision, PreprocessedTensor
 
 if TYPE_CHECKING:
     # Type-only: the registry is imported inside load() to keep it off the
@@ -46,9 +47,10 @@ class PyTorchBackend:
         model_builder: Any | None = None,
         compile: bool = False,
         compile_mode: str = "reduce-overhead",
-        fp16: bool = False,
         feature_cache: Any | None = None,
         kv_cache: bool = False,
+        precision: Precision | None = None,
+        precision_explicit: bool = False,
     ) -> None:
         if not hw_profile.libraries.torch_version:
             raise DependencyError(
@@ -64,7 +66,13 @@ class PyTorchBackend:
         self._input_shape: tuple[int, int] = (640, 640)
         self._compile: bool = compile
         self._compile_mode: str = compile_mode
-        self._fp16: bool = fp16
+        # The REQUEST, kept raw. What actually executes is resolved in load(),
+        # once _resolve_device has produced a real device string — never from
+        # BackendSelection.device_type, which can say CUDA while this runs on CPU.
+        self._precision: Precision | None = precision
+        self._precision_explicit: bool = precision_explicit
+        self._executing_precision: Precision | None = None
+        self._fp16: bool = False
         self._feature_cache: Any | None = feature_cache
         self._kv_cache: bool = kv_cache
         self._neck_hook_handle: Any = None
@@ -86,6 +94,30 @@ class PyTorchBackend:
     @property
     def input_shape(self) -> tuple[int, int]:
         return self._input_shape
+
+    @property
+    def executing_precision(self) -> Precision | None:
+        """The precision this backend is executing; ``None`` before ``load()``."""
+        return self._executing_precision
+
+    def _resolve_precision(self, device: str) -> None:
+        """Decide what this backend will really execute on *device*.
+
+        Called from ``load()`` with the device string this backend RESOLVED, so
+        the decision is taken against the hardware that runs rather than against
+        a selection that can disagree with it.
+
+        Raises:
+            ConfigError: An explicitly requested precision this backend does not
+                execute on this device.
+        """
+        self._executing_precision = honoured_precision(
+            BackendType.PYTORCH,
+            device_type_of(device),
+            self._precision,
+            explicit=self._precision_explicit,
+        )
+        self._fp16 = self._executing_precision is Precision.FP16
 
     # ------------------------------------------------------------------
     # Protocol methods
@@ -137,6 +169,9 @@ class PyTorchBackend:
 
         self._torch = torch  # cache for hot path
         resolved = self._resolve_device(device)
+        # Before any weight is touched: an impossible configuration should not
+        # cost a model load first.
+        self._resolve_precision(resolved)
 
         # --- Custom model builder: delegate entirely to caller ---
         if self._model_builder is not None:

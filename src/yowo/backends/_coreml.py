@@ -9,9 +9,10 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from yowo.backends._precision import device_type_of, honoured_precision
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendType, PreprocessedTensor
+from yowo.types import BackendType, Precision, PreprocessedTensor
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,21 @@ class CoreMLBackend:
     no base class required.
     """
 
-    def __init__(self, hw_profile: HardwareProfile) -> None:
+    def __init__(
+        self,
+        hw_profile: HardwareProfile,
+        *,
+        precision: Precision | None = None,
+        precision_explicit: bool = False,
+    ) -> None:
         if not hw_profile.libraries.coremltools_version:
             raise DependencyError("coremltools", "uv add coremltools>=7.0")
 
         self._hw = hw_profile
+        # Kept only so load() can refuse an explicit request. Nothing
+        # here can act on it: the artifact's numerics are already fixed.
+        self._precision: Precision | None = precision
+        self._precision_explicit: bool = precision_explicit
         self._model: Any = None
         self._input_shape: tuple[int, int] = (640, 640)
         self._input_name: str = "images"
@@ -51,6 +62,17 @@ class CoreMLBackend:
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
+
+    @property
+    def executing_precision(self) -> Precision | None:
+        """Always ``None``: this backend does not determine its own precision.
+
+        The numerics belong to the compiled artifact it loads, chosen when that
+        artifact was exported. Returning a concrete ``Precision`` here would be
+        a guess about a file this backend never inspected — the exact defect
+        this member exists to remove.
+        """
+        return None
 
     @property
     def input_shape(self) -> tuple[int, int]:
@@ -72,6 +94,16 @@ class CoreMLBackend:
             BackendLoadError: Model file invalid or cannot be loaded.
             DependencyError: coremltools not installed.
         """
+        # The device is irrelevant here and deliberately so: this backend
+        # honours nothing on any device, because its numerics were fixed
+        # when the artifact was exported. An explicit request is refused;
+        # an auto-selected one resolves to None and says so.
+        honoured_precision(
+            BackendType.COREML,
+            device_type_of(device),
+            self._precision,
+            explicit=self._precision_explicit,
+        )
         try:
             import coremltools as ct  # type: ignore[import-untyped]
         except ImportError as exc:

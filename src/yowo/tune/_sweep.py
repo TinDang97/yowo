@@ -1,9 +1,9 @@
-"""Calibration sweep: measure FPS for backend x batch_size x precision combinations.
+"""Calibration sweep: measure FPS for backend x batch_size combinations.
 
 Public API
 ----------
 - ``SweepResult``: dataclass capturing one measurement result.
-- ``run_sweep()``: iterate available backends x precisions x batch sizes,
+- ``run_sweep()``: iterate available backends x batch sizes,
   measure FPS on synthetic frames, return results sorted by FPS descending.
 """
 
@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
 
 from yowo.backends import check_backend_available
 from yowo.errors import BackendError
-from yowo.types import BackendType, Frame, Precision
+from yowo.types import BackendType, Frame
 
 if TYPE_CHECKING:
     from yowo.hardware import HardwareProfile
@@ -55,12 +55,16 @@ _BATCH_SIZES: list[int] = [1, 2, 4, 8, 16, 32]
 
 @dataclass
 class SweepResult:
-    """One FPS measurement for a specific backend/batch_size/precision combo.
+    """One FPS measurement for a specific backend/batch_size combo.
 
     Attributes:
         backend: Backend name string (e.g. ``"pytorch"``).
         batch_size: Batch size used during measurement.
-        precision: Precision string (e.g. ``"fp32"``).
+        precision: The precision the backend ACTUALLY executed, read back
+            from the engine after load — or ``"unknown"`` when the backend
+            does not determine it (its artifact does) and for a skipped
+            row, where nothing ran. Never a requested value: the sweep no
+            longer asks for one.
         fps: Measured frames per second. 0.0 for skipped configs.
         skipped: True if this config was skipped (e.g. OOM).
         skip_reason: Human-readable reason for skipping.
@@ -101,41 +105,6 @@ def _enumerate_backends(hw: HardwareProfile) -> list[BackendType]:
     return available
 
 
-def _precisions_for_backend(
-    backend: BackendType,
-    hw: HardwareProfile,
-) -> list[Precision]:
-    """Return precision list for a backend given hardware capabilities.
-
-    INT8 is only included for TENSORRT when TensorRT is available.
-    FP16 is only included for GPU-capable backends when a GPU is present.
-
-    Args:
-        backend: The backend to query.
-        hw: Current hardware profile.
-
-    Returns:
-        Ordered list of :class:`~yowo.types.Precision` values to sweep.
-    """
-    has_gpu = hw.has_nvidia_gpu
-
-    if backend == BackendType.TENSORRT:
-        trt_available = hw.libraries.tensorrt_version is not None
-        if trt_available:
-            return [Precision.FP32, Precision.FP16, Precision.INT8]
-        return [Precision.FP32]
-    elif backend in (BackendType.PYTORCH, BackendType.ONNX):
-        if has_gpu:
-            return [Precision.FP32, Precision.FP16]
-        return [Precision.FP32]
-    elif backend == BackendType.OPENVINO:
-        return [Precision.FP32]
-    elif backend == BackendType.COREML:
-        return [Precision.FP32, Precision.FP16]
-    else:
-        return [Precision.FP32]
-
-
 # ---------------------------------------------------------------------------
 # OOM detection helper
 # ---------------------------------------------------------------------------
@@ -159,27 +128,34 @@ def _measure_config(
     spec: ModelSpec,
     hw: HardwareProfile,
     backend: BackendType,
-    precision: Precision,
     batch_size: int,
     warmup_frames: int,
     measure_frames: int,
-) -> float:
-    """Measure FPS for one specific (backend, precision, batch_size) configuration.
+) -> tuple[float, str]:
+    """Measure FPS for one (backend, batch_size) configuration.
 
     Creates an engine, runs ``warmup_frames`` detections (untimed), then times
     ``measure_frames`` detections. The engine is always closed in a finally block.
+
+    No precision is REQUESTED. The sweep used to pass one, which made every row
+    an explicit user request as far as the engine is concerned — and since
+    nothing consumed the value, every precision row measured an identical
+    configuration, so the stored winner was FPS noise picked between
+    indistinguishable runs. The precision is now read back from the engine
+    AFTER load: what executed, not what was asked for.
 
     Args:
         spec: Model specification.
         hw: Hardware profile (unused by engine directly; passed for API context).
         backend: Backend to use for this measurement.
-        precision: Precision mode.
         batch_size: Batch size to configure.
         warmup_frames: Number of warmup iterations (not timed).
         measure_frames: Number of measured iterations for FPS calculation.
 
     Returns:
-        Measured FPS as ``measure_frames / elapsed_seconds``.
+        ``(fps, executing_precision)`` — FPS as ``measure_frames / elapsed``,
+        and the precision the backend actually ran, or the engine's documented
+        ``"unknown"`` sentinel when the backend does not determine it.
     """
     task = spec.task
     if task == "obb":
@@ -191,7 +167,6 @@ def _measure_config(
             model_size=spec.size,
             num_classes=spec.num_classes,
             backend=backend,
-            precision=precision,
             batch_size=batch_size,
         )
         engine = OBBEngine(config)
@@ -204,7 +179,6 @@ def _measure_config(
             model_size=spec.size,
             num_classes=spec.num_classes,
             backend=backend,
-            precision=precision,
             batch_size=batch_size,
         )
         engine = ClassificationEngine(config)
@@ -217,7 +191,6 @@ def _measure_config(
             model_size=spec.size,
             num_classes=spec.num_classes,
             backend=backend,
-            precision=precision,
             batch_size=batch_size,
         )
         engine = DetectionEngine(config)
@@ -247,7 +220,7 @@ def _measure_config(
             infer(frames)
         elapsed = time.monotonic() - t0
 
-        return measure_frames / elapsed
+        return measure_frames / elapsed, engine.health_report().precision_current
     finally:
         engine.close()
 
@@ -290,108 +263,108 @@ def run_sweep(
         _log.info("run_sweep: dry_run=True, skipping all measurements.")
         return []
 
+    # The ONE sentinel for "the precision that executed is not knowable",
+    # defined and documented in engine.py. Reused rather than respelled: a
+    # second spelling of the same meaning is how a sentinel stops meaning one
+    # thing. Imported here, not at module scope, because this file keeps the
+    # engine layer out of its import graph on purpose.
+    from yowo.engine import PRECISION_UNKNOWN
+
     available_backends = _enumerate_backends(hw)
     results: list[SweepResult] = []
 
     for backend in available_backends:
-        precisions = _precisions_for_backend(backend, hw)
+        oom_hit = False
 
-        for precision in precisions:
-            oom_hit = False
-
-            for batch_size in _BATCH_SIZES:
-                if oom_hit:
-                    _log.debug(
-                        "OOM already hit for %s/%s; skipping batch_size=%d.",
-                        backend.value,
-                        precision.value,
-                        batch_size,
+        for batch_size in _BATCH_SIZES:
+            if oom_hit:
+                _log.debug(
+                    "OOM already hit for %s; skipping batch_size=%d.",
+                    backend.value,
+                    batch_size,
+                )
+                results.append(
+                    SweepResult(
+                        backend=backend.value,
+                        batch_size=batch_size,
+                        precision=PRECISION_UNKNOWN,
+                        fps=0.0,
+                        skipped=True,
+                        skip_reason="OOM",
                     )
+                )
+                continue
+
+            try:
+                fps, executed = _measure_config(
+                    spec,
+                    hw,
+                    backend,
+                    batch_size,
+                    warmup_frames,
+                    measure_frames,
+                )
+                _log.debug(
+                    "Sweep %s/bs=%d -> %.1f FPS (ran %s)",
+                    backend.value,
+                    batch_size,
+                    fps,
+                    executed,
+                )
+                results.append(
+                    SweepResult(
+                        backend=backend.value,
+                        batch_size=batch_size,
+                        precision=executed,
+                        fps=fps,
+                    )
+                )
+
+            except Exception as exc:  # pylint: disable=broad-except
+                if _is_oom(exc):
+                    oom_hit = True
+                    _log.warning(
+                        "OOM for %s/bs=%d: %s. Skipping larger batch sizes.",
+                        backend.value,
+                        batch_size,
+                        exc,
+                    )
+                    if torch is not None and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     results.append(
                         SweepResult(
                             backend=backend.value,
                             batch_size=batch_size,
-                            precision=precision.value,
+                            precision=PRECISION_UNKNOWN,
                             fps=0.0,
                             skipped=True,
                             skip_reason="OOM",
                         )
                     )
-                    continue
-
-                try:
-                    fps = _measure_config(
-                        spec,
-                        hw,
-                        backend,
-                        precision,
-                        batch_size,
-                        warmup_frames,
-                        measure_frames,
-                    )
-                    _log.debug(
-                        "Sweep %s/%s/bs=%d -> %.1f FPS",
+                else:
+                    _log.error(
+                        "Error for %s/bs=%d: %s. Skipping.",
                         backend.value,
-                        precision.value,
                         batch_size,
-                        fps,
+                        exc,
                     )
                     results.append(
                         SweepResult(
                             backend=backend.value,
                             batch_size=batch_size,
-                            precision=precision.value,
-                            fps=fps,
+                            precision=PRECISION_UNKNOWN,
+                            fps=0.0,
+                            skipped=True,
+                            skip_reason=str(exc),
                         )
                     )
-
-                except Exception as exc:  # pylint: disable=broad-except
-                    if _is_oom(exc):
-                        oom_hit = True
-                        _log.warning(
-                            "OOM for %s/%s/bs=%d: %s. Skipping larger batch sizes.",
-                            backend.value,
-                            precision.value,
-                            batch_size,
-                            exc,
-                        )
-                        if torch is not None and torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                        results.append(
-                            SweepResult(
-                                backend=backend.value,
-                                batch_size=batch_size,
-                                precision=precision.value,
-                                fps=0.0,
-                                skipped=True,
-                                skip_reason="OOM",
-                            )
-                        )
-                    else:
-                        _log.error(
-                            "Error for %s/%s/bs=%d: %s. Skipping.",
-                            backend.value,
-                            precision.value,
-                            batch_size,
-                            exc,
-                        )
-                        results.append(
-                            SweepResult(
-                                backend=backend.value,
-                                batch_size=batch_size,
-                                precision=precision.value,
-                                fps=0.0,
-                                skipped=True,
-                                skip_reason=str(exc),
-                            )
-                        )
 
     non_skipped = [r for r in results if not r.skipped]
     return sorted(non_skipped, key=lambda r: (-r.fps, r.batch_size))
 
 
 def count_sweep_dimensions(hw: HardwareProfile) -> int:  # type: ignore[name-defined]
-    """Return total number of (backend, precision, batch_size) combinations for *hw*.
+    """Return total number of (backend, batch_size) combinations for *hw*.
 
     Used by ``yowo tune --dry-run`` to report the sweep size without running it.
 
@@ -401,7 +374,4 @@ def count_sweep_dimensions(hw: HardwareProfile) -> int:  # type: ignore[name-def
     Returns:
         Total number of configurations that :func:`run_sweep` would attempt.
     """
-    total = 0
-    for backend in _enumerate_backends(hw):
-        total += len(_precisions_for_backend(backend, hw)) * len(_BATCH_SIZES)
-    return total
+    return len(_enumerate_backends(hw)) * len(_BATCH_SIZES)
