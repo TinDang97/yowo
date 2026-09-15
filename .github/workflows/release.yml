@@ -39,7 +39,7 @@ jobs:
       # install set is a different gate wearing the same name, and the release
       # path must never be the weaker of the two (task integration-tier-revival, M4).
       - name: Install dependencies
-        run: uv sync --group dev --extra chromadb
+        run: uv sync --group dev --extra chromadb --extra openvino
 
       - name: Lint
         run: uv run ruff check src/ tests/ --quiet
