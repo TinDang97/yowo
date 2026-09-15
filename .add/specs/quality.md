@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 16
+delta_seq: 19
 ---
 ## Now
 
@@ -63,6 +63,9 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q19 · open · 2026-09-16] A declared bound needs a CEILING as well as a floor. Asserting only 'bound > worst measured' lets anyone widen it to admit whatever the run just produced, as a one-character edit nobody reviews. A headroom band (2x-10x) makes widening a diff against an assertion. (evidence: /tasks/arch-equivalence-in-ci.md)
+- [TDD · Q18 · open · 2026-09-16] Two axes that differ by orders of magnitude need two declared bounds. Measured 2026-09-16: arch box deviation 5.6e-04..1.4e-03 px, class deviation 1.3e-06..3.6e-05. One bound over both is set entirely by the looser, and the tighter axis silently stops being checked. (evidence: /tasks/arch-equivalence-in-ci.md)
+- [TDD · Q17 · open · 2026-09-16] A guard that matches source by LITERAL SPELLING is blind to code that computes the same thing. test_ci_weight_fixture grepped integration sources for 'yolo11x'/'yolo26x' to stop a 109 MB cold download; test_export_parity iterates 'for size in ModelSize' and contains neither literal, so parity-all downloaded both since 2026-09-15 with the check green. Bind the COST (does the job restore the cache?) not the spelling. (evidence: /tasks/arch-equivalence-in-ci.md)
 - [TDD · Q16 · open · 2026-09-15] Declare check names in the node BEFORE writing the test module, then use them verbatim with ids= pinning every parametrised case — and verify the two sets match mechanically, in both directions, rather than by eye. Doing it in the other order on the previous node produced names written from memory, [a|b|c] shorthand and ellipsis-truncated ids, all of which bound nothing and cost two gate refusals. Declared-first gated PASS on the first attempt. (evidence: /tasks/export-roundtrip-parity.md)
 - [TDD · Q15 · open · 2026-09-15] A gate primitive must be tested for the verdict it CANNOT reach as well as the one it can. NaN passed the mAP band because abs(nan) > tolerance is False, and the isinstance guard above it — whose stated purpose was that a gate with no measurement must not report success — accepts NaN, since isinstance(nan, float) is True. Every check asserted the band rejects a number that is too far away; none asserted it rejects a value that is not a number. (evidence: /tasks/map-regression-gate.md)
 - [TDD · Q14 · open · 2026-09-13] A measured deviation is a property of the configuration that produced it, not of the platform it ran on. A 0.33 px PyTorch-ONNX gap was filed twice as a platform fact — first as a general divergence, then as arm64 arithmetic — before anyone checked which execution provider had actually bound the graph. It was neither: an explicit device='cpu' was being served by the CoreML EP in FP16. Pin the provider before attributing the number. (evidence: tasks/pytorch-onnx-numeric-divergence.md)

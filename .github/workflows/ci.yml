@@ -339,7 +339,7 @@ jobs:
           # An absent weight or an absent oracle must fail, not skip: a skip is
           # green, and green here would mean "equivalence confirmed".
           CI: "true"
-        run: uv run pytest tests/integration/test_arch_equivalence.py -q --tb=short
+        run: uv run pytest tests/integration/test_arch_equivalence.py -q --tb=short -s
         timeout-minutes: 30
 
   # Appended by ADD task `map-regression-gate`. A separate job rather than a

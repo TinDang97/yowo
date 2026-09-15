@@ -238,6 +238,9 @@ class _Comparison:
 
 _CACHE: dict[str, _Comparison] = {}
 
+#: variant -> axis -> deviation, reported at teardown. See `_report_margins`.
+_MARGINS: dict[str, dict[str, float]] = {}
+
 
 def _compare(family: ModelFamily, size: ModelSize, tensor: torch.Tensor) -> _Comparison:
     """Run both implementations on the same bytes. Cached: each weight loads once."""
@@ -268,8 +271,27 @@ def _compare(family: ModelFamily, size: ModelSize, tensor: torch.Tensor) -> _Com
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _clear_cache() -> Iterator[None]:
+def _report_margins() -> Iterator[None]:
+    """Print what this machine actually measured, then drop the cached tensors.
+
+    The bounds assert only that the deviation is inside them. Without this, a
+    green run on a runner says the bound held and nothing about the margin —
+    and the headroom figures in the module docstring are darwin/arm64 numbers
+    (Q11: a measurement from one machine is not a property of the code). The
+    mAP gate prints for the same reason; both CI steps run with `-s`.
+    """
     yield
+    if _MARGINS:
+        print("\n--- arch equivalence, measured on this machine ---")
+        print(f"{'variant':10} {'box (px)':>13} {'/ bound':>9} {'class':>13} {'/ bound':>9}")
+        for name in sorted(_MARGINS):
+            axes = _MARGINS[name]
+            box, cls = axes.get("box"), axes.get("class")
+            box_s = f"{box:.4e}" if box is not None else "-"
+            box_p = f"{box / BOX_TOLERANCE_PX:6.1%}" if box is not None else "-"
+            cls_s = f"{cls:.4e}" if cls is not None else "-"
+            cls_p = f"{cls / CLASS_TOLERANCE:6.1%}" if cls is not None else "-"
+            print(f"{name:10} {box_s:>13} {box_p:>9} {cls_s:>13} {cls_p:>9}")
     _CACHE.clear()
 
 
@@ -281,6 +303,7 @@ def test_yolo11_box_geometry_matches_the_oracle(
     name = variant_id(family, size)
     c = _compare(family, size, input_tensor)
     deviation = (c.oracle[:, :4] - c.native[:, :4]).abs().max().item()
+    _MARGINS.setdefault(name, {})["box"] = deviation
     assert deviation <= BOX_TOLERANCE_PX, deviation_message(
         name, "box geometry", deviation, BOX_TOLERANCE_PX, " px"
     )
@@ -294,6 +317,7 @@ def test_yolo11_class_scores_match_the_oracle(
     name = variant_id(family, size)
     c = _compare(family, size, input_tensor)
     deviation = (c.oracle[:, 4:] - c.native[:, 4:]).abs().max().item()
+    _MARGINS.setdefault(name, {})["class"] = deviation
     assert deviation <= CLASS_TOLERANCE, deviation_message(
         name, "class score", deviation, CLASS_TOLERANCE
     )
@@ -309,10 +333,12 @@ def test_yolo26_detections_match_the_oracle(
     oracle, native = paired_end2end(c.oracle[0], c.native[0], name)
 
     box = (oracle[:, :4] - native[:, :4]).abs().max().item()
+    _MARGINS.setdefault(name, {})["box"] = box
     assert box <= BOX_TOLERANCE_PX, deviation_message(
         name, "box geometry", box, BOX_TOLERANCE_PX, " px"
     )
     conf = (oracle[:, 4] - native[:, 4]).abs().max().item()
+    _MARGINS.setdefault(name, {})["class"] = conf
     assert conf <= CLASS_TOLERANCE, deviation_message(name, "confidence", conf, CLASS_TOLERANCE)
 
 
