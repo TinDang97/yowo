@@ -1,0 +1,25 @@
+{
+  "_what": "The mAP yolo11n scores on the pinned COCO val2017 500-image subset, and every input that determines it. Read tests/integration/test_map_regression.py for how it is measured and src/yowo/benchmark/_baseline.py for how it is enforced.",
+  "_band": "Two-sided. Repeat runs on one machine are bit-identical (0.41577614647708055, twice, 2026-09-15), so for a fixed model, fixed weights and a fixed image set the number should not move at all. The tolerance absorbs cross-machine float drift and nothing else. A rise past it means something changed that nobody declared.",
+  "_provenance": "Measured locally first; measured_on records where. If the CI number differs by more than the tolerance, the CI number is the correct baseline for a gate that runs on CI, and this record is re-measured rather than the band widened.",
+
+  "model": "yolo11n",
+  "weights_sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+  "backend": "pytorch",
+  "device": "cpu",
+  "confidence_threshold": 0.001,
+  "iou_threshold": 0.45,
+  "images": 500,
+  "subset_manifest_sha256": "872ac411cf65f03234a725df9711e9ced36d1c8156161ab0b7ae63bd23336aad",
+
+  "map_50_95": 0.41577614647708055,
+  "map_50": 0.5850060859394748,
+  "map_75": 0.45092540401234155,
+
+  "tolerance": 0.005,
+  "measured_on": "darwin arm64, Python 3.11, CPU",
+  "measured_at": "2026-09-15",
+
+  "_shipped_default_cost": "The engine's default confidence_threshold is 0.25, not the COCO protocol's 0.001. Measured 2026-09-15 over the same 500 images: 0.3658, 5.0 points lower. Recorded so the gap between the published-comparable number and what a user gets out of the box is visible rather than discovered.",
+  "shipped_default_map_50_95": 0.3658058310252462
+}

@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from yowo.types import Detection
@@ -151,6 +152,8 @@ def evaluate_coco_map(
     gt_ann_path: str | Path,
     predictions: list[dict[str, object]],
     subset: int | None = None,
+    *,
+    image_ids: Sequence[int] | None = None,
 ) -> dict[str, float]:
     """Compute COCO mAP using official pycocotools COCOeval.
 
@@ -162,12 +165,21 @@ def evaluate_coco_map(
             sorted order, so a pinned subset is reproducible across runs and
             machines. ``None`` evaluates every image in the ground truth.
             Values above the dataset size are clamped.
+        image_ids: The images this run actually evaluated. Scopes the
+            evaluation to exactly these, which ``subset`` cannot express when
+            the evaluated set is not a leading slice. Prefer this: a caller
+            that already holds the list it inferred over cannot re-derive a
+            different one. Passing both is allowed only when they agree.
 
     Returns:
-        Dict with keys ``mAP_50_95``, ``mAP_50``, ``mAP_75``.
+        Dict with keys ``mAP_50_95``, ``mAP_50``, ``mAP_75`` and
+        ``images_evaluated`` — the count the denominator actually used, which
+        is not the count requested when *subset* exceeds the dataset.
 
     Raises:
         ImportError: If pycocotools is not installed.
+        ValueError: If *subset* and *image_ids* disagree, or if *image_ids*
+            names an image the ground truth does not have.
     """
     try:
         from pycocotools.coco import COCO  # type: ignore[import-untyped]
@@ -185,7 +197,14 @@ def evaluate_coco_map(
         # value is returned directly rather than measured. It is a score, not
         # a "did not run" sentinel; test_empty_predictions_score_zero_by_
         # evaluation pins it to the evaluated result.
-        return {"mAP_50_95": 0.0, "mAP_50": 0.0, "mAP_75": 0.0}
+        return {
+            "mAP_50_95": 0.0,
+            "mAP_50": 0.0,
+            "mAP_75": 0.0,
+            # Nothing was measured, so claiming a denominator would be a lie
+            # the gate one layer up reads as "500 images scored 0.0".
+            "images_evaluated": 0.0,
+        }
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_gt = COCO(str(gt_ann_path))
@@ -200,6 +219,28 @@ def evaluate_coco_map(
     evaluated_img_ids = sorted(coco_gt.getImgIds())
     if subset is not None:
         evaluated_img_ids = evaluated_img_ids[:subset]
+
+    if image_ids is not None:
+        requested = list(image_ids)
+        # An id the ground truth does not have would silently shrink the
+        # denominator — the same family of defect as scoping to predictions.
+        missing = [i for i in requested if i not in set(coco_gt.getImgIds())]
+        if missing:
+            msg = (
+                f"image_ids names {len(missing)} image(s) not in the ground truth "
+                f"at {gt_ann_path}: {missing[:5]}"
+            )
+            raise ValueError(msg)
+        # Two scopes that disagree must raise. Silently preferring one would
+        # make the reported number depend on an undocumented precedence rule.
+        if subset is not None and requested != evaluated_img_ids:
+            msg = (
+                f"subset={subset} and image_ids disagree: subset selects "
+                f"{len(evaluated_img_ids)} id(s) starting {evaluated_img_ids[:3]}, "
+                f"image_ids names {len(requested)} starting {requested[:3]}"
+            )
+            raise ValueError(msg)
+        evaluated_img_ids = requested
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco_dt = coco_gt.loadRes(predictions)  # type: ignore[arg-type]
@@ -217,6 +258,7 @@ def evaluate_coco_map(
         "mAP_50_95": float(stats[0]),
         "mAP_50": float(stats[1]),
         "mAP_75": float(stats[2]),
+        "images_evaluated": float(len(evaluated_img_ids)),
     }
 
 

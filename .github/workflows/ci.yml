@@ -306,3 +306,58 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_coco_dataset.py -q --tb=short
         timeout-minutes: 45
+
+  # Appended by ADD task `map-regression-gate`. A separate job rather than a
+  # step on `accuracy-dataset`, for two reasons: it needs the weight store as
+  # well as the image store, and branch protection binds a published check
+  # NAME — a gate folded into another job cannot be required on its own.
+  #
+  # What this job asserts that `accuracy-dataset` does not: the model still
+  # detects. `accuracy-dataset` proves the 500 pinned images are the real COCO
+  # ones; nothing there runs a model over them.
+  map-gate:
+    name: mAP Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev --extra benchmark
+
+      # Same key as `accuracy-dataset`, so the two jobs share one 1.07 GB
+      # entry rather than each storing their own.
+      - name: Restore the COCO val2017 tree
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yowo/datasets/coco-val2017
+          key: yowo-coco-val2017-${{ hashFiles('tests/support/datasets.py', 'tests/fixtures/coco_val2017_subset500.tsv') }}
+
+      # Same key as `weights`. The gate measures with the digest-verified
+      # weight the baseline pins; an unverified download would measure a
+      # different file and the band would be defending nothing.
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
+
+      # CI: "true" turns a missing dataset or weight from a green skip into a
+      # failure. 500 images infer in ~21s on CPU; the ceiling is set by the
+      # cold-cache fetch of both stores, and MUST stay at the value
+      # MAP_GATE_TIMEOUT_MINUTES_REQUIRED asserts.
+      - name: yolo11n still scores what the baseline records
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_map_regression.py -q --tb=short
+        timeout-minutes: 45

@@ -32,6 +32,11 @@ def render_table(
 
     table.add_column("Format", style="cyan")
     table.add_column("mAP@0.5:0.95", justify="right")
+    # The denominator, beside the number it divides. An mAP with no visible
+    # image count is unreadable: measured 2026-09-15, a scoping defect made
+    # `yowo benchmark --subset 500` print 0.0419 against a true 0.4158, and
+    # nothing in this table distinguished that from a model that regressed.
+    table.add_column("Images", justify="right")
     table.add_column("FPS", justify="right", style="green")
     table.add_column("Latency p50", justify="right")
     table.add_column("Model Size", justify="right")
@@ -48,7 +53,15 @@ def render_table(
         lat_str = f"{r.latency_p50_ms:.1f} ms"
         size_str = f"{r.model_size_mb:.1f} MB"
 
-        row: list[str] = [r.format, map_str, fps_str, lat_str, size_str, r.device]
+        row: list[str] = [
+            r.format,
+            map_str,
+            str(r.num_images),
+            fps_str,
+            lat_str,
+            size_str,
+            r.device,
+        ]
 
         if ultralytics_results is not None:
             if ultra_map is not None and r.map_50_95 is not None:

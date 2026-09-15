@@ -19,6 +19,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "unrecorded", at: 2026-09-15, act: interview, authority: human, interview: "sha256:0e0f009cce2511b2", receipt: /tasks/map-regression-gate.d/interviews/1.md, answers: "A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A12=confirm|A14=confirm|A15=confirm|A16=confirm|A18=confirm|R:UNSCOPED_EVALUATION=confirm|R:SELF_UPDATING_BASELINE=confirm|R:GREEN_BY_SKIP=confirm" }
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:5ae953a9ae672ab9", binding: "sha256:c45e5a61b60500bc" }
+  - { by: "builder", at: 2026-09-15, act: replan, authority: process, note: "CHECK names reconciled to the names pytest actually collects, verified against --collect-only rather than written from memory (M12: a parametrised check cited by its bare name binds nothing, so the seven mismatch cases and the twelve required-field cases are cited by case id). No rule, surface or assumption moved; seventeen declared names became thirty-eight real ones because several declared checks were one name over a parametrised family. Also added: test_the_table_shows_the_denominator_beside_the_map, which binds A6 by putting the evaluated image count in the benchmark table beside the mAP — A6's cost is that 0.0419 looks exactly like a real number, and the table was printing an mAP with no visible denominator." }
 advised_by: inference-parity-engineer
 ---
 ## CARD
@@ -76,24 +77,57 @@ contract:
 - E6 the gate's own run reports the backend and device it actually used, and a mismatch against the baseline's recorded pair fails rather than being averaged in
 
 ## CHECKS
-- test_a_subset_benchmark_scores_only_the_images_it_evaluated · covers: M1,A2,S1 · drives `run_benchmark` over a subset and asserts the mAP matches the scoped evaluation, not the full-ground-truth one — red today at 0.0419 against 0.4158
-- test_explicit_image_ids_scope_the_evaluation · covers: M1,R:UNSCOPED_EVALUATION,S1 · `evaluate_coco_map(..., image_ids=[...])` evaluates exactly those ids
-- test_a_subset_above_the_dataset_size_is_clamped_to_what_exists · covers: E1,A3
-- test_an_unscoped_evaluation_still_covers_every_ground_truth_image · covers: E2,A4
-- test_a_subset_that_disagrees_with_image_ids_is_an_error · covers: E3
-- test_the_selection_order_is_sorted_image_ids · covers: A5
-- test_the_baseline_records_every_input_that_determines_the_number · covers: M2,A8,A12,S2
-- test_a_missing_baseline_fails_the_gate · covers: A10,E5,R:GREEN_BY_SKIP,S2
-- test_a_baseline_whose_weights_digest_does_not_match_fails_the_gate · covers: E5,A9
-- test_a_measured_map_below_the_band_fails_with_baseline_measured_and_delta · covers: M3,A18,S3
-- test_a_measured_map_above_the_band_also_fails · covers: M3,R:SELF_UPDATING_BASELINE
-- test_zero_predictions_fail_the_gate_rather_than_passing_vacuously · covers: E4
-- test_a_backend_or_device_mismatch_against_the_baseline_fails · covers: E6,A14
-- test_the_gate_fails_rather_than_skips_when_the_dataset_is_absent_under_ci · covers: M4,A16,R:GREEN_BY_SKIP,S3
-- test_ci_registers_the_map_gate_step · covers: M4,A13,A15,A17,S3 · the CI contract guard sees the step, in the job, within the declared timeout
-- test_the_baseline_is_never_written_by_the_gate · covers: R:SELF_UPDATING_BASELINE,A7
-- test_a_who_dimension_free_library_call_needs_no_principal · covers: A1,A6,A11 · the reported table carries the evaluated image count beside the mAP, so a reader can see the denominator without reading the source
-red-first: every check MUST fail first.
+Names below are the names pytest collects — verified against `--collect-only`,
+not written from memory. M12: a parametrised check cited by its bare name binds
+nothing, so the cases that carry a rule are cited by their case id.
+
+tests/unit/test_benchmark_subset_scope.py — real COCOeval through the PUBLIC runner:
+- test_a_subset_benchmark_scores_only_the_images_it_evaluated · covers: M1,A2,R:UNSCOPED_EVALUATION,S1 · red at 0.2 before the fix, 1.0 after
+- test_a_full_run_is_unchanged · covers: E2,A4,S1
+- test_a_model_that_misses_images_inside_its_own_subset_still_scores_lower · covers: M1,R:UNSCOPED_EVALUATION · the repair must not make recall free
+- test_the_table_shows_the_denominator_beside_the_map · covers: A1,A6,A11,S1 · the reported table names the image count beside the mAP
+
+tests/unit/test_coco_map_evaluator.py — real COCOeval on synthetic ground truth:
+- test_explicit_image_ids_scope_the_evaluation · covers: M1,S1
+- test_image_ids_need_not_be_a_leading_slice · covers: M1,A5 · the set `subset` cannot express
+- test_image_ids_that_disagree_with_subset_are_an_error · covers: E3
+- test_image_ids_that_agree_with_subset_are_accepted · covers: E3
+- test_an_image_id_absent_from_the_ground_truth_is_an_error · covers: M1,R:UNSCOPED_EVALUATION
+- test_the_result_reports_how_many_images_were_evaluated · covers: E1,A3,S1 · the count evaluated, not the count requested
+- test_subset_is_deterministic · covers: A5 (pre-existing, PR #49)
+- test_subset_none_evaluates_every_image · covers: A4,E2 (pre-existing, PR #49)
+
+tests/unit/test_map_baseline.py — the record and the band:
+- test_the_baseline_records_every_input_that_determines_the_number[model|weights_sha256|backend|device|confidence_threshold|iou_threshold|images|subset_manifest_sha256|map_50_95|tolerance|measured_on|measured_at] · covers: M2,A8,S2 · twelve cases, one per required field
+- test_a_complete_baseline_loads · covers: M2,A12,S2
+- test_a_missing_baseline_fails_rather_than_passes · covers: A10,R:GREEN_BY_SKIP,S2
+- test_an_unparseable_baseline_fails · covers: A10,E5,S2
+- test_a_measurement_on_the_baseline_passes · covers: M3
+- test_a_measurement_inside_the_band_passes · covers: M3
+- test_a_measurement_below_the_band_fails · covers: M3,A18,S3 · asserts the message names baseline, measurement and signed delta
+- test_a_measurement_above_the_band_also_fails · covers: M3,A18
+- test_zero_predictions_fail_rather_than_passing_vacuously · covers: E4
+- test_a_mismatched_input_fails_instead_of_being_compared[weights_sha256-0000…] · covers: E5,A9
+- test_a_mismatched_input_fails_instead_of_being_compared[backend-onnx] · covers: E6,A14
+- test_a_mismatched_input_fails_instead_of_being_compared[device-cuda] · covers: E6,A14
+- test_a_mismatched_input_fails_instead_of_being_compared[confidence_threshold-0.25] · covers: E6,A9
+- test_a_mismatched_input_fails_instead_of_being_compared[iou_threshold-0.7] · covers: E6,A9
+- test_a_mismatched_input_fails_instead_of_being_compared[images_evaluated-499] · covers: E1,A3
+- test_a_mismatched_input_fails_instead_of_being_compared[subset_manifest_sha256-ffff…] · covers: A9,E5
+- test_the_gate_never_writes_the_baseline · covers: R:SELF_UPDATING_BASELINE,A7,S2
+
+tests/unit/test_ci_contract.py — the gate is wired, in CI, with what it needs:
+- test_ci_job_ids_are_the_frozen_set · covers: M4,A17,S3 · `map-gate` registered in the same commit that adds it
+- test_the_map_gate_job_is_registered_with_both_stores_it_needs · covers: M4,A13,S3
+- test_the_map_gate_step_runs_under_ci_true_within_its_budget · covers: M4,A15,A16,R:GREEN_BY_SKIP,S3
+
+tests/integration/test_map_regression.py — the real number, on the real images:
+- test_the_measured_map_is_inside_the_recorded_band · covers: M3,M4,E5,E6,S3
+- test_the_gate_evaluated_every_pinned_image · covers: M1,A3,E1,S3
+- test_the_model_actually_detected_something · covers: E4,S3
+
+red-first: every check MUST fail first — recorded in commit a434f8f, which is red
+on purpose and carries no implementation.
 
 ## EVIDENCE
 receipt: <runs/<n>.md>

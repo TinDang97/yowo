@@ -27,7 +27,7 @@ import pytest
 
 pytest.importorskip("pycocotools")
 
-from yowo.benchmark._runner import run_single_backend
+from yowo.benchmark._runner import BenchmarkResult, run_single_backend
 from yowo.types import (
     BackendType,
     BoundingBox,
@@ -164,4 +164,37 @@ def test_a_model_that_misses_images_inside_its_own_subset_still_scores_lower(
     assert partial.map_50_95 < 1.0, (
         f"a model detecting in 2 of the 4 images it evaluated scored "
         f"{partial.map_50_95!r} — degrading recall must lower the score"
+    )
+
+
+def test_the_table_shows_the_denominator_beside_the_map(capsys: pytest.CaptureFixture[str]) -> None:
+    """A6: a reader must be able to see what the mAP was measured over.
+
+    The 0.0419 defect shipped because a wrong number looks exactly like a right
+    one. `mAP@0.5:0.95 0.0419` on its own is indistinguishable from a model
+    that regressed; `0.0419 over 500 images` against a 5000-image dataset is
+    a question a reader can ask.
+    """
+    from yowo.benchmark._report import render_table
+
+    render_table(
+        [
+            BenchmarkResult(
+                format="pytorch",
+                map_50_95=0.4158,
+                map_50=0.585,
+                fps_avg=24.0,
+                latency_p50_ms=41.0,
+                latency_p95_ms=45.0,
+                latency_p99_ms=48.0,
+                model_size_mb=5.4,
+                device="cpu",
+                num_images=500,
+            )
+        ],
+        model_name="yolo11n",
+    )
+    rendered = " ".join(capsys.readouterr().out.split())
+    assert "500" in rendered, (
+        f"the benchmark table reports an mAP without saying how many images it covers:\n{rendered}"
     )
