@@ -380,3 +380,7 @@ onnxruntime_profile__*.json
 # fetched and digest-verified at runtime.
 *.pt
 *.state_dict.pt
+
+# macOS Finder metadata. Untracked since 2026-09-11 and reported by `gh pr
+# create` as an uncommitted change on every pull request since.
+.DS_Store
