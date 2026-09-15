@@ -10,7 +10,10 @@ and fetching something unverified.
 
 Nothing here is committed to the repository. The weight is 5.4 MB and AGPL-3.0;
 the sample image is served by a third party under no stated licence. Both are
-fetched once and cached, and neither belongs in an Apache-2.0 source tree.
+fetched once and cached, and neither belongs in an Apache-2.0 source tree. Both
+are now digest-pinned: the weight through ``resolve_weights``, the image through
+``tests.support.datasets.fetch_verified``. COCO val2017, for the accuracy tier,
+comes through the same path — see ``docs/datasets.md`` for its licence.
 
 A missing input FAILS in CI and skips locally. That asymmetry is deliberate:
 these fixtures previously pointed at ``/Users/<someone>/Downloads`` and a
@@ -25,9 +28,14 @@ import shutil
 from pathlib import Path
 
 import pytest
-import requests
 from click.testing import CliRunner
 
+from tests.support.datasets import (
+    BUS_IMAGE,
+    fetch_verified,
+    pinned_subset_ids,
+    require_coco_val2017,
+)
 from yowo.models._weights import resolve_weights
 from yowo.types import ModelFamily, ModelSize, ModelSpec
 
@@ -39,7 +47,6 @@ from yowo.types import ModelFamily, ModelSize, ModelSpec
 _FIXTURE_FAMILY = ModelFamily.YOLO26
 _FIXTURE_SIZE = ModelSize.NANO
 
-_BUS_IMAGE_URL = "https://ultralytics.com/images/bus.jpg"
 _IMAGE_CACHE = (
     Path(os.environ.get("YOWO_CACHE_DIR", Path.home() / ".cache" / "yowo")) / "test-assets"
 )
@@ -89,24 +96,41 @@ def yolo26_weights(verified_weight: Path) -> Path:
 
 @pytest.fixture(scope="session")
 def sample_image_path() -> Path:
-    """The standard YOLO test image, cached across runs rather than committed.
+    """The standard YOLO test image, digest-verified like the weights beside it.
 
     Contains people and a bus, so a test asserting "found something" at default
     confidence is meaningful rather than vacuously satisfiable.
+
+    This used to be a bare ``requests.get`` with no integrity check at all,
+    sitting one fixture below ``verified_weight``, which resolves through
+    ``resolve_weights`` and is verified against a pinned digest. Same file, same
+    cache, same blast radius — different trust. It now goes through the same
+    pinned path, and is re-verified on every cache hit rather than once at
+    download, because the cache-hit path is the one that runs every subsequent
+    time.
     """
-    _IMAGE_CACHE.mkdir(parents=True, exist_ok=True)
-    img_path = _IMAGE_CACHE / "bus.jpg"
-    if img_path.exists() and img_path.stat().st_size > 0:
-        return img_path
     try:
-        resp = requests.get(_BUS_IMAGE_URL, timeout=30)
-        resp.raise_for_status()
-        tmp = img_path.with_suffix(".tmp")
-        tmp.write_bytes(resp.content)
-        tmp.replace(img_path)
+        return fetch_verified(BUS_IMAGE, _IMAGE_CACHE)
     except Exception as exc:
         _unavailable("sample image", f"{type(exc).__name__}: {exc}")
-    return img_path
+        raise  # unreachable; keeps the return type honest
+
+
+@pytest.fixture(scope="session")
+def coco_val2017_root() -> Path:
+    """COCO val2017, digest-pinned, or a loud failure under CI.
+
+    ~1.07 GB is fetched once and cached. A contributor without it gets a skip;
+    CI gets a failure naming both archives and how to obtain them, because a CI
+    box that evaluated nothing must not report green.
+    """
+    return require_coco_val2017()
+
+
+@pytest.fixture(scope="session")
+def coco_subset_ids() -> tuple[int, ...]:
+    """The 500 pinned ground-truth image ids every published mAP covers."""
+    return pinned_subset_ids()
 
 
 @pytest.fixture()

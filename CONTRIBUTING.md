@@ -124,6 +124,26 @@ def scale(b, c):
 |-----------|---------|
 | `tests/unit/` | Pure unit tests — no hardware, no real weights, no network |
 | `tests/integration/` | End-to-end CLI tests — may require GPU, marked `@pytest.mark.integration` |
+| `tests/support/` | Shared helpers for both tiers (e.g. dataset acquisition) |
+| `tests/fixtures/` | Committed test data |
+
+### Test data and datasets
+
+Some tiers need inputs too large or too restrictively licensed to commit: model
+weights, a sample image, and COCO val2017 (~1.07 GB) for the accuracy tier.
+They are fetched once, digest-verified against pins in the repository, and
+cached under `~/.cache/yowo/` (override with `YOWO_CACHE_DIR`).
+
+**Read [`docs/datasets.md`](docs/datasets.md) before working on anything that
+touches the accuracy tier.** It covers where COCO comes from, its licence — the
+annotations are CC BY 4.0, the images are Flickr-licensed and are *not*
+redistributable as project assets — how to fetch it by hand, and what you will
+see if you do not have it.
+
+You do **not** need the dataset to contribute. Without it the accuracy tier
+skips locally, with a message telling you how to get it. Under CI the same
+condition is a hard failure, deliberately: a CI run that evaluated nothing must
+not report green.
 
 ### Requirements for every PR
 
