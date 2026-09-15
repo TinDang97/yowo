@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Precision reaches the executing backend, or leaves the surface
-status: direction
+status: done
 depth: deep
 sensitivity: architecture
 milestone: m4-honest-deployment
@@ -28,12 +28,16 @@ verified:
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:b97bcd12bd91cda7", binding: "sha256:f6151447e8ca057f" }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/2.md }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: refreeze, authority: human, direction: "sha256:6444477df81dab7d", binding: "sha256:f6151447e8ca057f" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:b39e2c59d66bcf1f" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/4.md, brief: "sha256:b39e2c59d66bcf1f" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
 goal: The precision a caller asks for reaches the backend that executes it, or the caller is told — loudly, naming the backend and the device — that it cannot.
 why: Measured at HEAD 714fa79 — `create_backend()` has no `precision` parameter at all, so the value `select_backend()` resolves at `engine.py:286` is computed and dropped. `PyTorchBackend(fp16=...)` is the only runtime hook in the library and nothing has ever passed it. The live lie is the asymmetry: an explicit `fp16` on CPU is silently coerced to fp32, but an explicit `int8` is passed straight through `select_precision`'s CPU branch (`_selector.py:181-182`), stored on `BackendSelection`, and published by `health_report().precision_current` while fp32 executes. An operator sizing an edge box reads `int8` off a configuration that never took effect.
-beat: direction · next: add interview precision-plumbing, then add freeze precision-plumbing
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -113,7 +117,7 @@ DEFERRED, and named: `TuneProfile.precision` and `SweepResult.precision` themsel
 - E6 A user-supplied `backend_instance` plus an explicit precision must be judged against that instance, not against the hardcoded `Precision.FP32` at `engine.py:273`.
 - E7 Memory pressure in `[0.90, 0.95)` must halve the batch, count exactly one degradation, and CLEAR back to READY once pressure drops below 0.75.
 - E8 An explicit fp16 on a GPU with too little VRAM, which `_degrade_from` turns into fp32 inside selection, must still raise — the verdict reads the raw request, not the degraded selection.
-- E9 A health read taken before `load()` completes must report `None`, not the request the engine was constructed with.
+- E9 A health read taken before `load()` completes must report `"unknown"`, not the request the engine was constructed with. (Said `None` until 2026-09-15; the human ruling kept `precision_current` typed `str`, so the Protocol keeps `None` and the public field spells it `"unknown"`. The edge now says what M4, A10 and A15 say.)
 
 ## CHECKS
 - test_an_explicit_precision_the_backend_does_not_execute_raises_and_names_backend_and_device · covers: M2, A23, A26, E2, R:SILENT_COERCION · explicit fp16 with the device resolving to cpu; asserts the message contains `pytorch`, `cpu`, a remedy, and that fp32 was what ran before too.
@@ -133,6 +137,8 @@ DEFERRED, and named: `TuneProfile.precision` and `SweepResult.precision` themsel
 - test_a_tune_profile_precision_is_not_applied_to_a_production_config · covers: M7, A6 · a profile carrying a NON-DEFAULT precision leaves `config.precision` at `None` while its backend and batch size are still applied.
 - test_a_pre_change_tune_profile_still_loads · covers: M7 · YAML written by the pre-change code loads and yields backend and batch size — `load_profile` builds from named keys, so an unread key is inert.
 - test_the_public_surface_loses_no_name_and_changes_no_type · covers: M4, A2, A15, R:PUBLIC_BREAK · four clauses: `HealthReport.precision_current` is annotated exactly `str`, an engine whose backend cannot determine its precision reads `"unknown"` there (RED today — the field reports the request, and that is why this check fails first), `yowo.tune.TuneProfile` still carries its `precision` field, and `yowo.__all__` membership is unchanged.
+- test_an_unloaded_engine_reports_unknown_not_the_request · covers: A10, E9 · a constructed-but-unloaded engine reads `"unknown"` from `precision_current` and a status that is not READY — the pair an operator polling during a slow load actually receives.
+- test_health_report_precision_comes_from_the_backend_not_the_request · covers: A25, M4 · the field is sourced from the executing backend, so an engine that requested one precision and executes another reports what executes.
 - test_no_fixture_in_this_suite_requests_the_default_precision · covers: R:DEFAULT_FIXTURE · Q4, enforced on this file: no check asks for `fp32` as the REQUESTED value, where a value that never travelled compares equal to one that did.
 red-first: every check MUST fail first.
 
