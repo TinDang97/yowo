@@ -18,6 +18,7 @@ evaluation scope moved the reported number by a factor of ten.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -31,6 +32,11 @@ __all__ = [
     "check_against_baseline",
     "load_baseline",
 ]
+
+
+#: The widest band that still defends something. yolo11n scores ~0.4158 on the
+#: pinned 500, so 0.01 is already 2.4% of the number.
+MAX_TOLERANCE = 0.01
 
 
 class BaselineError(YowoError):
@@ -106,7 +112,46 @@ def load_baseline(path: str | Path) -> MapBaseline:
             f"required: without it the gate cannot tell a model regression from a "
             f"change to how the number was measured."
         )
-    return MapBaseline(**{name: record[name] for name in required})
+
+    # Presence is not validity. `"tolerance": "0.005"` loaded fine and raised a
+    # bare TypeError from the comparison, so the loader's stated contract —
+    # missing, unreadable or incomplete — was untrue for a malformed record.
+    for field in fields(MapBaseline):
+        value = record[field.name]
+        if field.type in ("float", float):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise BaselineError(
+                    f"mAP baseline at {p}: {field.name} must be a number, got {value!r}"
+                )
+            if not math.isfinite(float(value)):
+                raise BaselineError(
+                    f"mAP baseline at {p}: {field.name} is not a finite number ({value!r})"
+                )
+        elif field.type in ("int", int):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise BaselineError(
+                    f"mAP baseline at {p}: {field.name} must be an integer, got {value!r}"
+                )
+        elif not isinstance(value, str):
+            raise BaselineError(
+                f"mAP baseline at {p}: {field.name} must be a string, got {value!r}"
+            )
+
+    baseline = MapBaseline(**{name: record[name] for name in required})
+
+    # A band can be widened until nothing can fail it. That is re-recording the
+    # baseline in everything but name — the gate passes without the number
+    # improving — and nothing else in the suite reads this file, so it would be
+    # invisible. MAX_TOLERANCE is 2.4% of yolo11n's ~0.4158; measured
+    # darwin/arm64-to-ubuntu/x86-64 drift sits inside 0.005.
+    if not 0.0 < baseline.tolerance <= MAX_TOLERANCE:
+        raise BaselineError(
+            f"mAP baseline at {p}: tolerance is {baseline.tolerance}, outside "
+            f"(0, {MAX_TOLERANCE}]. A band this wide is not defending anything; "
+            f"a gate whose tolerance was widened to accommodate a drop is a gate "
+            f"that was switched off."
+        )
+    return baseline
 
 
 #: Recorded field -> the key the gate's own run reports it under. The names
@@ -121,6 +166,17 @@ _MUST_MATCH: tuple[tuple[str, str], ...] = (
     ("iou_threshold", "iou_threshold"),
     ("images", "images_evaluated"),
     ("subset_manifest_sha256", "subset_manifest_sha256"),
+)
+
+
+#: Every recorded score is defended. `map_50` and `map_75` were required by the
+#: loader and read by nothing: editing either in the shipped record left the
+#: whole suite green, so two of the three numbers in a file arguing that a bare
+#: float is not a baseline were themselves decorative.
+_SCORES: tuple[tuple[str, str], ...] = (
+    ("map_50_95", "mAP@0.5:0.95"),
+    ("map_50", "mAP@0.5"),
+    ("map_75", "mAP@0.75"),
 )
 
 
@@ -156,19 +212,33 @@ def check_against_baseline(
                 f"reader is sent to the input that changed."
             )
 
-    measured = observed.get("map_50_95")
-    if not isinstance(measured, (int, float)):
-        raise MapRegression(
-            f"the run reported no map_50_95 to compare (got {measured!r}); "
-            f"a gate with no measurement must not report success"
-        )
+    for field, label in _SCORES:
+        measured = observed.get(field)
+        if isinstance(measured, bool) or not isinstance(measured, (int, float)):
+            raise MapRegression(
+                f"the run reported no {field} to compare (got {measured!r}); "
+                f"a gate with no measurement must not report success"
+            )
+        # NaN walks straight through `abs(delta) > tolerance`, which is False
+        # for NaN, so a non-finite measurement returned from this function
+        # normally — past the guard above, because isinstance(nan, float) is
+        # True. An infinity would pass the band check in the other direction.
+        if not math.isfinite(float(measured)):
+            raise MapRegression(
+                f"{field} is not a finite number ({measured!r}); a gate cannot "
+                f"compare against it, and must not report success instead"
+            )
+        _check_band(baseline, field, label, float(measured))
 
-    delta = float(measured) - baseline.map_50_95
+
+def _check_band(baseline: MapBaseline, field: str, label: str, measured: float) -> None:
+    recorded = float(getattr(baseline, field))
+    delta = measured - recorded
     if abs(delta) > baseline.tolerance:
         direction = "below" if delta < 0 else "above"
         raise MapRegression(
-            f"mAP@0.5:0.95 is {abs(delta):.4f} {direction} the recorded baseline: "
-            f"measured {float(measured):.4f}, baseline {baseline.map_50_95:.4f}, "
+            f"{field} ({label}) is {abs(delta):.4f} {direction} the recorded "
+            f"baseline: measured {measured:.4f}, baseline {recorded:.4f}, "
             f"delta {delta:+.4f}, tolerance +/-{baseline.tolerance:.4f}.\n"
             f"The baseline was measured on {baseline.measured_on} at "
             f"{baseline.measured_at} over {baseline.images} images with "
@@ -177,5 +247,10 @@ def check_against_baseline(
             f"{baseline.iou_threshold}.\n"
             f"A rise is not automatically good news: nothing about the model, the "
             f"weights or the images changed, so check what did before re-recording "
-            f"the number. The gate never rewrites its own baseline."
+            f"the number. The gate never rewrites its own baseline.\n"
+            f"To re-record deliberately: run the gate with `-s`, which prints every "
+            f"measured score, and update map_50_95, map_50, map_75, measured_on and "
+            f"measured_at TOGETHER. All three scores are enforced, so a partial "
+            f"re-record fails here rather than leaving numbers that were never "
+            f"measured together."
         )

@@ -122,13 +122,21 @@ def test_the_measured_map_is_inside_the_recorded_band(measured: dict[str, object
     # force a failure. `pytest -s` or a failure shows it; either way the
     # number is in the run rather than only in the verdict.
     print(
-        f"\nmAP@0.5:0.95 measured {float(measured['map_50_95']):.6f} "
-        f"| baseline {baseline.map_50_95:.6f} "
-        f"| delta {float(measured['map_50_95']) - baseline.map_50_95:+.6f} "
+        f"\n{measured['images_evaluated']} images, {measured['detections']} detections "
         f"| tolerance +/-{baseline.tolerance} "
-        f"| {measured['images_evaluated']} images, {measured['detections']} detections "
         f"| baseline measured on {baseline.measured_on}"
     )
+    for field, label in (
+        ("map_50_95", "mAP@0.5:0.95"),
+        ("map_50", "mAP@0.5   "),
+        ("map_75", "mAP@0.75  "),
+    ):
+        seen = float(measured[field])  # type: ignore[arg-type]
+        recorded = float(getattr(baseline, field))
+        print(
+            f"  {label} measured {seen:.6f} | baseline {recorded:.6f} "
+            f"| delta {seen - recorded:+.6f}"
+        )
     check_against_baseline(baseline, measured)
 
 

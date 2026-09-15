@@ -222,3 +222,49 @@ def test_the_result_reports_how_many_images_were_evaluated(gt_path: Path) -> Non
         "the no-predictions branch returns without measuring, so it must not "
         "claim to have evaluated images"
     )
+
+
+def test_duplicate_image_ids_are_refused(gt_path: Path) -> None:
+    """A repeated id would inflate the reported denominator.
+
+    `COCOeval.evaluate` does `np.unique(p.imgIds)`, so duplicates collapse
+    inside pycocotools but not in the count this function reports. A subset
+    manifest with 500 rows and 499 distinct images would report a 500-image
+    denominator for a 499-image measurement, and the gate's own
+    `images_evaluated == 500` check could not see it.
+    """
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_coco_map(gt_path, _preds([1, 2]), image_ids=[1, 1, 2])
+
+
+def test_an_empty_image_ids_is_refused(gt_path: Path) -> None:
+    """Zero images score -1.0, pycocotools' 'nothing to average' sentinel.
+
+    Returning it from a function documented to return a mAP puts -1.0 into
+    `BenchmarkResult.map_50_95` and prints it in the benchmark table as though
+    it were a score. `tests/support/datasets.py` refuses an empty manifest for
+    exactly this reason; the scope parameter must not reopen the door.
+    """
+    with pytest.raises(ValueError, match="empty"):
+        evaluate_coco_map(gt_path, _preds([1, 2]), image_ids=[])
+
+
+def test_the_scope_is_validated_even_when_there_are_no_predictions(gt_path: Path) -> None:
+    """The empty-predictions early return must not skip the id check.
+
+    A caller that mis-derives its ids AND detects nothing would otherwise get
+    a plausible 0.0 instead of the error telling it the ids are wrong.
+    """
+    with pytest.raises(ValueError, match="not in the ground truth"):
+        evaluate_coco_map(gt_path, [], image_ids=[99999])
+
+
+def test_agreement_with_subset_is_by_set_not_by_order(gt_path: Path) -> None:
+    """`subset=2` and `image_ids=[2, 1]` name the same two images.
+
+    Comparing against a sorted list made the check order-sensitive, so a
+    future loader yielding ids in file order would get a ValueError asserting
+    a scope disagreement that does not exist.
+    """
+    r = evaluate_coco_map(gt_path, _preds([1, 2]), subset=2, image_ids=[2, 1])
+    assert r["mAP_50_95"] == pytest.approx(1.0)

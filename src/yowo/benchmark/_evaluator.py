@@ -148,6 +148,49 @@ def detections_to_coco_results(
     return results
 
 
+def _validate_scope(gt_ann_path: str | Path, image_ids: Sequence[int]) -> None:
+    """Refuse a scope that would misreport its own denominator.
+
+    Raises:
+        ValueError: *image_ids* is empty, contains duplicates, or names an
+            image the ground truth does not have.
+    """
+    requested = list(image_ids)
+    if not requested:
+        msg = (
+            "image_ids is empty. Zero images score -1.0, pycocotools' "
+            "'nothing to average' sentinel, which is not a mAP — it would reach "
+            "the benchmark table and be printed as though it were one."
+        )
+        raise ValueError(msg)
+
+    # A repeated id collapses inside COCOeval's own np.unique but not in the
+    # count reported here, so 500 ids over 499 distinct images would claim a
+    # 500-image denominator for a 499-image measurement.
+    duplicates = sorted({i for i in requested if requested.count(i) > 1})
+    if duplicates:
+        msg = (
+            f"image_ids contains {len(requested) - len(set(requested))} duplicate "
+            f"id(s), e.g. {duplicates[:5]}. COCOeval scores each image once while "
+            f"the reported image count would double-count it."
+        )
+        raise ValueError(msg)
+
+    # An id the ground truth does not have would silently shrink the
+    # denominator — the same family of defect as scoping to the predictions.
+    from pycocotools.coco import COCO  # type: ignore[import-untyped]
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        known = set(COCO(str(gt_ann_path)).getImgIds())
+    missing = [i for i in requested if i not in known]
+    if missing:
+        msg = (
+            f"image_ids names {len(missing)} image(s) not in the ground truth "
+            f"at {gt_ann_path}: {missing[:5]}"
+        )
+        raise ValueError(msg)
+
+
 def evaluate_coco_map(
     gt_ann_path: str | Path,
     predictions: list[dict[str, object]],
@@ -191,6 +234,12 @@ def evaluate_coco_map(
             "or: pip install yowo[benchmark]"
         ) from exc
 
+    # Validated BEFORE the early return: a caller that mis-derives its ids and
+    # also detects nothing must get the error naming the real problem, not a
+    # plausible 0.0.
+    if image_ids is not None:
+        _validate_scope(gt_ann_path, image_ids)
+
     if not predictions:
         # 0.0 here is what the evaluated path computes for predictions that
         # match nothing — pycocotools' loadRes() rejects an empty list, so the
@@ -222,19 +271,11 @@ def evaluate_coco_map(
 
     if image_ids is not None:
         requested = list(image_ids)
-        # An id the ground truth does not have would silently shrink the
-        # denominator — the same family of defect as scoping to predictions.
-        known = set(coco_gt.getImgIds())
-        missing = [i for i in requested if i not in known]
-        if missing:
-            msg = (
-                f"image_ids names {len(missing)} image(s) not in the ground truth "
-                f"at {gt_ann_path}: {missing[:5]}"
-            )
-            raise ValueError(msg)
         # Two scopes that disagree must raise. Silently preferring one would
         # make the reported number depend on an undocumented precedence rule.
-        if subset is not None and requested != evaluated_img_ids:
+        # Compared as SETS: `subset=2` and `image_ids=[2, 1]` name the same two
+        # images, and a loader yielding ids in file order is not a disagreement.
+        if subset is not None and sorted(requested) != sorted(evaluated_img_ids):
             msg = (
                 f"subset={subset} and image_ids disagree: subset selects "
                 f"{len(evaluated_img_ids)} id(s) starting {evaluated_img_ids[:3]}, "
@@ -259,7 +300,8 @@ def evaluate_coco_map(
         "mAP_50_95": float(stats[0]),
         "mAP_50": float(stats[1]),
         "mAP_75": float(stats[2]),
-        "images_evaluated": float(len(evaluated_img_ids)),
+        # Distinct, matching what COCOeval scores after its own np.unique.
+        "images_evaluated": float(len(set(evaluated_img_ids))),
     }
 
 
