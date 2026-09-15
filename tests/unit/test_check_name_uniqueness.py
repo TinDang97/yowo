@@ -59,16 +59,20 @@ def test_ci_keeps_the_names_branch_protection_is_configured_with() -> None:
 
 def test_required_contexts_resolve_to_a_ci_job() -> None:
     """covers: G2, A16 — a context nothing publishes never blocks anything."""
-    ci_names = set(_effective_names(WORKFLOW_DIR / "ci.yml").values())
-    other = {
+    gating = _pull_request_workflows()
+    publishable = {n for wf in gating for n in _effective_names(wf).values()}
+    elsewhere = {
         n
         for wf in WORKFLOW_DIR.glob("*.yml")
-        if wf.name != "ci.yml"
+        if wf not in gating
         for n in _effective_names(wf).values()
     }
     for context in required_contexts():
-        assert context in ci_names, f"required context {context!r} names no ci.yml job"
-        assert context not in other, (
+        assert context in publishable, (
+            f"required context {context!r} names no job in a pull-request workflow, "
+            f"so it can never report and every merge would block forever"
+        )
+        assert context not in elsewhere, (
             f"required context {context!r} is also published by another workflow"
         )
 
@@ -114,7 +118,25 @@ def test_the_doc_and_the_protection_payload_agree() -> None:
     )
 
 
-def test_every_ci_job_is_classified_as_gating_or_advisory() -> None:
+def _pull_request_workflows() -> list[Path]:
+    """Every workflow that publishes a check on a pull request.
+
+    Not just ci.yml. The classification guard below was scoped to ci.yml and
+    `parity.yml` escaped it the hour it landed — publishing `Export Parity` on
+    every pull request while appearing in no table and blocking nothing, the
+    exact state the guard exists to prevent.
+    """
+    found: list[Path] = []
+    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+        wf = yaml.safe_load(path.read_text())
+        # PyYAML parses the bare key `on:` as the boolean True.
+        triggers = wf.get("on") or wf.get(True) or {}
+        if "pull_request" in triggers:
+            found.append(path)
+    return found
+
+
+def test_every_pull_request_check_is_classified_as_gating_or_advisory() -> None:
     """R:ADVISORY_BY_ACCIDENT.
 
     `Real Backend Smoke`, `Backend Conformance` and `Accuracy Dataset` each ran
@@ -126,11 +148,13 @@ def test_every_ci_job_is_classified_as_gating_or_advisory() -> None:
     A new job must therefore land with a verdict: required, or recorded in the
     doc as advisory. Silence is what produced a gate everybody read as one.
     """
-    ci_names = set(_effective_names(WORKFLOW_DIR / "ci.yml").values())
+    published = {
+        name for path in _pull_request_workflows() for name in _effective_names(path).values()
+    }
     rows = _doc_rows()
-    unclassified = sorted(ci_names - set(rows))
+    unclassified = sorted(published - set(rows))
     assert not unclassified, (
-        f"these ci.yml jobs appear in no row of docs/ci-required-checks.md: "
+        f"these pull-request checks appear in no row of docs/ci-required-checks.md: "
         f"{unclassified}. A job that is neither required nor recorded as advisory "
         f"is a check contributors read as a gate while it blocks nothing."
     )
