@@ -1,13 +1,14 @@
 ---
 type: Task
 title: A licensed evaluation dataset, sourced and reachable from CI
-status: direction
+status: done
 depth: standard
 sensitivity: security
 milestone: m3-prove-it
 scope:
   - tests/
   - docs/
+  - .github/workflows/
 gives:
   - S1 tests.support.datasets.fetch_verified(archive, cache_dir, *, session, sleep, clock) -> Path — a digest-verified archive, or nothing
   - S2 tests.support.datasets.extract_zip_safely(archive, dest, *, members_under, max_total_bytes) -> Path — traversal-refusing unpack
@@ -22,12 +23,17 @@ verified:
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/1.md }
   - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:8c80c8a2d60946b7", receipt: /tasks/accuracy-dataset.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|A21=confirm|A20=confirm|R:UNPINNED=confirm|R:TRAVERSAL=confirm|R:HALFCACHED=confirm|R:GREENSKIP=confirm|R:RESELECT=confirm" }
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:cea1c98c8b34fceb", binding: "sha256:ce8cafb5b72a5550" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/2.md }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/3.md }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:d968ccb89d19194d" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/4.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/4.md, brief: "sha256:d968ccb89d19194d" }
 advised_by: security-reviewer
 ---
 ## CARD
 goal: Make COCO val2017 fetchable, digest-verified, traversal-safe and reachable from CI, with a 500-image subset pinned in the repo, so the repaired mAP evaluator has something real to measure.
 why: The project publishes accuracy claims it cannot measure — PR #49 fixed `evaluate_coco_map` and left it with no data to eat; every downstream accuracy gate in m3 waits on this node.
-beat: verify · PROCESS DEVIATION RECORDED 2026-09-15: the build ran BEFORE the freeze was stamped. The executing agent authored direction, recorded 49 red-first checks (0 skipped), then built to green — so red-first held and the direction was not shaped to fit the code — but `add freeze` was never marked, because the agent's own boundary treats the freeze as a human seam it must not touch and that boundary outranked the instruction delegating it. The orchestrator's spawn prompt was wrong to delegate a human seam. Direction was reviewed and frozen retroactively at human authority; the receipt predates the stamp and that is visible here rather than tidied away.
+beat: done · next: add status
 
 ## RULES
 <must>
