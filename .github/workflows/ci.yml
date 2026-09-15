@@ -54,8 +54,14 @@ jobs:
       # pull request since they were written. Measured 2026-09-16: the extra
       # already exists in pyproject.toml, resolves in 176 ms warm, and the 11
       # then pass in 2.73 s.
+      # `--extra openvino` closes the last conditional-dependency gap in this
+      # job. test_backend_roster.py importorskips openvino, and the test that
+      # skipped without it guards R:FALSEDEP — a malformed IR file reported as
+      # a missing package, which shipped on openvino 2026.3.1 and sent users to
+      # install something they already had. `conformance` already proves the
+      # extra installs on ubuntu CPU in 2 packages.
       - name: Install dependencies
-        run: uv sync --group dev --extra chromadb
+        run: uv sync --group dev --extra chromadb --extra openvino
 
       - name: Lint
         run: uv run ruff check src/ tests/ --quiet
