@@ -224,7 +224,8 @@ def evaluate_coco_map(
         requested = list(image_ids)
         # An id the ground truth does not have would silently shrink the
         # denominator — the same family of defect as scoping to predictions.
-        missing = [i for i in requested if i not in set(coco_gt.getImgIds())]
+        known = set(coco_gt.getImgIds())
+        missing = [i for i in requested if i not in known]
         if missing:
             msg = (
                 f"image_ids names {len(missing)} image(s) not in the ground truth "
