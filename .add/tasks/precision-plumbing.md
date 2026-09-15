@@ -26,6 +26,8 @@ verified:
   - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:2d28c9cb2473959e", receipt: /tasks/precision-plumbing.d/interviews/1.md, answers: "A2=correct|A10=correct|A15=correct|A25=correct" }
   - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:2d28c9cb2473959e", receipt: /tasks/precision-plumbing.d/interviews/2.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|A20=confirm|A21=confirm|A22=confirm|A23=confirm|A24=confirm|A25=confirm|A26=confirm|A27=confirm|A28=confirm|R:REPORTS_REQUEST=confirm|R:SILENT_COERCION=confirm|R:AUTO_RAISES=confirm|R:SWALLOWED_BY_FALLBACK=confirm|R:PHANTOM_DEGRADATION=confirm|R:PUBLIC_BREAK=confirm|R:DEFAULT_FIXTURE=confirm|R:MOCK_ONLY_HONOUR=confirm" }
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:b97bcd12bd91cda7", binding: "sha256:f6151447e8ca057f" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/2.md }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/3.md }
 advised_by: inference-parity-engineer
 ---
 ## CARD
