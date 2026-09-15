@@ -140,7 +140,7 @@ jobs:
           path: |
             ~/.cache/yowo/weights
             ~/.cache/yowo/test-assets
-          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
 
       - name: CI can obtain a digest-verified weight
         env:
@@ -184,7 +184,7 @@ jobs:
           path: |
             ~/.cache/yowo/weights
             ~/.cache/yowo/test-assets
-          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
 
       # CI: "true" is what turns a missing weight, image or torch from a green
       # skip into a failure. Without it this job can report success having
@@ -232,7 +232,7 @@ jobs:
           path: |
             ~/.cache/yowo/weights
             ~/.cache/yowo/test-assets
-          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py') }}
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
 
       # CI: "true" turns a missing weight or image from a green skip into a
       # failure. Without it this job can report success having executed nothing.
@@ -251,3 +251,47 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_export_default_precision.py -q --tb=short
         timeout-minutes: 20
+
+  # COCO val2017 is 1.07 GB from a third party, so it is fetched under a SHA-256
+  # pin, over the path-style S3 URL: https://images.cocodataset.org/ is fronted
+  # by a certificate for s3.amazonaws.com and fails TLS verification, which is
+  # why most recipes for this dataset quietly fall back to plain HTTP.
+  accuracy-dataset:
+    name: Accuracy Dataset
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev --extra benchmark
+
+      # Keyed on the PINNED DIGESTS and the subset manifest, so a re-pin or a
+      # re-selection invalidates it. A name-keyed cache would serve the old
+      # 1.07 GB forever. The store holds the extracted tree only — the archives
+      # are deleted after extraction, deliberately, so this does not blow the
+      # 10 GB per-repo budget the weight cache also draws on.
+      - name: Restore the COCO val2017 tree
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yowo/datasets/coco-val2017
+          key: yowo-coco-val2017-${{ hashFiles('tests/support/datasets.py', 'tests/fixtures/coco_val2017_subset500.tsv') }}
+
+      # CI: "true" turns a missing dataset from a green skip into a failure.
+      # timeout-minutes MUST stay above the 1800s per-attempt fetch deadline
+      # (CI_JOB_TIMEOUT_MINUTES_REQUIRED = 45, asserted by a unit check): below
+      # it GitHub cancels the job first and the contributor gets a bare
+      # cancellation carrying none of the guidance the failure message holds.
+      - name: The pinned subset describes real COCO
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_coco_dataset.py -q --tb=short
+        timeout-minutes: 45
