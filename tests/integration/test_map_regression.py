@@ -115,7 +115,21 @@ def test_the_measured_map_is_inside_the_recorded_band(measured: dict[str, object
     the defect this node was created to fix, where a broken evaluation scope
     moved the number by 10x.
     """
-    check_against_baseline(load_baseline(BASELINE), measured)
+    baseline = load_baseline(BASELINE)
+    # Print before asserting. A gate that reports only pass/fail leaves no
+    # record of WHAT it measured, so the CI log cannot answer "how much drift
+    # does this machine actually have" without perturbing the baseline to
+    # force a failure. `pytest -s` or a failure shows it; either way the
+    # number is in the run rather than only in the verdict.
+    print(
+        f"\nmAP@0.5:0.95 measured {float(measured['map_50_95']):.6f} "
+        f"| baseline {baseline.map_50_95:.6f} "
+        f"| delta {float(measured['map_50_95']) - baseline.map_50_95:+.6f} "
+        f"| tolerance +/-{baseline.tolerance} "
+        f"| {measured['images_evaluated']} images, {measured['detections']} detections "
+        f"| baseline measured on {baseline.measured_on}"
+    )
+    check_against_baseline(baseline, measured)
 
 
 def test_the_gate_evaluated_every_pinned_image(measured: dict[str, object]) -> None:

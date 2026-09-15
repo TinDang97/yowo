@@ -359,5 +359,5 @@ jobs:
       - name: yolo11n still scores what the baseline records
         env:
           CI: "true"
-        run: uv run pytest tests/integration/test_map_regression.py -q --tb=short
+        run: uv run pytest tests/integration/test_map_regression.py -q --tb=short -s
         timeout-minutes: 45
