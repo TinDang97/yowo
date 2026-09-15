@@ -1,7 +1,7 @@
 ---
 type: Task
 title: PyTorch to ONNX numeric agreement, asserted per variant
-status: direction
+status: done
 depth: standard
 milestone: m3-prove-it
 scope:
@@ -19,12 +19,14 @@ verified:
   - { by: "unrecorded", at: 2026-09-15, act: interview, authority: human, interview: "sha256:2d31fa5fd91f58f8", receipt: /tasks/export-roundtrip-parity.d/interviews/1.md, answers: "A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A8=confirm|A9=confirm|A10=confirm|A12=confirm|A14=confirm|A15=confirm|A16=confirm|A18=confirm|R:UNPINNED_PROVIDER=confirm|R:SELF_RATIFYING_BOUND=confirm|R:GREEN_BY_SKIP=confirm|R:COUNT_BLIND=confirm" }
   - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:8834c77103e7527c", binding: "sha256:edbb6fcba706ddca" }
   - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:f62dde0f6c1205bb" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/export-roundtrip-parity.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/export-roundtrip-parity.d/runs/1.md, brief: "sha256:4f9f395eb49ed4b4" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
 goal: assert PyTorch and ONNX agree to 1e-3 px on coordinates and 1e-4 on confidence, per variant, with the execution provider pinned and asserted — n/s on every pull request, all ten on a schedule.
 why: the export path has never been checked per variant. `test_backend_conformance.py` binds coordinates for ONE variant (yolo26n) and binds confidence NOWHERE, so nine of ten exports and the entire confidence axis are unmeasured by CI.
-beat: direction · next: freeze
+beat: done · next: add status
 
 ## RULES
 <must>
