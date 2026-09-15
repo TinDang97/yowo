@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 14
+delta_seq: 15
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q15 · open · 2026-09-15] A gate primitive must be tested for the verdict it CANNOT reach as well as the one it can. NaN passed the mAP band because abs(nan) > tolerance is False, and the isinstance guard above it — whose stated purpose was that a gate with no measurement must not report success — accepts NaN, since isinstance(nan, float) is True. Every check asserted the band rejects a number that is too far away; none asserted it rejects a value that is not a number. (evidence: /tasks/map-regression-gate.md)
 - [TDD · Q14 · open · 2026-09-13] A measured deviation is a property of the configuration that produced it, not of the platform it ran on. A 0.33 px PyTorch-ONNX gap was filed twice as a platform fact — first as a general divergence, then as arm64 arithmetic — before anyone checked which execution provider had actually bound the graph. It was neither: an explicit device='cpu' was being served by the CoreML EP in FP16. Pin the provider before attributing the number. (evidence: tasks/pytorch-onnx-numeric-divergence.md)
 - [TDD · Q13 · open · 2026-09-13] A metric that scopes itself to the model's own output measures precision and calls it accuracy. evaluate_coco_map restricted COCOeval to images that had predictions, removing every miss from the denominator, so a model detecting in 1 of 10 images scored 0.99999999 against a perfect model's 1.0 — degrading recall RAISED the score. The comment above the line stated the choice aloud ('so unscored images don't drag down recall') and it shipped anyway, because the only tests mocked pycocotools and never executed COCOeval. (evidence: tasks/coco-map-evaluator-repair.md)
 - [TDD · Q12 · open · 2026-09-13] A mocked exporter cannot prove an export works. Every export_model call in the unit suite patched _export_onnx and passed FP32 or INT8 — never the signature default — so the default-precision path shipped broken for every detection and OBB model, and the two lines that halve the model were the only uncovered lines in that region of a 50%-covered file. A check that never executes the default value of the argument under test does not bind that value. (evidence: tasks/export-fp16-default.md)
