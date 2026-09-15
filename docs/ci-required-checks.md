@@ -13,7 +13,7 @@ Frozen by ADD task `pr-ci-gate`. Change this file and
 | Setting | Value | Why |
 |---|---|---|
 | Branch | `main` | the only protected branch; releases cut from it |
-| Required status checks | **`Quality Gate`**, **`Source Distribution`**, **`Reproducible Build`**, **`Weight Fixture`** | the four `name:` values of `ci.yml`'s jobs — GitHub exposes the job *name*, not its id |
+| Required status checks | **all eight `ci.yml` jobs** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all eight") |
 | Strict (require branches up to date) | `false` | a solo maintainer rebasing every PR before merge is friction without a corresponding risk here |
 | `enforce_admins` | **`true`** | decided 2026-09-08. Nobody bypasses a failing check, repository owner included — an advisory gate is the state this task exists to change |
 | Required approving reviews | none | single maintainer; the gate is automated, not social |
@@ -35,6 +35,10 @@ run passed.
 | `Source Distribution` | `ci.yml` | `sdist` | **yes** |
 | `Reproducible Build` | `ci.yml` | `reproducible` | **yes** |
 | `Weight Fixture` | `ci.yml` | `weights` | **yes** |
+| `Real Backend Smoke` | `ci.yml` | `backend-smoke` | **yes** |
+| `Backend Conformance` | `ci.yml` | `conformance` | **yes** |
+| `Accuracy Dataset` | `ci.yml` | `accuracy-dataset` | **yes** |
+| `mAP Gate` | `ci.yml` | `map-gate` | **yes** |
 | `Quality Gate (release)` | `release.yml` | `quality` | no |
 | `Source Distribution (release)` | `release.yml` | `sdist` | no |
 | `Semantic Release` | `release.yml` | `release` | no |
@@ -45,6 +49,28 @@ run passed.
 stores the string; renaming the job leaves protection referencing a context nothing
 publishes, which never blocks anything and still looks configured.
 `tests/unit/test_check_name_uniqueness.py` asserts both halves.
+
+## Why all eight, not just `Quality Gate`
+
+Amended 2026-09-15 by human decision. `Real Backend Smoke`, `Backend Conformance`
+and `Accuracy Dataset` had each been running on every pull request while blocking
+nothing, and `mAP Gate` joined them the day it landed. The cost was not
+hypothetical: **Backend Conformance caught a real design fault that 2656 green
+unit tests missed** — a precision request the backend could honour being refused —
+and it could not have stopped that merging. A check that runs, reports, and cannot
+fail a merge is worse than no check, because everybody reads it as a gate.
+
+`tests/unit/test_check_name_uniqueness.py::test_every_ci_job_is_classified_as_gating_or_advisory`
+now requires every `ci.yml` job to appear in the table above with a verdict, so a
+new job cannot land silently advisory — which is how the previous four got there.
+That test, and the one asserting this doc agrees with `branch-protection.json`,
+read the payload rather than a copy of it: `REQUIRED_CONTEXTS` was a hardcoded
+`("Quality Gate",)` while protection had required four since 2026-09-10, so the
+guard against silently un-gating the branch was itself checking a stale list.
+
+The cost is real and was accepted: a flake in any of the eight now blocks a merge,
+and with `enforce_admins: true` there is no bypass short of the emergency path
+below. The two slowest are `Backend Conformance` (~3m) and `mAP Gate` (~1m30s).
 
 ## Why all four, not just `Quality Gate`
 

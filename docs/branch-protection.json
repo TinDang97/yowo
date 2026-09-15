@@ -5,7 +5,11 @@
       "Quality Gate",
       "Source Distribution",
       "Reproducible Build",
-      "Weight Fixture"
+      "Weight Fixture",
+      "Real Backend Smoke",
+      "Backend Conformance",
+      "Accuracy Dataset",
+      "mAP Gate"
     ]
   },
   "enforce_admins": true,
