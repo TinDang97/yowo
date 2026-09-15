@@ -34,6 +34,10 @@ FROZEN_JOB_IDS = {
     "map-gate",
     # `arch-equivalence` appended by task arch-equivalence-in-ci.
     "arch-equivalence",
+    # `cli-e2e` and `persistent-gallery` appended by task integration-tier-revival:
+    # both run suites that existed and that no workflow ran.
+    "cli-e2e",
+    "persistent-gallery",
 }
 
 # The mAP gate's own budget. 500 images inferred in 20.8 s on local CPU

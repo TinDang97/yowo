@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 20
+delta_seq: 22
 ---
 ## Now
 
@@ -63,6 +63,8 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q22 · open · 2026-09-16] Detect behaviour by PARSING, not by matching text. A regex for importorskip(...) flagged the guard's own docstring, which quotes the call as an example — prose that executes nothing. ast.walk for a real Call node is immune. This is the same defect the task was written to remove, reappearing inside the guard against it. (evidence: /tasks/integration-tier-revival.md)
+- [TDD · Q21 · open · 2026-09-16] In zsh an unquoted $VAR holding space-separated paths does NOT word-split — it becomes ONE nonexistent path, pytest reports 'no tests ran', and a grep for FAILED finds nothing. Five mutation checks 'passed' by running zero tests on 2026-09-16. A verification that finds nothing looks exactly like a verification that found nothing wrong; always print the pass/fail COUNT, never just grep for failures. (evidence: /tasks/integration-tier-revival.md)
 - [TDD · Q20 · open · 2026-09-16] Print the MARGIN, not just the verdict. arch-equivalence recorded a darwin/arm64 box maximum of 1.4038e-03 and claimed 3.6x headroom; adding '-s' showed ubuntu/x86-64 producing 2.2583e-03 on a different variant (yolo11x, not yolo11l) within the hour — 1.6x larger, real headroom 2.2x. A green bound tells you it held, never by how much, and the difference is whether the next platform reds the build. Q11 in its live form. (evidence: /tasks/arch-equivalence-in-ci.md)
 - [TDD · Q19 · open · 2026-09-16] A declared bound needs a CEILING as well as a floor. Asserting only 'bound > worst measured' lets anyone widen it to admit whatever the run just produced, as a one-character edit nobody reviews. A headroom band (2x-10x) makes widening a diff against an assertion. (evidence: /tasks/arch-equivalence-in-ci.md)
 - [TDD · Q18 · open · 2026-09-16] Two axes that differ by orders of magnitude need two declared bounds. Measured 2026-09-16: arch box deviation 5.6e-04..1.4e-03 px, class deviation 1.3e-06..3.6e-05. One bound over both is set entirely by the looser, and the tighter axis silently stops being checked. (evidence: /tasks/arch-equivalence-in-ci.md)
