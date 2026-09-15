@@ -254,7 +254,7 @@ def test_an_fp32_artifact_answers_an_explicit_fp32_request(tmp_path: Path) -> No
     )
 
 
-def test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32(
+def test_an_artifact_that_declares_fp16_refuses_an_explicit_fp32_request(
     tmp_path: Path,
 ) -> None:
     """covers: M2, A3, A16.
@@ -730,7 +730,7 @@ def test_no_fixture_in_this_suite_requests_the_default_precision() -> None:
     # fp32 IS the subject under test rather than an incidental fixture value,
     # and in all three of these the frozen text names fp32 explicitly.
     exempt = {
-        "test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32": (
+        "test_an_artifact_that_declares_fp16_refuses_an_explicit_fp32_request": (
             "an explicit fp32 against an artifact that declares fp16 is the "
             "mismatch this check exists for; fp32 has to be the value asked for"
         ),

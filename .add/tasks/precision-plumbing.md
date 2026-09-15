@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Precision reaches the executing backend, or leaves the surface
-status: direction
+status: done
 depth: deep
 sensitivity: architecture
 milestone: m4-honest-deployment
@@ -38,6 +38,14 @@ verified:
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/7.md }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/8.md }
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/9.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:89519892a606cb4b", receipt: /tasks/precision-plumbing.d/interviews/3.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|A20=confirm|A21=confirm|A22=confirm|A23=confirm|A24=confirm|A25=confirm|A26=confirm|A27=confirm|A28=confirm|R:REPORTS_REQUEST=confirm|R:SILENT_COERCION=confirm|R:AUTO_RAISES=confirm|R:SWALLOWED_BY_FALLBACK=confirm|R:PHANTOM_DEGRADATION=confirm|R:PUBLIC_BREAK=confirm|R:DEFAULT_FIXTURE=confirm|R:MOCK_ONLY_HONOUR=confirm" }
+  - { by: "Tin Dang", at: 2026-09-15, act: refreeze, authority: human, direction: "sha256:3f1a116710ab023f", binding: "sha256:40e899daca2cbad3" }
+  - { by: "cli", at: 2026-09-15, act: brief, authority: process, brief: "sha256:7f99edabceff3431" }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/10.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/10.md, brief: "sha256:7f99edabceff3431" }
+  - { by: loop, at: 2026-09-15, act: reopen, to: verify, reason: "Rebased onto main after #51 and #53 merged; in-scope files moved, so the receipt's freshness claim no longer held." }
+  - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/11.md }
+  - { by: "Tin Dang", at: 2026-09-15, act: gate, authority: human, outcome: PASS, receipt: /tasks/precision-plumbing.d/runs/11.md, brief: "sha256:7f99edabceff3431" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
@@ -117,7 +125,7 @@ DEFERRED, and named: `TuneProfile.precision` and `SweepResult.precision` themsel
 ## EDGES
 - E1 `precision=None` — the default, and every caller that has never passed one — must reach the backend and raise nothing on any device.
 - E2 `precision=fp16` explicitly, PyTorch, resolved device `cpu`: the COMMON case. Must raise naming both `pytorch` and `cpu`.
-- E3 `precision=int8` explicitly, any backend, any device: nothing in this library executes int8 at runtime, so it always raises, and no surface reports it again.
+- E3 `precision=int8` explicitly: no surface reports it again unless something is executing it. · AMENDED 2026-09-15, premise refuted twice over. The edge said "nothing in this library executes int8 at runtime, so it always raises". (a) That stopped being true the same day: `int8-calibration-parity` (PR #53) landed a working ONNX INT8 export, so an INT8 QDQ artifact really does execute int8 and refusing it would refuse a shipped path. (b) It is not detectable anyway — measured, an INT8 QDQ graph built from an FP32 source has `tensor(float)` at both boundaries, identical to FP32, so the float boundary cannot tell them apart and a file size is not a precision oracle. Explicit int8 on onnx therefore LOADS with verdict `None`, and `precision_current` reads `"unknown"` rather than echoing `int8`. The lie this edge was written against — reporting `int8` while fp32 executes — is killed by M4, not by the refusal.
 - E4 A CUDA-capable box run with `device="cpu"`, where `BackendSelection.device_type` says CUDA and the backend resolves `cpu`: an AUTO fp16 must not raise, and must report fp32.
 - E5 An explicit request must survive the backend-fallback loop: the loop may not re-derive it away, and when every candidate is disqualified the final error names precision.
 - E6 A user-supplied `backend_instance` plus an explicit precision must be judged against that instance, not against the hardcoded `Precision.FP32` at `engine.py:273`.
@@ -129,7 +137,7 @@ DEFERRED, and named: `TuneProfile.precision` and `SweepResult.precision` themsel
 ## CHECKS
 - test_an_explicit_precision_the_backend_does_not_execute_raises_and_names_backend_and_device · covers: M2, A23, A26, E2, R:SILENT_COERCION · explicit fp16 with the device resolving to cpu; asserts the message contains `pytorch`, `cpu`, a remedy, and that fp32 was what ran before too.
 - test_an_explicit_int8_request_raises_instead_of_being_reported · covers: M2, E3, R:REPORTS_REQUEST · the shipping defect: today `select_precision` returns INT8 on CPU and `precision_current` says so while fp32 executes.
-- test_an_explicit_precision_on_an_artifact_backend_raises_including_fp32 · covers: M2, A3, A16 · fp32 is not a null request; a FP16 artifact executing under an explicit fp32 is the same lie.
+- test_an_artifact_that_declares_fp16_refuses_an_explicit_fp32_request · covers: M2, A3, A16 · fp32 is not a null request; a FP16 artifact executing under an explicit fp32 is the same lie. · RENAMED 2026-09-15: the old name said `..._raises_including_fp32`, which the A3 amendment made unsatisfiable alongside E11 — one line demanded a raise on any explicit fp32, the next forbade exactly that. The RATIONALE survives the amendment verbatim and is what the check actually binds; only the name over-claimed. What it proves now: an artifact whose declared dtype is fp16 refuses an explicit fp32 request, which is the case the raise exists for.
 - test_an_auto_selected_precision_that_cannot_be_honoured_does_not_raise · covers: M3, A13, E1, E4, R:AUTO_RAISES · the same impossible pair reached without an explicit request resolves quietly to fp32.
 - test_a_honourable_precision_reaches_and_changes_the_executing_backend · covers: M1, A9, R:MOCK_ONLY_HONOUR · asserts `backend.active_precision is Precision.FP16` AND that the backend's own fp16 state is set, on the CONSTRUCTED backend after a cuda load — at the executor, never at the config that asked (Q13) — and `None` before load.
 - test_health_report_precision_comes_from_the_backend_not_the_request · covers: M4, A15, E9, R:REPORTS_REQUEST · a backend executing fp32 while the selection holds a different value makes `precision_current` read the backend's; an artifact backend makes it read `None`.
