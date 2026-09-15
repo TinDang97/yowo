@@ -47,10 +47,6 @@ _ALLOWLIST: dict[str, str] = {
         "torch.cuda.memory_reserved. The producer exists and is conditioned on "
         "hardware this suite does not have, which is not the same as absent."
     ),
-    "precision_current": (
-        "Read straight off the resolved BackendSelection, which is set at load "
-        "from the hardware profile. Driven below via a loaded engine."
-    ),
 }
 
 
@@ -323,9 +319,15 @@ def test_dropped_events_are_in_the_snapshot() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "site", ["oom", "precision", "backend"], ids=["oom", "precision", "backend"]
-)
+# The "precision" site is gone, and with it this file's A16/E6 subject.
+# `_try_precision_fallback` was deleted by /tasks/precision-plumbing.md: no
+# backend ever defined `set_precision`, so it was not a recovery that could
+# FAIL — it was a no-op that counted a degradation anyway, and `return`ed,
+# stranding tier-1 for the whole [0.90, 0.95) band. After that node no
+# degradation site can attempt something and fail, so there is nothing left
+# here to drive. /tasks/metrics-truth.md M4, A16 and E6 name that site and
+# need amending; this comment is the trail.
+@pytest.mark.parametrize("site", ["oom", "backend"], ids=["oom", "backend"])
 def test_each_degradation_site_increments_the_counter(site: str, monkeypatch: Any) -> None:
     """covers: M4, A13, A14, A16, E6 — driven at the site, not asserted about it."""
     from yowo.engine import BaseEngine
@@ -346,13 +348,6 @@ def test_each_degradation_site_increments_the_counter(site: str, monkeypatch: An
 
     if site == "oom":
         engine._halve_batch_size()  # type: ignore[attr-defined]
-    elif site == "precision":
-        # A recovery that FAILS still counts: the engine entered a degraded state.
-        class _NoPrecision:
-            pass
-
-        engine._backend = _NoPrecision()  # type: ignore[attr-defined]
-        engine._try_precision_fallback()  # type: ignore[attr-defined]
     else:
         engine._record_backend_fallback()  # type: ignore[attr-defined]
 

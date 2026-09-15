@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from yowo.errors import BackendLoadError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendType, PreprocessedTensor
+from yowo.types import BackendType, Precision, PreprocessedTensor
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,23 @@ class CoreMLBackend:
     no base class required.
     """
 
-    def __init__(self, hw_profile: HardwareProfile) -> None:
+    def __init__(
+        self,
+        hw_profile: HardwareProfile,
+        *,
+        precision: Precision | None = None,
+        precision_explicit: bool = False,
+    ) -> None:
         if not hw_profile.libraries.coremltools_version:
             raise DependencyError("coremltools", "uv add coremltools>=7.0")
 
         self._hw = hw_profile
+        # Kept only so load() can refuse an explicit request. Nothing
+        # here can act on it: the artifact's numerics are already fixed.
+        self._precision: Precision | None = precision
+        self._precision_explicit: bool = precision_explicit
+        # Read FROM the artifact in load(), never from the request.
+        self._executing_precision: Precision | None = None
         self._model: Any = None
         self._input_shape: tuple[int, int] = (640, 640)
         self._input_name: str = "images"
@@ -51,6 +63,29 @@ class CoreMLBackend:
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
+
+    @property
+    def executing_precision(self) -> Precision | None:
+        """ALWAYS ``None`` on this backend — a NAMED GAP, not a claim.
+
+        The other three artifact backends answer this by reading the element
+        type at the loaded artifact's I/O boundary. That does not transfer here:
+        coremltools keeps compute precision in the model spec rather than at the
+        I/O, so the one-line read that settles ONNX, TensorRT and OpenVINO has
+        no CoreML equivalent — and this backend is ``UNVERIFIED`` in
+        ``_roster.py`` (macOS only, no CI runner), so determinability written
+        here would ship unexecuted and unmeasured. Guessing a ``Precision``
+        instead would be R:REPORTS_REQUEST wearing a CoreML hat.
+
+        So the engine reports ``"unknown"`` for every CoreML load. That is the
+        honest answer until someone can run the thing: under A3's three-way
+        reading, CANNOT DETERMINE accepts the request and refuses nothing, and
+        M4 keeps anything unexecuted from being reported.
+
+        The slot is real rather than a literal ``return None`` so that closing
+        the gap is an assignment in ``load()``, not a rewrite of this property.
+        """
+        return self._executing_precision
 
     @property
     def input_shape(self) -> tuple[int, int]:

@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 17
+delta_seq: 18
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M18 · open · 2026-09-15] A check can be retired by a LATER node proving its subject never existed. metrics-truth's A16 assumed _try_precision_fallback attempted a recovery and failed; it attempted nothing, because no backend ever defined set_precision, so the parametrize case gated a phantom. When a done node's evidence is invalidated, amend the node with dated evidence naming the node that invalidated it — a gated PASS is a record of what ran, not a claim that it still holds. (evidence: /tasks/precision-plumbing.md)
 - [ADD · M17 · open · 2026-09-13] A milestone's why rots like any other claim. m3 was written on five factual claims; by the time its first node started, THREE were false - fixed by m1 and m2 in the interim. Building against a stale motivation makes a node justify work the repo already did, and inflates the stated urgency past what the evidence supports. Measure the why before authoring the first node of any milestone that was planned before the previous one closed, and amend it with dates. (evidence: /milestones/m3-prove-it.md)
 - [ADD · M16 · open · 2026-09-11] A Must with two clauses needs a check for each. degraded-mode-correctness M3 required both the marker VALUES and that ClassificationResult DOCUMENT their meaning; one check bound the values, the gate passed, and the docstring half was simply not built. A covers: key names the rule, not the clause — so a partially-satisfied Must reads as covered. (evidence: /tasks/degraded-mode-correctness.md)
 - [ADD · M15 · open · 2026-09-11] A check can cite a rule and exercise nothing, and the citation makes the gap read as coverage. In reader-shutdown, A5 -- 'a reconnect landing between the read and the retry branch' -- was written, cited by a check, and reported passing. Mutating the retry branch to keep its reopened capture as a LOCAL left every check green, because no scenario in the file ever drove that branch: after a reconnect the read always succeeded, so the retry path was dead code from the suite's point of view. The gate cannot see this -- it resolves covers: keys against reported test ids, and the test really did run and really did pass. What it cannot know is which BRANCHES that test entered. The remedy is per-rule: for each Must and each Edge, name the line or branch that would have to change to break it, then change it and watch the check go red. If nothing reddens, the rule is decorative however many covers: keys point at it. Corollary: a check that passes both before and after the change it exists to catch is indistinguishable from one that was never bound, so mutation is the only thing that separates a bound rule from a cited one. (evidence: /tasks/reader-shutdown.d/runs/2.md)

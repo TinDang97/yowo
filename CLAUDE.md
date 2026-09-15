@@ -15,6 +15,19 @@ Simultaneously:
 
 Only proceed to commit after all three return APPROVE / no P0 issues / no uncovered error paths.
 
+### Committing a red-first (direction) commit
+
+`.pre-commit-config.yaml` runs `pytest tests/unit -x`, which by design refuses a
+commit containing a deliberately failing test — exactly what red-first TDD needs
+to record. Do NOT reach for `--no-verify`: it disables ruff, ruff-format and
+pyright too, so a direction commit lands with no lint or type checking at all.
+
+Skip the one hook instead, keeping the other three:
+
+```bash
+SKIP=pytest git commit -F tmp/{commit-msg-name}.txt
+```
+
 ### Release - update changelog & readme after merge PR. Then prefer release
 
 <!-- ADD:BEGIN — managed by `add.py sync-guidelines`; do not edit inside -->

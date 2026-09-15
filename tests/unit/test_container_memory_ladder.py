@@ -230,13 +230,14 @@ def test_one_tier_fires_per_poll(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     with (
         patch.object(engine, "_evict_lowest_activity_streams") as evict,
-        patch.object(engine, "_try_precision_fallback") as precision,
         patch.object(engine, "_halve_batch_size") as halve,
     ):
         engine._apply_oom_recovery(0.99)
 
+    # The dead precision rung that used to sit between these two is gone
+    # (/tasks/precision-plumbing.md A17): it recovered nothing and `return`ed,
+    # which made tier-1 unreachable for the whole [0.90, 0.95) band.
     assert evict.call_count == 1
-    assert precision.call_count == 0
     assert halve.call_count == 0
 
 

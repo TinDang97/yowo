@@ -107,7 +107,12 @@ class HealthReport:
         memory_pct: GPU memory reserved / total (0.0-1.0).  ``None`` on CPU.
         stream_count: Number of currently active streams.
         batch_size_current: Active batch size (may have been reduced by OOM recovery).
-        precision_current: String representation of the current precision (e.g. ``"fp32"``).
+        precision_current: The precision the EXECUTING backend is running
+            (e.g. ``"fp32"``), or the sentinel ``"unknown"`` when the
+            backend does not determine it — the artifact it loaded does —
+            or when no model is loaded yet. Never the request: a value
+            reported here that nothing executes is what this field used to
+            be. ``"unknown"`` is used by no other field on this report.
     """
 
     status: HealthStatus
@@ -130,10 +135,42 @@ class HealthReport:
 # OOM monitor thresholds
 # ---------------------------------------------------------------------------
 
+#: The one value ``HealthReport.precision_current`` takes when the precision
+#: that is executing cannot be known: no model loaded yet, or a backend whose
+#: numerics belong to the artifact it loaded rather than to itself. It is the
+#: cost of keeping that field typed ``str`` — widening it to ``str | None``,
+#: which would match ``memory_pct: float | None`` on the same dataclass, is a
+#: public type change deferred to the deprecation policy. Used by no other
+#: field on the report.
+PRECISION_UNKNOWN = "unknown"
+
 _OOM_TIER1 = 0.80  # halve batch size
-_OOM_TIER2 = 0.90  # attempt precision fallback
 _OOM_TIER3 = 0.95  # evict lowest-activity streams
+# There is no tier-2. A precision-fallback rung stood here and was dead: no
+# backend defined `set_precision`, so it logged at debug, counted a
+# degradation for a recovery that never happened, and `return`ed — which
+# made tier-1 UNREACHABLE for the whole [0.90, 0.95) band. It also set
+# DEGRADED without setting `_oom_recovering`, so the restore branch could
+# never fire and one tick latched DEGRADED for the life of the process.
+# The bands nest rather than partition: >= 0.90 also satisfies >= 0.80 and
+# now gets tier-1's real recovery.
 _OOM_CLEAR = 0.75  # restore batch size when below this
+
+
+def _device_type_of(device: str) -> DeviceType:
+    """The device family a device STRING names, defaulting to CPU for "auto".
+
+    A user-provided backend owns its own device placement, so ``"auto"`` here
+    means "not stated" rather than "CUDA if present".
+    """
+    from yowo.backends._precision import device_type_of
+
+    return DeviceType.CPU if device == "auto" else device_type_of(device)
+
+
+def _precision_disqualified(backend: BackendType) -> ConfigError:
+    """The error recorded when a FALLBACK candidate cannot honour the request."""
+    return ConfigError(f"fallback backend '{backend.value}' cannot honour the requested precision")
 
 
 def _load_tune_profile(
@@ -146,7 +183,13 @@ def _load_tune_profile(
     Profile values are applied ONLY when config fields are at their defaults:
     - ``config.backend is None`` → apply ``profile.backend``
     - ``config.batch_size == 1`` → apply ``profile.batch_size``
-    - ``config.precision is None`` → apply ``profile.precision``
+
+    ``profile.precision`` is deliberately NOT applied. Nothing consumed
+    ``precision`` when these profiles were swept, so every precision row measured
+    an identical configuration and the stored winner is FPS noise picked between
+    indistinguishable runs. Writing it into a production config also made
+    "explicit" undecidable: a non-``None`` ``config.precision`` now means exactly
+    one thing, that a human asked for it.
 
     Uses ``dataclasses.replace()`` — never mutates config in-place.
 
@@ -172,9 +215,6 @@ def _load_tune_profile(
         updates["backend"] = BackendType(profile.backend)
     if config.batch_size == 1:
         updates["batch_size"] = profile.batch_size
-    if config.precision is None:
-        updates["precision"] = Precision(profile.precision)
-
     if not updates:
         return config
 
@@ -256,6 +296,13 @@ class BaseEngine(StreamingMixin):
     ) -> None:
         self._spec = spec
         self._model_builder = model_builder
+        # The RAW request, kept exactly as the caller gave it. `select_precision`
+        # degrades an explicit request before any verdict could see it —
+        # `_degrade_from` on the GPU path, and an unconditional INT8 last resort
+        # — so a verdict read from `BackendSelection.precision` would compare a
+        # coerced value against itself and pass, having lost the request.
+        # `None` means the caller expressed no preference, never "FP32 please".
+        self._requested_precision: Precision | None = precision
         self._batch_size = batch_size
         self._device = device
         self._auto_letterbox = auto_letterbox
@@ -267,10 +314,14 @@ class BaseEngine(StreamingMixin):
         self._user_provided_backend = backend_instance is not None
         if backend_instance is not None:
             self._backend: InferenceBackend = backend_instance
+            # The request is RECORDED here, not answered. A user backend
+            # implements the Protocol, so it reports what it executes and
+            # `_finalize_load` judges it. This used to hardcode FP32, which
+            # discarded an explicit request without leaving a trace of it.
             self._selection: BackendSelection = BackendSelection(
                 backend=backend_instance.backend_type,
-                device_type=DeviceType.CPU,
-                precision=Precision.FP32,
+                device_type=_device_type_of(device),
+                precision=precision if precision is not None else Precision.FP32,
                 device_index=0,
                 reason="User-provided backend instance",
             )
@@ -293,6 +344,8 @@ class BaseEngine(StreamingMixin):
                 model_builder=self._model_builder,
                 feature_cache=self._feature_cache,
                 kv_cache=kv_cache,
+                precision=self._precision_for_backend(),
+                precision_explicit=precision is not None,
             )
         self._model_meta = _resolve_model_meta(spec, model_builder)
         self._loaded = False
@@ -401,7 +454,7 @@ class BaseEngine(StreamingMixin):
             memory_pct=self._memory_pressure(),
             stream_count=len(self._active_streams),
             batch_size_current=self._batch_size,
-            precision_current=self._selection.precision.value,
+            precision_current=self._executing_precision_label(),
         )
 
     def export_metrics(self) -> dict[str, object]:
@@ -471,6 +524,8 @@ class BaseEngine(StreamingMixin):
                         model_builder=self._model_builder,
                         feature_cache=self._feature_cache,
                         kv_cache=self._kv_cache,
+                        precision=self._precision_for_backend(),
+                        precision_explicit=self._requested_precision is not None,
                     )
                 self._backend.load(weights_path, device=self._device)
                 self._backend.warmup(batch_size=self._batch_size)
@@ -479,7 +534,16 @@ class BaseEngine(StreamingMixin):
                     logger.warning("Using fallback backend: %s", bt.value)
                     self._record_backend_fallback()
                     _fs = select_backend(
-                        self._hw, model_size=self._spec.size.value, backend_override=bt.value
+                        self._hw,
+                        model_size=self._spec.size.value,
+                        backend_override=bt.value,
+                        # Without this the loop re-derived an auto precision and
+                        # threw the caller's request away on every fallback.
+                        precision_override=(
+                            self._requested_precision.value
+                            if self._requested_precision is not None
+                            else None
+                        ),
                     )
                     self._selection = BackendSelection(
                         backend=bt,
@@ -490,6 +554,15 @@ class BaseEngine(StreamingMixin):
                     )
                 self._finalize_load()
                 return
+            except ConfigError:
+                # A precision refusal for the candidate the CALLER chose is the
+                # caller's own configuration being refused — falling back cannot
+                # repair it, and swallowing it here is R:SWALLOWED_BY_FALLBACK.
+                if bt == self._selection.backend:
+                    raise
+                # A refusal for a candidate the ENGINE picked disqualifies that
+                # candidate. Recorded, so the final error still names precision.
+                last_exc = _precision_disqualified(bt)
             except (BackendLoadError, BackendError) as exc:
                 last_exc = exc
         raise BackendLoadError(
@@ -497,8 +570,67 @@ class BaseEngine(StreamingMixin):
             f"Last error: {last_exc}"
         )
 
+    def _executing_precision_label(self) -> str:
+        """What the EXECUTING backend runs, as a string, or the sentinel.
+
+        Never reads `BackendSelection.precision`. That field is the request as
+        selection left it, and reporting it is how `precision_current` came to
+        say "int8" on a process running fp32.
+        """
+        if not self._loaded:
+            return PRECISION_UNKNOWN
+        executing = self._backend.executing_precision
+        return executing.value if executing is not None else PRECISION_UNKNOWN
+
+    def _precision_for_backend(self) -> Precision:
+        """What to hand the backend: the RAW request when there was one.
+
+        `BackendSelection.precision` is a recommendation that may already have
+        been degraded away from what the caller asked for, so it is only used
+        when the caller asked for nothing.
+        """
+        if self._requested_precision is not None:
+            return self._requested_precision
+        return self._selection.precision
+
+    def _verify_precision_honoured(self) -> None:
+        """Refuse an explicit request the loaded backend DEMONSTRABLY does not run.
+
+        The single verdict site, and it is here rather than at construction
+        because this is the only point downstream of BOTH the fallback
+        re-selection and the `backend_instance` branch — each of which used to
+        replace an explicit request without telling anyone. A backend that
+        resolved its own device, or interrogated its own artifact, has usually
+        raised a better-worded error already; this is the backstop no path can
+        route around.
+
+        A backend reporting `None` executes something it cannot name, which is
+        IGNORANCE, not disagreement — refusing there is what broke eight
+        conformance tests on PR #52, where an FP32-exported artifact answering
+        an explicit `fp32` request was refused for being unable to prove it.
+        M4 carries the honesty for that case instead: `precision_current` reads
+        `"unknown"`, so nothing unexecuted is ever reported.
+        """
+        requested = self._requested_precision
+        if requested is None:
+            return
+        executing = self._backend.executing_precision
+        if executing is None or executing is requested:
+            return
+        with contextlib.suppress(Exception):
+            self._backend.unload()
+        raise ConfigError(
+            f"Backend '{self._backend.backend_type.value}' on device "
+            f"'{self._device}' cannot honour precision '{requested.value}'; it "
+            f"executes '{executing.value}'. It was executing that before this "
+            f"error existed too — the request was accepted and ignored. Omit "
+            f"the precision request, or choose a backend and device that "
+            f"execute it."
+        )
+
     def _finalize_load(self) -> None:
         """Allocate reusable buffers and resolve pipeline workers."""
+        self._verify_precision_honoured()
         if self._auto_letterbox and self._backend.backend_type != BackendType.PYTORCH:
             with contextlib.suppress(Exception):
                 self._backend.unload()
@@ -661,8 +793,8 @@ class BaseEngine(StreamingMixin):
 
         Tiers (applied top-down, only one action per call):
           - >= _OOM_TIER3 (0.95): evict lowest-activity streams
-          - >= _OOM_TIER2 (0.90): attempt precision fallback
-          - >= _OOM_TIER1 (0.80): halve batch size
+          - >= _OOM_TIER1 (0.80): halve batch size — including the whole
+            [0.90, 0.95) band, which satisfies this rung too
           - <  _OOM_CLEAR (0.75): restore batch size if recovering
         """
         if pct < _OOM_CLEAR:
@@ -686,10 +818,6 @@ class BaseEngine(StreamingMixin):
 
         if pct >= _OOM_TIER3:
             self._evict_lowest_activity_streams()
-            return
-
-        if pct >= _OOM_TIER2:
-            self._try_precision_fallback()
             return
 
         if pct >= _OOM_TIER1:
@@ -719,22 +847,6 @@ class BaseEngine(StreamingMixin):
             self._batch_size,
             self._memory_budget_label(),
         )
-
-    def _try_precision_fallback(self) -> None:
-        """Tier-2 recovery: attempt FP16 precision fallback if backend supports it."""
-        if hasattr(self._backend, "set_precision"):
-            try:
-                self._backend.set_precision("fp16")  # type: ignore[attr-defined]
-                logger.warning("OOM monitor: switched backend to FP16 precision")
-            except Exception as exc:
-                logger.warning("OOM monitor: precision fallback failed: %s", exc)
-        else:
-            logger.debug("OOM monitor: precision fallback not supported by this backend")
-        # Counted even when the fallback itself failed: the engine entered a
-        # degraded state either way, and a failed recovery is the more important
-        # one to be able to see.
-        self._health_state = HealthStatus.DEGRADED
-        self._metrics.record_degradation()
 
     def _record_backend_fallback(self) -> None:
         """Count a load-time fallback to a different backend.

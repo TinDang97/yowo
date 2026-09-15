@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from yowo.errors import BackendError
 from yowo.hardware import HardwareProfile
-from yowo.types import BackendType, Precision
+from yowo.types import BackendType
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -113,59 +113,18 @@ class TestEnumerateBackends:
 
 
 # ---------------------------------------------------------------------------
-# Task 1 tests: _precisions_for_backend
-# ---------------------------------------------------------------------------
-
-
-class TestPrecisionsForBackend:
-    def test_pytorch_cpu_gives_fp32_only(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw(has_nvidia_gpu=False)
-        result = _precisions_for_backend(BackendType.PYTORCH, hw)
-        assert result == [Precision.FP32]
-
-    def test_pytorch_gpu_gives_fp32_fp16(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw(has_nvidia_gpu=True)
-        result = _precisions_for_backend(BackendType.PYTORCH, hw)
-        assert result == [Precision.FP32, Precision.FP16]
-
-    def test_tensorrt_gives_all_precisions(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw(has_nvidia_gpu=True, tensorrt_available=True)
-        result = _precisions_for_backend(BackendType.TENSORRT, hw)
-        assert Precision.INT8 in result
-        assert Precision.FP32 in result
-        assert Precision.FP16 in result
-
-    def test_openvino_gives_fp32_only(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw()
-        result = _precisions_for_backend(BackendType.OPENVINO, hw)
-        assert result == [Precision.FP32]
-
-    def test_coreml_gives_fp32_fp16(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw()
-        result = _precisions_for_backend(BackendType.COREML, hw)
-        assert result == [Precision.FP32, Precision.FP16]
-
-    def test_int8_not_included_without_tensorrt(self) -> None:
-        from yowo.tune._sweep import _precisions_for_backend
-
-        hw = _make_hw(has_nvidia_gpu=False, tensorrt_available=False)
-        for backend in (BackendType.PYTORCH, BackendType.ONNX, BackendType.OPENVINO):
-            result = _precisions_for_backend(backend, hw)
-            assert Precision.INT8 not in result, f"{backend} should not include INT8"
-
-
-# ---------------------------------------------------------------------------
-# Task 2 tests: run_sweep()
+# `_precisions_for_backend` and the tests that covered it are GONE.
+#
+# /tasks/precision-plumbing.md dropped the sweep's precision axis. Nothing
+# consumed `precision` when these rows were swept, so every precision row
+# measured an IDENTICAL configuration and the stored winner was FPS noise
+# picked between indistinguishable runs. Worse, once an explicit request became
+# loud, the sweep's own `precision=` argument would have raised on every
+# non-PyTorch row on every host — the sweep was a user request as far as the
+# engine could tell.
+#
+# A row's `precision` is now READ BACK from the engine after load: what
+# executed, not what was asked for.
 # ---------------------------------------------------------------------------
 
 
@@ -189,17 +148,13 @@ class TestRunSweep:
         # Only PYTORCH available; mock _measure_config to return predictable fps
         fps_by_batch: dict[int, float] = {1: 10.0, 2: 20.0, 4: 5.0}
 
-        def fake_measure(_spec, _hw, _backend, _precision, batch_size, _warmup, _measure) -> float:
-            return fps_by_batch[batch_size]
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
+            return fps_by_batch[batch_size], "fp32"
 
         with (
             patch(
                 "yowo.tune._sweep._enumerate_backends",
                 return_value=[BackendType.PYTORCH],
-            ),
-            patch(
-                "yowo.tune._sweep._precisions_for_backend",
-                return_value=[Precision.FP32],
             ),
             patch("yowo.tune._sweep._BATCH_SIZES", [1, 2, 4]),
             patch("yowo.tune._sweep._measure_config", side_effect=fake_measure),
@@ -219,17 +174,13 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, _precision, batch_size, _warmup, _measure) -> float:
-            return 30.0  # same fps for all
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
+            return 30.0, "fp32"  # same fps for all
 
         with (
             patch(
                 "yowo.tune._sweep._enumerate_backends",
                 return_value=[BackendType.PYTORCH],
-            ),
-            patch(
-                "yowo.tune._sweep._precisions_for_backend",
-                return_value=[Precision.FP32],
             ),
             patch("yowo.tune._sweep._BATCH_SIZES", [2, 4, 1]),
             patch("yowo.tune._sweep._measure_config", side_effect=fake_measure),
@@ -251,21 +202,17 @@ class TestRunSweep:
 
         call_count = 0
 
-        def fake_measure(_spec, _hw, _backend, _precision, batch_size, _warmup, _measure) -> float:
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
             nonlocal call_count
             call_count += 1
             if batch_size >= 4:
                 raise torch.cuda.OutOfMemoryError("OOM")
-            return 10.0
+            return 10.0, "fp32"
 
         with (
             patch(
                 "yowo.tune._sweep._enumerate_backends",
                 return_value=[BackendType.PYTORCH],
-            ),
-            patch(
-                "yowo.tune._sweep._precisions_for_backend",
-                return_value=[Precision.FP32],
             ),
             patch("yowo.tune._sweep._BATCH_SIZES", [1, 2, 4, 8, 16, 32]),
             patch("yowo.tune._sweep._measure_config", side_effect=fake_measure),
@@ -296,17 +243,13 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, _precision, batch_size, _warmup, _measure) -> float:
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
             raise torch.cuda.OutOfMemoryError("OOM")
 
         with (
             patch(
                 "yowo.tune._sweep._enumerate_backends",
                 return_value=[BackendType.PYTORCH],
-            ),
-            patch(
-                "yowo.tune._sweep._precisions_for_backend",
-                return_value=[Precision.FP32],
             ),
             patch("yowo.tune._sweep._BATCH_SIZES", [1]),
             patch("yowo.tune._sweep._measure_config", side_effect=fake_measure),
@@ -326,7 +269,7 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, _precision, batch_size, _warmup, _measure) -> float:
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
             raise torch.cuda.OutOfMemoryError("OOM")
 
         # We can't directly observe engine.close() from run_sweep since
@@ -337,10 +280,6 @@ class TestRunSweep:
             patch(
                 "yowo.tune._sweep._enumerate_backends",
                 return_value=[BackendType.PYTORCH],
-            ),
-            patch(
-                "yowo.tune._sweep._precisions_for_backend",
-                return_value=[Precision.FP32],
             ),
             patch("yowo.tune._sweep._BATCH_SIZES", [1, 2]),
             patch("yowo.tune._sweep._measure_config", side_effect=fake_measure),
@@ -383,7 +322,7 @@ class TestMeasureConfigDispatch:
         # is bound in function scope, not in _sweep's module dict.
         with patch("yowo.obb_engine.OBBEngine", return_value=mock_engine):
             mock_engine.load.return_value = None
-            _measure_config(spec, hw, BackendType.PYTORCH, Precision.FP32, 1, 1, 1)
+            _measure_config(spec, hw, BackendType.PYTORCH, 1, 1, 1)
 
         mock_engine.detect_obb.assert_called()
 
@@ -398,6 +337,6 @@ class TestMeasureConfigDispatch:
         # _measure_config via `from yowo.engine import DetectionEngine`.
         with patch("yowo.engine.DetectionEngine", return_value=mock_engine):
             mock_engine.load.return_value = None
-            _measure_config(spec, hw, BackendType.PYTORCH, Precision.FP32, 1, 1, 1)
+            _measure_config(spec, hw, BackendType.PYTORCH, 1, 1, 1)
 
         mock_engine.detect.assert_called()
