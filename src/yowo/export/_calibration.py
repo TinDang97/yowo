@@ -80,8 +80,15 @@ def calibration_batches(
 ) -> Iterator[NDArray[np.float32]]:
     """Yield BCHW float32 batches from calibration images.
 
-    Uses ``cv2.dnn.blobFromImages`` for efficient BGR->RGB + resize + normalize
-    in a single C++ call, matching the inference preprocessing pipeline.
+    Delegates to ``yowo.io._decode.preprocess`` -- the *same* function the
+    engine runs at inference -- so the activation distribution INT8 scales are
+    derived from is the distribution the quantized model will actually see.
+
+    That identity is the point. This function previously stretch-resized to a
+    square while inference letterboxed, so every scale was calibrated on a
+    geometry that never occurs at inference: a silent accuracy loss with a
+    docstring claiming the two matched. Sharing one implementation makes them
+    equal by construction rather than by two implementations agreeing.
 
     Args:
         image_paths: List of image file paths.
@@ -93,21 +100,26 @@ def calibration_batches(
     """
     import cv2
 
+    from yowo.io._decode import preprocess
+    from yowo.types import Frame
+
     for start in range(0, len(image_paths), batch_size):
         chunk = image_paths[start : start + batch_size]
-        images: list[cv2.typing.MatLike] = []
+        frames: list[Frame] = []
         for p in chunk:
             img = cv2.imread(str(p))
             if img is None:
                 logger.warning("Skipping unreadable calibration image: %s", p)
                 continue
-            resized = cv2.resize(img, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
-            images.append(resized)  # type: ignore[arg-type]
-        if not images:
+            # cv2 stubs return MatLike; imread of a real file is uint8 HWC BGR.
+            frames.append(
+                Frame(pixels=img, source_id=str(p), frame_index=len(frames))  # type: ignore[arg-type]
+            )
+        # ``preprocess`` raises on an empty frame list; an all-unreadable chunk
+        # stays a skip rather than becoming a new failure mode.
+        if not frames:
             continue
-        batch: NDArray[np.float32] = cv2.dnn.blobFromImages(  # type: ignore[assignment]
-            images, scalefactor=1.0 / 255.0, size=(input_size, input_size), swapRB=True
-        )
+        batch: NDArray[np.float32] = preprocess(frames, (input_size, input_size)).data
         yield batch
 
 
