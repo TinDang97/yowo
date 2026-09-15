@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from yowo.errors import ConfigError, DependencyError, ExportError
 from yowo.export._calibration import resolve_calibration_images
+from yowo.export._int8 import ParityReport
 from yowo.export._metadata import ExportMetadata
 from yowo.hardware import get_hardware_profile
 from yowo.models import resolve_weights
@@ -147,6 +149,7 @@ def export_model(
     t0 = time.monotonic()
 
     task_suffix = "-obb" if spec.task == "obb" else ""
+    int8_parity: ParityReport | None = None
     model_stem = f"{spec.family.value}{spec.size.value}{task_suffix}"
 
     # CoreML exports directly from PyTorch — skip ONNX intermediate
@@ -178,14 +181,19 @@ def export_model(
             from yowo.export._int8 import quantize_onnx_static
 
             quantized_path = output_dir / f"{model_stem}_int8.onnx"
-            quantize_onnx_static(
+            # The report -- not a path -- is the return value, so the measured
+            # delta against the FP32 source cannot be dropped on the floor.
+            # quantize_onnx_static raises rather than publishing an artifact
+            # that does not clear its declared parity floor.
+            int8_parity = quantize_onnx_static(
                 onnx_path,
                 quantized_path,
                 calibration_data,  # type: ignore[arg-type]  # validated non-None above
+                model_spec=spec,
                 input_size=imgsz,
                 batch_size=1 if not dynamic_batch else 8,
             )
-            onnx_path = quantized_path
+            onnx_path = Path(int8_parity.output_path)
 
         # Step 2: Convert if needed
         if target_format == ExportFormat.ONNX:
@@ -229,6 +237,9 @@ def export_model(
         extra={
             **({"kv_cache": True} if kv_cache else {}),
             **({"batch_sizes": batch_sizes} if batch_sizes else {}),
+            # Every quantization carries its measured delta against its source,
+            # on the artifact, where a reader who never ran the export can see it.
+            **({"int8_parity": asdict(int8_parity)} if int8_parity is not None else {}),
         },
     )
     meta.save()
