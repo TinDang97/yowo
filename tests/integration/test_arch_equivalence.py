@@ -18,14 +18,33 @@ Two bounds, one per axis, declared BEFORE the run:
 
 They are separate because the axes differ by two orders of magnitude, and one
 bound over both would be set entirely by the looser. Measured 2026-09-16 on
-bus.jpg, fp32, same weight file both sides:
+bus.jpg, fp32, same weight file both sides, on TWO platforms:
 
     YOLO11 raw, every one of 8400 anchors
-        box     5.6458e-04 .. 1.4038e-03 px   (worst: yolo11l)
-        class   1.3188e-06 .. 3.5942e-05      (worst: yolo11x)
+        box     darwin/arm64    5.6458e-04 .. 1.4038e-03 px  (worst: yolo11l)
+                ubuntu/x86-64   4.2725e-04 .. 2.2583e-03 px  (worst: yolo11x)
+        class   darwin/arm64    1.3188e-06 .. 3.5942e-05
+                ubuntu/x86-64   2.3842e-07 .. 1.3351e-05
     YOLO26 end2end, real detections only
-        box     3.0518e-05 .. 6.1035e-05 px
-        conf    1.1921e-07 .. 1.7881e-06
+        box     3.0518e-05 .. 6.1035e-05 px   both platforms
+        conf    1.1921e-07 .. 2.7418e-06      both platforms
+
+The second row is why this suite prints its margins on every run. The first
+version of this docstring recorded only the darwin figures and called the box
+headroom 3.6x. CI measured 2.2583e-03 on x86-64 within the hour — 1.6x larger
+than the worst number darwin had produced, leaving the real headroom at 2.2x.
+Nothing was wrong with the code; a one-machine measurement was being written
+down as a property of it (Q11).
+
+Note also that the worst VARIANT is not the same variant on the two platforms:
+yolo11l on darwin, yolo11x on x86-64. Per-variant bounds would have encoded one
+machine's ranking and reddened on the other.
+
+RESIDUAL, stated rather than hidden: two platforms have been sampled, and the
+box bound now carries 2.2x headroom rather than the 3.6x first claimed. A third
+runner could plausibly exceed it without any architectural drift. If that
+happens, the fix is to record the new measurement here and reconsider the bound
+DELIBERATELY — not to widen the constant so the build goes green.
 
 **A single 1e-3 bound — the one `test_export_parity.py` uses — would FAIL
 yolo11l at 1.4038e-03.** That is the trap for anyone who reuses the parity
@@ -83,20 +102,24 @@ from yowo.types import ModelFamily, ModelSize, ModelSpec
 
 pytestmark = pytest.mark.integration
 
-#: Absolute bound on box geometry, in pixels. Worst measured 1.4038e-03 (yolo11l).
+#: Absolute bound on box geometry, in pixels. Worst measured across both
+#: sampled platforms: 2.2583e-03 (yolo11x, ubuntu/x86-64) — 2.2x headroom.
 BOX_TOLERANCE_PX = 5e-3
 
-#: Absolute bound on class score / confidence. Worst measured 3.5942e-05 (yolo11x).
+#: Absolute bound on class score / confidence. Worst measured across both
+#: sampled platforms: 3.5942e-05 (yolo11x, darwin/arm64) — 2.8x headroom.
 CLASS_TOLERANCE = 1e-4
 
 #: Detections below this are the junk tail of a fixed-length top-300 list.
 YOLO26_CONF_FLOOR = 0.25
 
 #: Documentation of what was measured. NOT asserted — see the module docstring.
-OBSERVED_YOLO11_BOX_RANGE_PX = (5.6458e-04, 1.4038e-03)
-OBSERVED_YOLO11_CLASS_RANGE = (1.3188e-06, 3.5942e-05)
+#: Spans BOTH sampled platforms — see the docstring. A range recorded from one
+#: machine understated the box maximum by 1.6x.
+OBSERVED_YOLO11_BOX_RANGE_PX = (4.2725e-04, 2.2583e-03)
+OBSERVED_YOLO11_CLASS_RANGE = (2.3842e-07, 3.5942e-05)
 OBSERVED_YOLO26_BOX_RANGE_PX = (3.0518e-05, 6.1035e-05)
-OBSERVED_YOLO26_CONF_RANGE = (1.1921e-07, 1.7881e-06)
+OBSERVED_YOLO26_CONF_RANGE = (1.1921e-07, 2.7418e-06)
 
 #: The smallest headroom a declared bound must keep over the worst measurement,
 #: and the largest it may keep. The ceiling is what makes widening a bound to

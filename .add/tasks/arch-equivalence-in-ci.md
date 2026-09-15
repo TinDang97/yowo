@@ -28,6 +28,8 @@ verified:
   - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/arch-equivalence-in-ci.d/runs/5.md, brief: "sha256:5b1d3fedf1acd13f" }
   - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/arch-equivalence-in-ci.d/runs/6.md }
   - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/arch-equivalence-in-ci.d/runs/6.md, brief: "sha256:5b1d3fedf1acd13f" }
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/arch-equivalence-in-ci.d/runs/7.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/arch-equivalence-in-ci.d/runs/7.md, brief: "sha256:5b1d3fedf1acd13f" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
