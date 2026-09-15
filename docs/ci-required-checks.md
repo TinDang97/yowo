@@ -101,8 +101,17 @@ gh api -X PUT repos/TinDang97/yowo/branches/main/protection \
 Verify the live result — this is the check bound to the task, not a claim:
 
 ```bash
-python3 scripts/verify_branch_protection.py
+python3 scripts/verify_branch_protection.py --ref <a pull-request head sha>
 ```
+
+**Pass `--ref`.** `ci.yml` runs on `pull_request`, so a commit on `main` carries
+only `release.yml`'s checks and observation cannot be confirmed from there. Run
+without it and the script says so; before 2026-09-15 it instead reported that
+protection "would block every merge on a check that never reports", which was a
+false alarm — the checks report fine, on pull requests, which is where they are
+required. The script reads its context list from `branch-protection.json` rather
+than carrying a copy; the copy it used to carry said four while the payload said
+eight, so dropping half the contexts would have verified green.
 
 ## The emergency path
 

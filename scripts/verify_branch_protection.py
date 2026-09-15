@@ -20,24 +20,32 @@ import json
 import subprocess
 import sys
 import time
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 REPO = "TinDang97/yowo"
 BRANCH = "main"
 # All four of ci.yml's job names, not just the quality gate. Amended 2026-09-10:
 # until then only "Quality Gate" was required, so the three checks m1 built could
-# each fail and a pull request still merged. Kept in the SAME ORDER as
-# docs/branch-protection.json so a reader can diff the two by eye.
-REQUIRED_CONTEXTS = (
-    "Quality Gate",
-    "Source Distribution",
-    "Reproducible Build",
-    "Weight Fixture",
-)
-# The one whose check-run is probed for actual observation below. Protection accepts
-# a context GitHub has never reported; the quality gate is the longest-running of the
-# four, so it is the one most worth confirming really ran.
-OBSERVED_CONTEXT = REQUIRED_CONTEXTS[0]
+# each fail and a pull request still merged.
+#
+# READ from docs/branch-protection.json, never copied. This was a hardcoded
+# four-entry tuple whose comment asked the reader to "diff the two by eye" —
+# and it drifted: the payload required eight while the verifier asserted four
+# and reported "requires all 4 checks" as a success, so dropping the other
+# four would have verified green.
+PAYLOAD = Path(__file__).resolve().parents[1] / "docs" / "branch-protection.json"
+
+
+def required_contexts() -> tuple[str, ...]:
+    """The contexts the applied payload binds."""
+    data = json.loads(PAYLOAD.read_text(encoding="utf-8"))
+    return tuple(data["required_status_checks"]["contexts"])
+
+
+def missing_contexts(configured: list[str]) -> list[str]:
+    """Which required contexts the live configuration does not bind."""
+    return [c for c in required_contexts() if c not in configured]
 
 
 def _gh(path: str) -> tuple[int, str]:
@@ -68,13 +76,35 @@ def _context_was_observed(sha: str) -> tuple[bool, str]:
         names = [r.get("name") for r in json.loads(out).get("check_runs", [])]
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         return False, f"check-runs response was not JSON: {exc}"
-    if OBSERVED_CONTEXT not in names:
+    return explain_observation(names, sha)
+
+
+def explain_observation(names: list[str], sha: str) -> tuple[bool, str]:
+    """Read a commit's check-run names into a verdict, and an accurate reason.
+
+    `ci.yml` runs on `pull_request`, so a commit on `main` never carries its
+    checks — only `release.yml`'s. Run against main, which is exactly what the
+    doc's copy-pasteable command does, this reported that protection would
+    "block every merge on a check that never reports". That diagnosis is
+    false: the check reports fine, on pull requests, which is where it is
+    required. Say which commit to ask about instead of blaming the config.
+    """
+    probe = required_contexts()[0]
+    if probe in names:
+        return True, ""
+    if not any(n in names for n in required_contexts()):
         return False, (
-            f"GitHub has never reported a check named {OBSERVED_CONTEXT!r} on {sha[:8]} "
-            f"(observed: {names or 'none'}) — protection requiring it would block every "
-            "merge on a check that never reports"
+            f"{sha[:8]} carries none of the required checks (observed: "
+            f"{names or 'none'}). ci.yml runs on `pull request`, so a commit on "
+            f"main carries only release.yml's checks and observation cannot be "
+            f"confirmed from here. Re-run against a pull-request head: "
+            f"`--ref <sha>`."
         )
-    return True, ""
+    return False, (
+        f"GitHub has never reported a check named {probe!r} on {sha[:8]} "
+        f"(observed: {names or 'none'}) — protection requiring it would block every "
+        "merge on a check that never reports"
+    )
 
 
 def check(ref: str | None = None) -> list[str]:
@@ -91,7 +121,7 @@ def check(ref: str | None = None) -> list[str]:
     failures: list[str] = []
 
     contexts = (data.get("required_status_checks") or {}).get("contexts") or []
-    missing = [c for c in REQUIRED_CONTEXTS if c not in contexts]
+    missing = missing_contexts(contexts)
     if missing:
         failures.append(
             f"required status checks {contexts!r} are missing {missing!r} — "
@@ -148,8 +178,8 @@ def main() -> int:
         print(f"FAIL: {line}", file=sys.stderr)
     if not failures:
         print(
-            f"OK: {BRANCH} requires all {len(REQUIRED_CONTEXTS)} checks "
-            f"({', '.join(REQUIRED_CONTEXTS)}) and enforces them on admins"
+            f"OK: {BRANCH} requires all {len(required_contexts())} checks "
+            f"({', '.join(required_contexts())}) and enforces them on admins"
         )
     return 1 if failures else 0
 
