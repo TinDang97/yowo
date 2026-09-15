@@ -13,7 +13,7 @@ Frozen by ADD task `pr-ci-gate`. Change this file and
 | Setting | Value | Why |
 |---|---|---|
 | Branch | `main` | the only protected branch; releases cut from it |
-| Required status checks | **all eight `ci.yml` jobs** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all eight") |
+| Required status checks | **all eight `ci.yml` jobs, plus `Export Parity`** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all eight") |
 | Strict (require branches up to date) | `false` | a solo maintainer rebasing every PR before merge is friction without a corresponding risk here |
 | `enforce_admins` | **`true`** | decided 2026-09-08. Nobody bypasses a failing check, repository owner included — an advisory gate is the state this task exists to change |
 | Required approving reviews | none | single maintainer; the gate is automated, not social |
@@ -39,6 +39,8 @@ run passed.
 | `Backend Conformance` | `ci.yml` | `conformance` | **yes** |
 | `Accuracy Dataset` | `ci.yml` | `accuracy-dataset` | **yes** |
 | `mAP Gate` | `ci.yml` | `map-gate` | **yes** |
+| `Export Parity` | `parity.yml` | `parity-pr` | **yes** |
+| `Export Parity (all variants)` | `parity.yml` | `parity-all` | no — see below |
 | `Quality Gate (release)` | `release.yml` | `quality` | no |
 | `Source Distribution (release)` | `release.yml` | `sdist` | no |
 | `Semantic Release` | `release.yml` | `release` | no |
@@ -49,6 +51,23 @@ run passed.
 stores the string; renaming the job leaves protection referencing a context nothing
 publishes, which never blocks anything and still looks configured.
 `tests/unit/test_check_name_uniqueness.py` asserts both halves.
+
+## Why `Export Parity (all variants)` is deliberately NOT required
+
+Amended 2026-09-15. `parity-all` runs on a schedule, not on pull requests, so on
+a pull request it reports **`skipping`** — and GitHub treats a skipped required
+check as **satisfied**. Requiring it would produce a context that is green on
+every pull request without ever executing: a gate that never runs, which is
+strictly worse than an advisory job because it also looks enforced.
+
+Its evidence comes from the scheduled run instead. That run must be watched:
+nothing blocks a merge on it, by construction.
+
+Recorded because it is the second time this shape has appeared today. The
+classification guard below was written to catch a job that runs and blocks
+nothing — and was scoped to `ci.yml`, so `parity.yml` escaped it within the
+hour, publishing `Export Parity` on every pull request while appearing in no
+table. It now covers every workflow with a `pull_request` trigger.
 
 ## Why all eight, not just `Quality Gate`
 

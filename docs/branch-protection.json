@@ -9,7 +9,8 @@
       "Real Backend Smoke",
       "Backend Conformance",
       "Accuracy Dataset",
-      "mAP Gate"
+      "mAP Gate",
+      "Export Parity"
     ]
   },
   "enforce_admins": true,
