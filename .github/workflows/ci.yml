@@ -48,8 +48,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
+      # `--extra chromadb` is what makes `tests/unit/` mean what it says. The 11
+      # tests in test_chroma_gallery.py cover the shipped, publicly exported
+      # ChromaEmbeddingGallery and importorskip'd their way to green on every
+      # pull request since they were written. Measured 2026-09-16: the extra
+      # already exists in pyproject.toml, resolves in 176 ms warm, and the 11
+      # then pass in 2.73 s.
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --extra chromadb
 
       - name: Lint
         run: uv run ruff check src/ tests/ --quiet
@@ -61,6 +67,10 @@ jobs:
         run: uv run pyright src/yowo/
 
       - name: Unit tests
+        env:
+          # Without this an absent chromadb skips the gallery tests, and a skip
+          # is green — exactly the state `--extra chromadb` above is undoing.
+          CI: "true"
         run: uv run pytest tests/unit/ -x -q --tb=short --timeout=60 --cov --cov-report=term-missing:skip-covered
         timeout-minutes: 15
 
@@ -194,6 +204,16 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_real_backend_smoke.py -q --tb=short
         timeout-minutes: 15
+
+      # Appended by ADD task `integration-tier-revival`. Built in PR #50 as a
+      # gate and then run by nothing for six days. It belongs here rather than
+      # in a job of its own: both steps assert a real backend honours what the
+      # caller asked for, and this job already restores what it needs.
+      - name: An explicitly requested provider is the provider that runs
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_onnx_provider_honoured.py -q --tb=short
+        timeout-minutes: 30
 
   # Appended by ADD task `backend-conformance-suite` under the pr-ci-gate APPEND
   # rule. An eighth appender, added as a new job rather than by widening
@@ -340,6 +360,61 @@ jobs:
           # green, and green here would mean "equivalence confirmed".
           CI: "true"
         run: uv run pytest tests/integration/test_arch_equivalence.py -q --tb=short -s
+        timeout-minutes: 30
+
+  # Appended by ADD task `integration-tier-revival`. 21 tests that no workflow
+  # ran. They take a name of their own rather than joining another job: 21
+  # failures under somebody else's label is a diagnosis nobody can read.
+  cli-e2e:
+    name: CLI End-to-End
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --group dev
+      # test_cli_e2e.py uses sample_image_path AND sample_image_dir, which both
+      # resolve through ~/.cache/yowo/test-assets — the weight store alone is
+      # not enough, and a cold fetch failure fails the job under CI=true.
+      - name: Restore the verified weight and image stores
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
+      - name: The CLI works end to end
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_cli_e2e.py -q --tb=short
+        timeout-minutes: 30
+
+  # Appended by ADD task `integration-tier-revival`. 8 tests over
+  # ChromaEmbeddingGallery, which `yowo.tracking` exports publicly and which no
+  # job has ever executed — the module importorskip'd a dependency CI did not
+  # install, and was named by no workflow either way.
+  persistent-gallery:
+    name: Persistent Gallery
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --group dev --extra chromadb
+      - name: A persistent gallery survives a restart
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_chroma_gallery_persistence.py -q --tb=short
         timeout-minutes: 30
 
   # Appended by ADD task `map-regression-gate`. A separate job rather than a
