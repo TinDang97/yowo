@@ -31,7 +31,15 @@ FROZEN_JOB_IDS = {
     "backend-smoke",
     "conformance",
     "accuracy-dataset",
+    "map-gate",
 }
+
+# The mAP gate's own budget. 500 images inferred in 20.8 s on local CPU
+# (measured 2026-09-15), but the job also restores a ~1.07 GB dataset cache and
+# a ~1.42 GB weight cache before it can start. Below this ceiling GitHub
+# cancels the job and the contributor gets a bare cancellation carrying none of
+# the guidance the band failure holds.
+MAP_GATE_TIMEOUT_MINUTES_REQUIRED = 45
 
 # The four quality commands both gates must run identically (task pr-ci-gate, M2).
 _QUALITY_MARKERS = ("ruff check", "ruff format", "pyright", "pytest tests/unit")
@@ -122,4 +130,41 @@ def test_required_check_name_matches_published_job_name() -> None:
     published = _load(CI)["jobs"]["quality"].get("name", "quality")
     assert published in doc.read_text(), (
         f"the required-checks doc does not name the check the workflow publishes ({published!r})"
+    )
+
+
+def test_the_map_gate_job_is_registered_with_both_stores_it_needs() -> None:
+    """covers: M4 — the gate cannot measure without the images AND the weights.
+
+    A job that restores only one of the two silently falls back: a missing
+    dataset is caught by `CI=true`, but a missing weight store would download
+    an unverified file, and the number measured would not be the number the
+    baseline pins.
+    """
+    job = _load(CI)["jobs"]["map-gate"]
+    assert job.get("name") == "mAP Gate", "the published check name is what protection binds"
+    cached = " ".join(
+        str(step.get("with", {}).get("path", ""))
+        for step in job.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/cache")
+    )
+    assert "datasets/coco-val2017" in cached, "the gate does not restore the COCO subset"
+    assert "weights" in cached, "the gate does not restore the verified weight store"
+
+
+def test_the_map_gate_step_runs_under_ci_true_within_its_budget() -> None:
+    """covers: M4, A15, A16 — R:GREEN_BY_SKIP.
+
+    Without `CI=true` an absent dataset turns the gate into a green skip, which
+    is the failure mode this whole node exists to prevent one layer down.
+    """
+    steps = _steps(_load(CI), "map-gate")
+    gate = [s for s in steps if "test_map_regression" in str(s.get("run", ""))]
+    assert gate, "no step runs the mAP regression gate"
+    step = gate[0]
+    assert str(step.get("env", {}).get("CI")) == "true", (
+        "the gate step does not set CI=true, so an absent dataset would skip green"
+    )
+    assert step.get("timeout-minutes") == MAP_GATE_TIMEOUT_MINUTES_REQUIRED, (
+        f"the gate step's timeout must be {MAP_GATE_TIMEOUT_MINUTES_REQUIRED} minutes"
     )

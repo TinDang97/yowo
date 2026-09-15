@@ -239,7 +239,11 @@ def run_single_backend(
     if task == "detect" and gt_ann_path is not None and image_ids is not None:
         coco_results = detections_to_coco_results(all_detections, image_ids)
         if coco_results:
-            metrics = evaluate_coco_map(gt_ann_path, coco_results)
+            # Scope the evaluation to the images THIS RUN evaluated. Dropping
+            # image_ids here scored a 500-image subset against all 5000
+            # ground-truth images: measured 2026-09-15, 0.0419 against a true
+            # 0.4158, with the 4500 unseen images counted as total misses.
+            metrics = evaluate_coco_map(gt_ann_path, coco_results, image_ids=image_ids)
             map_50_95 = metrics["mAP_50_95"]
             map_50 = metrics["mAP_50"]
 
