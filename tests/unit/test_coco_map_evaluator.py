@@ -155,3 +155,70 @@ def test_subset_zero_is_an_empty_set_not_a_full_run(gt_path: Path) -> None:
         f"({full['mAP_50_95']!r}) — 0 is being read as None, so a typo would "
         "silently become a full-dataset evaluation"
     )
+
+
+# --- explicit image-id scoping -------------------------------------------
+#
+# Measured 2026-09-15: `evaluate_coco_map`'s repair landed, but the runner one
+# layer up never passed the scope on, so `yowo benchmark --subset 500` reported
+# 0.0419 against a true 0.4158 — 4500 of 5000 ground-truth images counted as
+# total misses. `subset=N` and `load_coco_dataset(subset=N)` each re-derive
+# `sorted(getImgIds())[:N]` independently; passing the evaluated ids collapses
+# the two derivations into one and removes the chance to disagree.
+
+
+def test_explicit_image_ids_scope_the_evaluation(gt_path: Path) -> None:
+    """M1: the denominator is the images the run evaluated."""
+    by_ids = evaluate_coco_map(gt_path, _preds([1, 2]), image_ids=[1, 2])
+    by_subset = evaluate_coco_map(gt_path, _preds([1, 2]), subset=2)
+    assert by_ids["mAP_50_95"] == pytest.approx(by_subset["mAP_50_95"])
+    assert by_ids["mAP_50_95"] == pytest.approx(1.0), (
+        f"a perfect model over exactly the evaluated images scored {by_ids['mAP_50_95']!r}, not 1.0"
+    )
+
+
+def test_image_ids_need_not_be_a_leading_slice(gt_path: Path) -> None:
+    """The whole point: an arbitrary evaluated set, not `[:N]`."""
+    r = evaluate_coco_map(gt_path, _preds([3, 7, 9]), image_ids=[3, 7, 9])
+    assert r["mAP_50_95"] == pytest.approx(1.0), (
+        f"a perfect model over a non-contiguous evaluated set scored {r['mAP_50_95']!r}; "
+        "`subset` cannot express this set at all"
+    )
+
+
+def test_image_ids_that_disagree_with_subset_are_an_error(gt_path: Path) -> None:
+    """E3: two scopes that disagree must raise, never have one silently win."""
+    with pytest.raises(ValueError, match="disagree"):
+        evaluate_coco_map(gt_path, _preds([1, 2]), subset=2, image_ids=[3, 4])
+
+
+def test_image_ids_that_agree_with_subset_are_accepted(gt_path: Path) -> None:
+    """Agreeing scopes are not an error — only disagreeing ones."""
+    r = evaluate_coco_map(gt_path, _preds([1, 2]), subset=2, image_ids=[1, 2])
+    assert r["mAP_50_95"] == pytest.approx(1.0)
+
+
+def test_an_image_id_absent_from_the_ground_truth_is_an_error(gt_path: Path) -> None:
+    """Scoping to an image the ground truth does not have is a caller bug.
+
+    Silently dropping it would shrink the denominator — the same family of
+    defect as scoping to the predictions.
+    """
+    with pytest.raises(ValueError, match="not in the ground truth"):
+        evaluate_coco_map(gt_path, _preds([1]), image_ids=[1, 99999])
+
+
+def test_the_result_reports_how_many_images_were_evaluated(gt_path: Path) -> None:
+    """E1/A3: the count reported is the count evaluated, not the count asked for."""
+    clamped = evaluate_coco_map(gt_path, _preds([1, 2]), subset=_N_IMAGES * 100)
+    assert clamped["images_evaluated"] == _N_IMAGES, (
+        f"a subset of {_N_IMAGES * 100} over {_N_IMAGES} images reported "
+        f"{clamped['images_evaluated']!r} evaluated"
+    )
+    scoped = evaluate_coco_map(gt_path, _preds([3, 7]), image_ids=[3, 7])
+    assert scoped["images_evaluated"] == 2
+    empty = evaluate_coco_map(gt_path, [])
+    assert empty["images_evaluated"] == 0, (
+        "the no-predictions branch returns without measuring, so it must not "
+        "claim to have evaluated images"
+    )
