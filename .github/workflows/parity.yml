@@ -1,0 +1,96 @@
+# PyTorch↔ONNX export parity. The FIRST scheduled workflow in this repo.
+#
+# It is a new file rather than a job on ci.yml for two reasons: ci.yml's job ids
+# are frozen by tests/unit/test_ci_contract.py, and ci.yml carries no `schedule:`
+# trigger at all — there was none anywhere in .github/workflows/ before this.
+#
+# The split m3 box 3 asks for:
+#   pull_request -> the four n/s variants: yolo11n, yolo11s, yolo26n, yolo26s
+#   schedule     -> all ten
+#
+# Both entry points run the SAME test file with the SAME assertions. Only the
+# variant list differs, and tests/unit/test_parity_workflow_contract.py asserts
+# that: a split that also changed what was asserted would make these two
+# different checks wearing one name.
+name: Parity
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Daily. A weekly cadence lets an export regression sit undetected for six
+    # days, and the run is cheap enough that daily costs little.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  parity-pr:
+    name: Export Parity
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      # Same key as ci.yml's `weights` job, so the four n/s weights come from
+      # one shared store rather than a second copy.
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
+
+      # CI: "true" turns an unobtainable weight from a green skip into a
+      # failure. Without it the run would report a parity it never measured.
+      - name: PyTorch and ONNX agree on the n/s variants
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_export_parity.py --parity-scope pr -q --tb=short
+        timeout-minutes: 60
+
+  parity-all:
+    name: Export Parity (all variants)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Restore the verified weight store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yowo/weights
+            ~/.cache/yowo/test-assets
+          key: yowo-weights-sha256-${{ hashFiles('src/yowo/models/_registry.py', 'tests/support/datasets.py') }}
+
+      # The x weights are 114 MB and 118 MB and their exports dominate the run.
+      - name: PyTorch and ONNX agree on all ten variants
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_export_parity.py --parity-scope all -q --tb=short
+        timeout-minutes: 60
