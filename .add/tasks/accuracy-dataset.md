@@ -3,7 +3,7 @@ type: Task
 title: A licensed evaluation dataset, sourced and reachable from CI
 status: direction
 depth: standard
-sensitivity: data
+sensitivity: security
 milestone: m3-prove-it
 scope:
   - tests/
@@ -20,12 +20,14 @@ gives:
 generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "process:run", at: 2026-09-15, act: run, authority: process, outcome: PASS, receipt: /tasks/accuracy-dataset.d/runs/1.md }
-advised_by: artifact-integrity-steward
+  - { by: "Tin Dang", at: 2026-09-15, act: interview, authority: human, interview: "sha256:8c80c8a2d60946b7", receipt: /tasks/accuracy-dataset.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|A13=confirm|A14=confirm|A15=confirm|A16=confirm|A17=confirm|A18=confirm|A19=confirm|A21=confirm|A20=confirm|R:UNPINNED=confirm|R:TRAVERSAL=confirm|R:HALFCACHED=confirm|R:GREENSKIP=confirm|R:RESELECT=confirm" }
+  - { by: "Tin Dang", at: 2026-09-15, act: freeze, authority: human, direction: "sha256:cea1c98c8b34fceb", binding: "sha256:ce8cafb5b72a5550" }
+advised_by: security-reviewer
 ---
 ## CARD
 goal: Make COCO val2017 fetchable, digest-verified, traversal-safe and reachable from CI, with a 500-image subset pinned in the repo, so the repaired mAP evaluator has something real to measure.
 why: The project publishes accuracy claims it cannot measure — PR #49 fixed `evaluate_coco_map` and left it with no data to eat; every downstream accuracy gate in m3 waits on this node.
-beat: direction authored · red run recorded (49 unit checks red-first, 0 skipped) · implementation green · awaiting the human freeze, which this agent does not mark
+beat: verify · PROCESS DEVIATION RECORDED 2026-09-15: the build ran BEFORE the freeze was stamped. The executing agent authored direction, recorded 49 red-first checks (0 skipped), then built to green — so red-first held and the direction was not shaped to fit the code — but `add freeze` was never marked, because the agent's own boundary treats the freeze as a human seam it must not touch and that boundary outranked the instruction delegating it. The orchestrator's spawn prompt was wrong to delegate a human seam. Direction was reviewed and frozen retroactively at human authority; the receipt predates the stamp and that is visible here rather than tidied away.
 
 ## RULES
 <must>
@@ -191,9 +193,25 @@ gate: <PASS | RISK-ACCEPTED | HARD-STOP>  — NOT this agent's to mark
   non-regular members before writing any. MEASURED: CPython's `zipfile` already sanitises names and
   never creates a symlink, so this closes no exploitable hole today — it refuses instead of silently
   rewriting, and it holds if the extractor is ever swapped (the documented manual path uses `unzip`,
-  which DOES honour symlinks). Open for the human, not for this agent: `sensitivity: data` on a node
-  that pulls 1.07 GB from a third party and unpacks an archive inside CI — whether that reads as
-  `security` under the CLAUDE.md floor is a human call.
+  which DOES honour symlinks).
+  RULED 2026-09-15: sensitivity RAISED `data` -> `security`. A 1.07 GB fetch from a third party plus
+  an archive unpack executing inside CI is a supply-chain trust edge, and the CLAUDE.md floor makes
+  security a HARD-STOP lens rather than an advisory one. Raised before any interview answer existed,
+  so nothing was cleared by the edit.
+  REVIEWED 2026-09-15 by the orchestrator, reading `_check_member`, `extract_zip_safely` and
+  `fetch_verified` directly rather than accepting the report. Verdict: no HARD-STOP. Four controls
+  confirmed by reading, not by summary — containment decided by `Path.resolve()` and not by a string
+  prefix (the code carries the counter-example itself: `"val2017/../../x".startswith("val2017/")` is
+  True); symlink detection via `stat.S_IFMT(external_attr >> 16)` with the correct note that a DOS-era
+  zip has no type bits at all, so "has any mode" would have been the wrong question; every member
+  validated BEFORE any member is written; and digest-verify-then-`os.replace`, so a reader that finds
+  the cache path finds bytes that already passed.
+  ONE RESIDUAL the report did not name: the zip-bomb bound sums `info.file_size`, the DECLARED size
+  from the central directory, which an adversarial archive can understate. Harmless for COCO, whose
+  content is fixed by the digest pin — but `extract_zip_safely` is a published surface whose own
+  docstring invites other nodes to point it at archives carrying no pin, and for those the bound is
+  advisory. Named here rather than fixed: bounding the DECOMPRESSED stream belongs to whichever node
+  first extracts an unpinned archive.
 - CONCURRENCY — temp files carry pid AND thread id; publication is `os.replace`, atomic on POSIX, so
   two processes racing cannot interleave. The in-process `_verified` map is lock-guarded. A watcher
   polling the destination during two racing fetches observes no short file. Residual: the process-race
