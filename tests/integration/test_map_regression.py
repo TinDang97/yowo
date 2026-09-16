@@ -73,6 +73,8 @@ def measured(coco_val2017_root: Path) -> dict[str, object]:
         device="cpu",
         confidence_threshold=baseline.confidence_threshold,
         iou_threshold=baseline.iou_threshold,
+        max_nms=baseline.max_nms,
+        max_det=baseline.max_det,
         weights_path=weights,
     )
     detections = []
@@ -97,6 +99,8 @@ def measured(coco_val2017_root: Path) -> dict[str, object]:
         "device": device,
         "confidence_threshold": baseline.confidence_threshold,
         "iou_threshold": baseline.iou_threshold,
+        "max_nms": baseline.max_nms,
+        "max_det": baseline.max_det,
         "images_evaluated": int(scores["images_evaluated"]),
         "subset_manifest_sha256": file_digest(SUBSET_MANIFEST_PATH),
         "map_50_95": scores["mAP_50_95"],
@@ -137,6 +141,18 @@ def test_the_measured_map_is_inside_the_recorded_band(measured: dict[str, object
             f"  {label} measured {seen:.6f} | baseline {recorded:.6f} "
             f"| delta {seen - recorded:+.6f}"
         )
+    # Full precision too. The fixture stores 17 significant digits and the
+    # loop above prints 6, so following the `_rerecord` note as written could
+    # not produce a correct fixture -- the documented procedure could not
+    # reproduce the artifact it documents.
+    print(
+        "  to re-record: "
+        + ", ".join(
+            f'"{field}": {float(measured[field])!r}'  # type: ignore[arg-type]
+            for field in ("map_50_95", "map_50", "map_75")
+        )
+    )
+
     check_against_baseline(baseline, measured)
 
 

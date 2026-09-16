@@ -136,6 +136,8 @@ class OBBEngine(BaseEngine):
 
         self._conf = cfg.confidence_threshold
         self._iou = cfg.iou_threshold
+        self._max_nms = cfg.max_nms
+        self._max_det = cfg.max_det
         # Store logging config so BaseEngine._finalize_load can wire it
         self._config_log_level = cfg.log_level
         self._config_structured_logging = cfg.structured_logging
@@ -236,6 +238,8 @@ class OBBEngine(BaseEngine):
             tensor,
             conf_threshold=self._conf,
             iou_threshold=self._iou,
+            max_nms=self._max_nms,
+            max_det=self._max_det,
         )
         # OBBDetection is frozen — reconstruct to attach inference_time_ms
         return [

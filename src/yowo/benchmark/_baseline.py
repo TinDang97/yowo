@@ -67,6 +67,8 @@ class MapBaseline:
     device: str
     confidence_threshold: float
     iou_threshold: float
+    max_nms: int | None
+    max_det: int | None
     images: int
     subset_manifest_sha256: str
     map_50_95: float
@@ -132,6 +134,16 @@ def load_baseline(path: str | Path) -> MapBaseline:
                 raise BaselineError(
                     f"mAP baseline at {p}: {field.name} must be an integer, got {value!r}"
                 )
+        elif field.type in ("int | None", "Optional[int]"):
+            # A detection bound is an integer OR None, and `None` is a real
+            # value here -- it means unbounded, which is a different run from
+            # any number. Rejecting it would make the unbounded configuration
+            # unrecordable, so the gate could never guard a baseline measured
+            # without bounds.
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+                raise BaselineError(
+                    f"mAP baseline at {p}: {field.name} must be an integer or null, got {value!r}"
+                )
         elif not isinstance(value, str):
             raise BaselineError(
                 f"mAP baseline at {p}: {field.name} must be a string, got {value!r}"
@@ -164,6 +176,8 @@ _MUST_MATCH: tuple[tuple[str, str], ...] = (
     ("device", "device"),
     ("confidence_threshold", "confidence_threshold"),
     ("iou_threshold", "iou_threshold"),
+    ("max_nms", "max_nms"),
+    ("max_det", "max_det"),
     ("images", "images_evaluated"),
     ("subset_manifest_sha256", "subset_manifest_sha256"),
 )

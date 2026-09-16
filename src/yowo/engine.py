@@ -1137,6 +1137,8 @@ class DetectionEngine(BaseEngine):
         batch_size: int = 1,
         confidence_threshold: float = 0.25,
         iou_threshold: float = 0.45,
+        max_nms: int | None = InferenceConfig.max_nms,
+        max_det: int | None = InferenceConfig.max_det,
         cache: bool = False,
         cache_dir: Path | None = None,
         kv_cache: bool = False,
@@ -1163,6 +1165,8 @@ class DetectionEngine(BaseEngine):
                 batch_size=batch_size,
                 confidence_threshold=confidence_threshold,
                 iou_threshold=iou_threshold,
+                max_nms=max_nms,
+                max_det=max_det,
                 cache=cache,
                 cache_dir=cache_dir,
                 kv_cache=kv_cache,
@@ -1176,6 +1180,8 @@ class DetectionEngine(BaseEngine):
             )
         self._confidence = cfg.confidence_threshold
         self._iou_threshold = cfg.iou_threshold
+        self._max_nms = cfg.max_nms
+        self._max_det = cfg.max_det
         # Forwarded to postprocess so a custom model keeps its own labels.
         # None means the COCO defaults, exactly as before.
         self._class_names = cfg.class_names
@@ -1244,6 +1250,8 @@ class DetectionEngine(BaseEngine):
             backend=self._selection.backend,
             confidence_threshold=self._confidence,
             iou_threshold=self._iou_threshold,
+            max_nms=self._max_nms,
+            max_det=self._max_det,
             class_names=self._class_names,
             inference_time_ms=elapsed_ms,
             scratch=scratch,

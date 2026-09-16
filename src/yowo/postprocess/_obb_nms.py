@@ -94,26 +94,53 @@ def _nms_rotated(
     boxes_xywhr: Tensor,
     scores: Tensor,
     iou_threshold: float,
+    max_nms: int | None = None,
+    max_det: int | None = None,
 ) -> Tensor:
     """Greedy NMS using probiou for rotated boxes.
+
+    Cost is ``O(K_kept x N)`` probiou pairs, worst case ``O(N^2)``. The binding
+    constant is that ``probiou_matrix`` costs ~83 us even for a single pair --
+    it issues ~20 elementwise torch ops and is dispatch-bound below M~2000 --
+    so every kept box carries that floor regardless of how many rivals remain.
+    Measured 2026-09-16: 3.3-7.2 s at N=8400 unbounded, 51-56 ms with
+    ``max_nms=2048, max_det=300``.
+
+    Note what is NOT the problem: the ``.item()`` below reads as a per-candidate
+    device sync, but ``postprocess_obb`` is always handed a CPU tensor
+    (``obb_engine.py`` wraps the backend's ndarray), where the sync costs
+    0.619 us -- 0.15% of the call. Removing it changes nothing. It WOULD
+    dominate on MPS (measured 84% of wall time at N=1000), so this function
+    should not be handed a device tensor.
 
     Args:
         boxes_xywhr: ``(N, 5)`` — xywhr boxes.
         scores: ``(N,)`` — confidence scores.
         iou_threshold: Suppress boxes with IoU > this threshold.
+        max_nms: Consider at most this many candidates, highest score first.
+            ``None`` means unbounded. This is what makes latency independent
+            of the anchor count; ``max_det`` alone leaves ``O(max_det x N)``.
+        max_det: Stop once this many boxes are kept. ``None`` means unbounded.
 
     Returns:
         ``(K,)`` indices of kept boxes in original order.
     """
-    order = scores.argsort(descending=True)
+    # Stable sort so exact score ties resolve by index on every platform --
+    # `topk` and `argsort` may order ties differently, and truncating an
+    # unstable order would silently change which boxes survive.
+    order = scores.argsort(descending=True, stable=True)
+    if max_nms is not None:
+        order = order[:max_nms]
     kept: list[int] = []
-    suppressed = torch.zeros(len(order), dtype=torch.bool, device=boxes_xywhr.device)
+    suppressed = torch.zeros(len(scores), dtype=torch.bool, device=boxes_xywhr.device)
 
     for i in range(len(order)):
         idx = int(order[i].item())
         if suppressed[idx]:
             continue
         kept.append(idx)
+        if max_det is not None and len(kept) >= max_det:
+            break
         if i + 1 >= len(order):
             break
         rest_idx = order[i + 1 :]
@@ -134,6 +161,8 @@ def postprocess_obb(
     tensor_meta: PreprocessedTensor,
     conf_threshold: float = 0.25,
     iou_threshold: float = 0.45,
+    max_nms: int | None = None,
+    max_det: int | None = None,
     class_names: list[str] | None = None,
 ) -> list[OBBDetection]:
     """Convert raw OBBHead output to a list of OBBDetection (one per frame in batch).
@@ -184,14 +213,24 @@ def postprocess_obb(
         conf_f = conf[mask]  # (K,)
         cls_ids_f = cls_ids[mask]  # (K,)
 
-        # Class-aware offset trick: shift box centres by class_id * large_offset
-        # so boxes from different classes never suppress each other
-        class_offsets = cls_ids_f.float().unsqueeze(1) * 10000.0
+        # Class-aware offset trick: shift box centres by class so boxes from
+        # different classes never suppress each other.
+        #
+        # The stride is derived from the data, not fixed at 10000.0. With a
+        # fixed stride, float32 runs out of resolution once class_id * stride
+        # dwarfs the coordinates: measured 2026-09-16, class 5000 gave an
+        # offset of 50,000,000, a stored dx of exactly 0.0000 and a self-IoU
+        # of 0.999532 -- every box in that class collapsed onto every other
+        # and suppressed it. `OBBConfig.num_classes` is user-settable with no
+        # upper bound, so that was reachable. The axis-aligned path already
+        # derives its stride this way (`_nms.py`); this brings the two in line.
+        stride = float(boxes_f[:, :2].max().item()) + float(boxes_f[:, 2:4].max().item()) + 1.0
+        class_offsets = cls_ids_f.float().unsqueeze(1) * stride
         boxes_offset = boxes_f.clone()
         boxes_offset[:, :2] = boxes_offset[:, :2] + class_offsets
         xywhr = torch.cat([boxes_offset, angles_f.unsqueeze(1)], dim=1)  # (K, 5)
 
-        kept = _nms_rotated(xywhr, conf_f, iou_threshold)
+        kept = _nms_rotated(xywhr, conf_f, iou_threshold, max_nms=max_nms, max_det=max_det)
 
         obb_boxes: list[OBBBox] = []
         for k in kept.tolist():
