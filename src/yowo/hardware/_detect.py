@@ -257,6 +257,15 @@ def _detect_gpus_nvml() -> list[Device]:
         count = pynvml.nvmlDeviceGetCount()
         cpu_arch = detect_cpu_arch()
         is_jetson = detect_is_jetson()
+        # One call for the host, not one per device -- the driver is the
+        # host's. A driver that will not report its own version leaves this
+        # None, which is a distinct cache-key value from "reported nothing".
+        try:
+            driver_version = pynvml.nvmlSystemGetDriverVersion()
+            if isinstance(driver_version, bytes):
+                driver_version = driver_version.decode()
+        except Exception:
+            driver_version = None
         devices: list[Device] = []
 
         for idx in range(count):
@@ -281,6 +290,7 @@ def _detect_gpus_nvml() -> list[Device]:
                     memory_total_mb=total_mb,
                     memory_available_mb=free_mb,
                     is_jetson=is_jetson,
+                    driver_version=driver_version,
                 )
             )
         return devices
@@ -328,6 +338,12 @@ def _parse_compute_cap(value: str) -> tuple[int, int] | None:
 # exit, empty stdout) rather than emitting a per-field placeholder, so it is
 # asked for separately and dropped on failure.
 _SMI_BASE_FIELDS = "index,name,memory.total,memory.free"
+# Fields asked for on top of the base, all in the same all-or-nothing retry:
+# a driver too old for any one of them fails the whole query, and we fall back
+# to the base columns rather than lose the device. Add to this tuple and the
+# column parsing below follows automatically -- it reads by NAME, never by a
+# hardcoded offset, so the two cannot drift apart.
+_SMI_OPTIONAL_FIELDS = ("driver_version", "compute_cap")
 _SMI_COMPUTE_CAP_FIELD = "compute_cap"
 
 
@@ -354,11 +370,24 @@ def _detect_gpus_smi() -> list[Device]:
     # base columns alone; the arch then comes from the torch probe (or stays
     # UNKNOWN), the same path a per-field [N/A] already takes. Only a genuine
     # "no GPU here" - both queries failing - returns empty.
-    result = _run_smi_query(f"{_SMI_BASE_FIELDS},{_SMI_COMPUTE_CAP_FIELD}")
+    asked = ",".join((_SMI_BASE_FIELDS, *_SMI_OPTIONAL_FIELDS))
+    result = _run_smi_query(asked)
     if result.returncode != 0:
-        result = _run_smi_query(_SMI_BASE_FIELDS)
+        asked = _SMI_BASE_FIELDS
+        result = _run_smi_query(asked)
     if result.returncode != 0:
         return []
+
+    columns = {name: i for i, name in enumerate(asked.split(","))}
+
+    def column(parts: list[str], name: str) -> str | None:
+        """Read one named column, or None when it was not asked for."""
+        i = columns.get(name)
+        if i is None or i >= len(parts):
+            return None
+        value = parts[i]
+        # nvidia-smi writes a placeholder rather than omitting the column.
+        return None if value in ("", "[N/A]", "N/A") else value
 
     cpu_arch = detect_cpu_arch()
     is_jetson = detect_is_jetson()
@@ -391,7 +420,8 @@ def _detect_gpus_smi() -> list[Device]:
         # architecture no longer needs torch. This is what makes fp16/int8
         # capability correct on a Jetson that has no torch installed - the
         # torch probe stays as a fallback for drivers too old to report it.
-        cc = _parse_compute_cap(parts[4]) if len(parts) >= 5 else None
+        raw_cc = column(parts, _SMI_COMPUTE_CAP_FIELD)
+        cc = _parse_compute_cap(raw_cc) if raw_cc is not None else None
         if cc is None:
             cc = _get_compute_capability(idx)
         arch = detect_gpu_arch(*cc) if cc is not None else GPUArch.UNKNOWN
@@ -406,6 +436,7 @@ def _detect_gpus_smi() -> list[Device]:
                 memory_total_mb=total_mb,
                 memory_available_mb=free_mb,
                 is_jetson=is_jetson,
+                driver_version=column(parts, "driver_version"),
             )
         )
     return devices

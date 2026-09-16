@@ -153,6 +153,9 @@ def load_profile(
     model: str,
     hw: HardwareProfile,  # type: ignore[name-defined]
     path: Path | None = None,
+    *,
+    backend: str | None = None,
+    precision: str | None = None,
 ) -> TuneProfile | None:
     """Load a previously saved profile for *model* on the current device.
 
@@ -160,6 +163,7 @@ def load_profile(
     - The profile file does not exist.
     - The file is corrupt (invalid YAML or missing required fields).
     - The stored fingerprint does not match the current device.
+    - *backend* or *precision* is given and is not the one the sweep ran with.
 
     A ``WARNING`` is logged when a fingerprint mismatch is detected so the
     user knows they need to re-tune.
@@ -168,6 +172,13 @@ def load_profile(
         model: Model identifier (used for default path resolution).
         hw: Current hardware profile.
         path: Override file path.  When ``None``, uses the default location.
+        backend: The backend that will actually run.  When given, a profile
+            swept on a different backend is a MISS.  ``compute_fingerprint``
+            takes only a ``HardwareProfile``, so the backend cannot be in the
+            path -- but the profile records the backend it swept, and that
+            record is what makes the comparison possible without moving any
+            file already on disk.
+        precision: The precision that will actually run; same rule.
 
     Returns:
         The loaded :class:`TuneProfile` or ``None``.
@@ -195,6 +206,24 @@ def load_profile(
         )
     except (KeyError, ValueError, yaml.YAMLError, TypeError):
         return None
+
+    # A batch size is optimal FOR a backend at a precision. Applying one swept
+    # on pytorch/fp32 to a tensorrt/int8 run is not a cache hit, it is the
+    # wrong answer delivered silently -- and both fields are already here.
+    for label, wanted, swept in (
+        ("backend", backend, profile.backend),
+        ("precision", precision, profile.precision),
+    ):
+        if wanted is not None and wanted != swept:
+            _log.debug(
+                "Ignoring tune profile for %s: swept with %s=%s, running %s=%s.",
+                model,
+                label,
+                swept,
+                label,
+                wanted,
+            )
+            return None
 
     if profile.fingerprint != current_fp:
         _log.warning(

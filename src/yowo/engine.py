@@ -206,7 +206,15 @@ def _load_tune_profile(
 
     task_suffix = spec.task if spec.task not in ("detect",) else ""
     model_name = f"{spec.family.value}{spec.size.value}{'-' + task_suffix if task_suffix else ''}"
-    profile = load_profile(model_name, hw)
+    # Pass what will actually run. A `None` here means "not chosen yet", so
+    # the profile is free to supply it; a set value must MATCH, or the
+    # profile's batch size belongs to a different run than this one.
+    profile = load_profile(
+        model_name,
+        hw,
+        backend=config.backend.value if config.backend is not None else None,
+        precision=config.precision.value if config.precision is not None else None,
+    )
     if profile is None:
         return config
 

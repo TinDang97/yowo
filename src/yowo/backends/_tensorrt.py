@@ -18,6 +18,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from yowo.backends._precision import verify_artifact_precision
+from yowo.cache._keys import InvalidationSet, invalidation_for_hardware
 from yowo.errors import BackendError, BackendLoadError, ConfigError, DependencyError, InferenceError
 from yowo.hardware import HardwareProfile, effective_cpu_count
 from yowo.types import BackendType, Precision, PreprocessedTensor
@@ -25,6 +26,37 @@ from yowo.types import BackendType, Precision, PreprocessedTensor
 logger = logging.getLogger(__name__)
 
 __all__ = ["TensorRTBackend"]
+
+
+def trt_provider_options(
+    device_index: int, model_path: Path, invalidation: InvalidationSet
+) -> dict[str, Any]:
+    """Provider options for the TensorRT EP, including the cache prefix.
+
+    The EP writes its built engines into ``trt_engine_cache_path`` and names
+    them itself unless given a prefix. Without one, two engines built from
+    different inputs -- a different precision, driver, GPU or shape -- land in
+    the model's own directory under names we do not control, and the EP may
+    reuse one for the other. The prefix is this package's key for exactly the
+    inputs the engine was built from, so a changed input is a miss.
+
+    Pure by design: it takes the invalidation set rather than probing, so the
+    prefix can be checked on a machine with no GPU.
+
+    Args:
+        device_index: CUDA device ordinal.
+        model_path: The model being loaded; its directory holds the cache.
+        invalidation: The inputs this engine depends on.
+
+    Returns:
+        The provider options mapping.
+    """
+    return {
+        "device_id": device_index,
+        "trt_engine_cache_enable": True,
+        "trt_engine_cache_path": str(model_path.parent),
+        "trt_engine_cache_prefix": invalidation.key(),
+    }
 
 
 class TensorRTBackend:
@@ -118,6 +150,17 @@ class TensorRTBackend:
     def input_shape(self) -> tuple[int, int]:
         return self._input_shape
 
+    def _invalidation(self, model_path: Path) -> InvalidationSet:
+        """The inputs the TRT engine cache entry for *model_path* depends on."""
+        precision = self._precision.value if self._precision is not None else "auto"
+        return invalidation_for_hardware(
+            self._hw,
+            model=model_path.stem,
+            backend=BackendType.TENSORRT.value,
+            precision=precision,
+            shape_profile="x".join(str(d) for d in self._input_shape),
+        )
+
     # ------------------------------------------------------------------
     # Protocol methods
     # ------------------------------------------------------------------
@@ -166,11 +209,9 @@ class TensorRTBackend:
         providers = [
             (
                 "TensorrtExecutionProvider",
-                {
-                    "device_id": self._device_index,
-                    "trt_engine_cache_enable": True,
-                    "trt_engine_cache_path": str(Path(model_path).parent),
-                },
+                trt_provider_options(
+                    self._device_index, Path(model_path), self._invalidation(Path(model_path))
+                ),
             ),
             (
                 "CUDAExecutionProvider",

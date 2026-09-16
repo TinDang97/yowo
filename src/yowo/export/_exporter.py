@@ -502,10 +502,18 @@ def _convert_tensorrt(
     if precision == Precision.INT8:
         config.set_flag(trt.BuilderFlag.INT8)
         if calibration_data:
+            from yowo.cache._keys import calibration_digest
             from yowo.export._int8 import create_tensorrt_calibrator
 
             images = resolve_calibration_images(calibration_data)
-            cache_file = engine_path.with_suffix(".calib")
+            # Name the table after the IMAGES, not after the engine path. Keyed
+            # on the engine alone, a second export against a different
+            # calibration set silently reuses the first set's table -- and an
+            # INT8 model calibrated on the wrong images degrades quietly, with
+            # nothing in the artifact to reveal it. The digest follows content,
+            # so renaming the directory reuses and editing an image does not.
+            digest = calibration_digest(images)
+            cache_file = engine_path.with_name(f"{engine_path.stem}-{digest}.calib")
             calibrator = create_tensorrt_calibrator(
                 images, batch_size=8, input_size=imgsz, cache_file=cache_file
             )
