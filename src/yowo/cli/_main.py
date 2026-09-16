@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -533,6 +535,13 @@ def detect_obb_command(
 @click.option("--dynamic-batch/--no-dynamic-batch", default=False)
 @click.option("--imgsz", default=640, type=int)
 @click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Print the export sidecar as JSON to stdout",
+)
+@click.option(
     "--batch-sizes",
     default=None,
     help="Comma-separated batch sizes for CoreML EnumeratedShapes (e.g. '1,4,8').",
@@ -546,6 +555,7 @@ def export_command(
     output_dir: str | None,
     dynamic_batch: bool,
     imgsz: int,
+    json_output: bool,
     batch_sizes: str | None,
 ) -> None:
     """Export MODEL to an optimized inference format."""
@@ -569,19 +579,30 @@ def export_command(
             sys.exit(1)
 
     try:
-        meta = export_model(
-            spec,
-            ExportFormat(fmt),
-            out_dir,
-            precision=Precision(precision),
-            dynamic_batch=dynamic_batch,
-            imgsz=imgsz,
-            calibration_data=calibration_data,
-            batch_sizes=parsed_batch_sizes,
-        )
-        click.echo(f"Exported: {meta.file_path}")
-        click.echo(f"Size: {meta.file_size_bytes / 1_048_576:.1f} MB")
-        click.echo(f"Duration: {meta.export_duration_sec:.1f}s")
+        # torch.onnx writes its progress to STDOUT. With --json that lands in
+        # the middle of the document and the output will not parse -- measured,
+        # 1220 bytes of which only the tail was JSON. Send it to stderr so the
+        # progress is still visible and stdout carries the record alone.
+        stream = contextlib.redirect_stdout(sys.stderr) if json_output else contextlib.nullcontext()
+        with stream:
+            meta = export_model(
+                spec,
+                ExportFormat(fmt),
+                out_dir,
+                precision=Precision(precision),
+                dynamic_batch=dynamic_batch,
+                imgsz=imgsz,
+                calibration_data=calibration_data,
+                batch_sizes=parsed_batch_sizes,
+            )
+        if json_output:
+            # The sidecar verbatim, so a caller gets the same record that was
+            # written beside the artifact rather than a reformatting of it.
+            click.echo(json.dumps(dataclasses.asdict(meta), indent=2, default=str))
+        else:
+            click.echo(f"Exported: {meta.file_path}")
+            click.echo(f"Size: {meta.file_size_bytes / 1_048_576:.1f} MB")
+            click.echo(f"Duration: {meta.export_duration_sec:.1f}s")
     except Exception as exc:
         click.echo(f"Export failed: {exc}", err=True)
         sys.exit(1)

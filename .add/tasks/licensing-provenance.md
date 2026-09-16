@@ -54,7 +54,7 @@ why: yowo 2.4.0 and 2.4.1 shipped a 5.6 MB AGPL-3.0 `yolo11n.pt` to PyPI inside 
   The code IS Apache-2.0 clean and the package now redistributes no weights. The work here is making
   the paperwork say what is already true, in the places a legal review looks.
 
-BLOCKED on one human decision, deliberately not guessed: the copyright holder for `LICENSE:189` and
+RESOLVED 2026-09-09 and RE-CONFIRMED by the author 2026-09-16 (this line read as a live block for a whole session afterwards, and was acted on as one -- it is a record of what was open at authoring, not a current state). The decision was: the copyright holder for `LICENSE:189` and
   `NOTICE`. Git authorship says `Tin Dang <tindang.ht97@gmail.com>`; the account email is
   `vinacapital@trustifytechnology.com`, which raises whether an employer holds the copyright. That is
   a legal identity, it is the one item here that is hard to unwind once published, and no evidence in

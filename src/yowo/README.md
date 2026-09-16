@@ -37,7 +37,7 @@ result = export_model(
     fmt=ExportFormat.ONNX,
     precision=Precision.FP16,
 )
-print(result.path)
+print(result.file_path)
 ```
 
 ---
@@ -152,7 +152,7 @@ from yowo import detect, parse_model_name
 from yowo import InferenceEngine, open_source
 
 # Export pipeline
-from yowo import export_model, ExportMetadata, ExportResult
+from yowo import export_model, ExportMetadata
 
 # Type primitives
 from yowo import (
