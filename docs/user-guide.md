@@ -472,7 +472,7 @@ InferenceEngine(
     iou_threshold: float = 0.45,
 
     # Caching (PyTorch backend only)
-    cache: bool = False,           # in-memory feature map cache
+    cache: bool = False,           # in-memory feature map cache; 40x40 px blind spot
     cache_dir: Path | None = None, # mmap-backed feature map cache
     kv_cache: bool = False,        # attention KV cache for streaming
 
@@ -1066,7 +1066,16 @@ eng = InferenceEngine(
 
 ### Feature Map Cache (PyTorch only)
 
-Skip backbone+neck for frames with similar visual content:
+Skip backbone+neck for frames with similar visual content.
+
+> **What it costs.** At the default `similarity_threshold` of 0.01 an object of
+> up to **40x40 px** at realistic contrast (22x22 px at maximum contrast) can
+> appear without the cache noticing, and will not be detected until the next
+> miss. Raising the threshold to buy hit rate raises that bound in step: 92x92 px
+> at 0.05, 130x130 px at 0.10. Measured 2026-09-16 — on Apple Silicon enabling
+> the cache cost **211% more** time per frame, so it is no longer on in that
+> preset. Full grid:
+> [feature cache recall and savings](experiments/2026-09-16-feature-cache-recall-and-savings.md).
 
 ```python
 # In-memory cache
@@ -1238,6 +1247,18 @@ router.register("cam-1", handle_cam1)
 
 run_pipeline(engine, collector, scheduler, router)
 ```
+
+**Feature cache recall — what it cannot see.** The feature cache decides two
+frames are the same scene from an 8x8 grid of per-channel means, compared by the
+worst cell. At the default `similarity_threshold` of 0.01 an object of up to
+**40x40 px** at realistic contrast (22x22 px at maximum contrast) can appear in
+the frame without the cache noticing, and it will not be detected until the next
+cache miss. Raising the threshold to buy hit rate raises that bound in step —
+92x92 px at 0.05, 130x130 px at 0.10. Measured 2026-09-16; the full grid,
+including the per-device latency it costs or saves, is in
+[docs/experiments/2026-09-16-feature-cache-recall-and-savings.md](experiments/2026-09-16-feature-cache-recall-and-savings.md).
+On Apple Silicon the cache is measured **slower at every threshold** and is no
+longer enabled by the preset.
 
 **Feature cache safety:** `run_pipeline()` automatically disables the engine's feature cache when active. `engine.detect()` keys its cache on `frames[0].source_id`, which is incorrect for mixed-source batches. A warning is logged when the cache is disabled.
 
@@ -2446,7 +2467,9 @@ for sid, err in collector.stream_errors.items():
 - Live sources auto-use `FrameDropPolicy.LATEST` — cameras stay temporally current even when inference is slower than frame rate.
 - `max_batch_size=4` matches camera count — each batch processes one frame from each camera.
 - `timeout_ms=50` flushes partial batches if some cameras are slower — prevents stalling on one offline camera.
-- Feature cache is auto-disabled (mixed-source batches).
+- Feature cache is auto-disabled (mixed-source batches). It would otherwise also
+  carry its own recall cost: at the default threshold it cannot see an object
+  smaller than about 40x40 px at realistic contrast.
 
 ### 16.8 Traffic Counting with ByteTrack
 

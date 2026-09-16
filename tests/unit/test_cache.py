@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from yowo.cache._similarity import frame_similarity
+from yowo.cache._similarity import fingerprint_distance, spatial_fingerprint
 from yowo.cache._store import FeatureStore
 
 
@@ -23,25 +23,50 @@ def _make_features(
     )
 
 
-# ─── frame_similarity ───────────────────────────────────────────────
+# ─── the fingerprint the cache actually compares ──────────────────────
+#
+# These tested `frame_similarity`, which compared two full tensors and returned
+# 1.0 on a shape mismatch. It had ZERO callers in `src/` -- so these tests kept
+# a shape guard covered, passing and unreachable, while `check_and_load`
+# compared three spatial means with no shape check at all. They now test the
+# functions the shipped path calls.
 
 
-class TestFrameSimilarity:
+class TestFingerprintDistance:
     def test_identical_frames_zero(self) -> None:
         a = np.ones((1, 3, 4, 4), dtype=np.float32) * 0.5
-        assert frame_similarity(a, a) == pytest.approx(0.0)
+        fp = spatial_fingerprint(a)
+        assert fingerprint_distance(fp, fp) == pytest.approx(0.0)
 
     def test_different_frames_positive(self) -> None:
-        a = np.zeros((1, 3, 4, 4), dtype=np.float32)
-        b = np.ones((1, 3, 4, 4), dtype=np.float32)
-        assert frame_similarity(a, b) == pytest.approx(1.0)
+        a = spatial_fingerprint(np.zeros((1, 3, 4, 4), dtype=np.float32))
+        b = spatial_fingerprint(np.ones((1, 3, 4, 4), dtype=np.float32))
+        assert fingerprint_distance(a, b) == pytest.approx(1.0)
 
     def test_returns_float(self) -> None:
-        a = np.zeros((1, 3, 2, 2), dtype=np.float32)
-        b = np.ones((1, 3, 2, 2), dtype=np.float32) * 0.1
-        result = frame_similarity(a, b)
+        a = spatial_fingerprint(np.zeros((1, 3, 2, 2), dtype=np.float32))
+        b = spatial_fingerprint(np.ones((1, 3, 2, 2), dtype=np.float32) * 0.1)
+        result = fingerprint_distance(a, b)
         assert isinstance(result, float)
         assert 0.0 < result < 1.0
+
+    def test_a_shape_mismatch_is_a_guaranteed_miss(self) -> None:
+        """The guard that used to live here and never ran."""
+        a = spatial_fingerprint(np.zeros((1, 3, 640, 640), dtype=np.float32))
+        b = spatial_fingerprint(np.zeros((4, 3, 640, 640), dtype=np.float32))
+        assert fingerprint_distance(a, b) == 1.0
+
+    def test_the_worst_cell_decides_not_the_average(self) -> None:
+        """A local change must not be divided by the whole frame."""
+        base = np.full((1, 3, 640, 640), 0.5, dtype=np.float32)
+        spot = base.copy()
+        spot[:, :, :80, :80] = 1.0  # exactly one cell of an 8x8 grid
+
+        distance = fingerprint_distance(spatial_fingerprint(base), spatial_fingerprint(spot))
+        assert distance == pytest.approx(0.5, abs=1e-5), (
+            "one cell went from 0.5 to 1.0; averaged over the frame this would "
+            "read as 0.0078 and hide under the 0.01 default"
+        )
 
 
 # ─── FeatureStore (in-memory) ────────────────────────────────────────

@@ -342,7 +342,29 @@ with InferenceEngine(backend=BackendType.ONNX, precision=Precision.FP16) as engi
 
 ### Feature map cache (sequential video inference)
 
-Skip backbone + neck on similar consecutive frames — 60–85% compute savings for slow-moving scenes.
+Skip backbone + neck on similar consecutive frames. **Measured 2026-09-16 — the
+saving and the blind spot are one number seen from two sides, so both are stated:**
+
+| device | threshold | cache off | cache on | saving | object it cannot see |
+|---|---|---|---|---|---|
+| cpu | 0.01 (default) | 34.50 ms | 40.22 ms | −16.6% | 40x40 px |
+| cpu | 0.05 | 33.17 ms | 18.55 ms | +44.1% | 92x92 px |
+| cpu | 0.10 | 36.02 ms | 17.14 ms | +52.4% | 130x130 px |
+| mps | 0.01 (default) | 6.27 ms | 19.52 ms | −211.3% | 40x40 px |
+| mps | 0.10 | 6.38 ms | 11.75 ms | −84.1% | 130x130 px |
+
+yolo11n, fixed camera, 40 frames, median. A hit copies ~6.4 MB of neck features
+host→device, so a faster device loses harder — **on Apple Silicon the cache costs
+time at every threshold**, which is why it is no longer on in that preset. The
+earlier "60–85%" claim had no experiment behind it and is not reachable at any
+threshold measured. Full grid and method:
+[feature cache recall and savings](docs/experiments/2026-09-16-feature-cache-recall-and-savings.md).
+
+**What it cannot see.** The fingerprint is an 8x8 grid of per-channel means
+compared by the worst cell, so a change confined to one cell is measured against
+that cell. At the default threshold an object of up to **40x40 px** at realistic
+contrast (22x22 px at maximum contrast) can appear without the cache noticing.
+Raising the threshold to buy hit rate raises that bound in step.
 
 ```python
 # In-memory cache (default)

@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 26
+delta_seq: 28
 ---
 ## Now
 
@@ -45,6 +45,8 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M28 · open · 2026-09-16] When a measurement taken during Build contradicts the premise of a decision the human already made, go back and ask again with the numbers. The user kept the cache on by default when told the cost was 'fewer hits'; shown -211% on the device where it ships on, they changed it. Carrying on with the earlier answer would have been technically obedient and materially wrong. (evidence: /tasks/feature-cache-honesty.md)
+- [ADD · M27 · open · 2026-09-16] Measure the DEFAULT configuration on the device the default ships for, not just the one under your hands. The feature cache's preset enabled it on Apple Silicon, where measurement showed it 3.1x SLOWER -- a default is a claim that the feature helps, and nobody had ever checked it on that device. (evidence: /tasks/feature-cache-honesty.md)
 - [ADD · M26 · open · 2026-09-16] An `or` in an assertion gives the check two ways to pass, and the weaker one decides. `assert any(exact_module in c or "tests/integration" in c ...)` was satisfied by any file in that directory, so pointing the CI step elsewhere kept it green. When a check names a specific thing, assert the specific thing. (evidence: /tasks/onnx-external-data.md)
 - [ADD · M25 · open · 2026-09-16] Bind EVERY probed assumption in the CHECKS covers: list, not just the Musts and Rejects. A13 on benchmark-truth carried a probe result ('the sweep winner really is applied to production') and no check named it; freeze accepted the node and the GATE refused at the end, after all the work. Sweep the ASSUMPTIONS ids against the union of covers: before freezing, mechanically. (evidence: /tasks/benchmark-truth.md)
 - [ADD · M24 · open · 2026-09-16] A package's supported-Python claim and its TEST SUITE's floor are different numbers and can be four versions apart. yowo ships 3.8-compatible code (96/96 compile under 3.8.20) while its tests need 3.11 (6 modules import tomllib). Matrixing the test suite over the claim is then impossible, and the right check installs the package as a CONSUMER and exercises its documented surface — which is what the classifiers actually promise. (evidence: /tasks/ci-matrix.md)

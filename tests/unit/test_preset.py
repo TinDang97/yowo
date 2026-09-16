@@ -263,7 +263,13 @@ class TestPresetConfig:
         )
         cfg = preset_config(hw, SourceCategory.VIDEO)
         assert cfg.batch_size == 2
-        assert cfg.cache is True
+        # This asserted `cfg.cache is True`. Measured 2026-09-16 on this device
+        # class: the feature cache cost 211% MORE time per frame at the default
+        # threshold (6.27 ms -> 19.52 ms) and was slower at every threshold
+        # tried, because a hit copies ~6.4 MB of neck features host-to-device
+        # while MPS inference is only 6.3 ms. The line pinned a default that
+        # made the device slower.
+        assert cfg.cache is False
         assert cfg.prefetch is True
 
     def test_override_batch_size(self) -> None:

@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from yowo.cache._similarity import DEFAULT_GRID, fingerprint_distance, spatial_fingerprint
 from yowo.cache._store import FeatureStore
 
 if TYPE_CHECKING:
@@ -51,9 +52,18 @@ class FeatureCache:
     Designed for sequential inference scenarios (video streams, multi-camera).
 
     Args:
-        similarity_threshold: Maximum L1 mean pixel difference to consider
-            frames "similar enough" for cache reuse. Lower = stricter.
-            Default 0.01 works well for surveillance/static-background video.
+        similarity_threshold: Maximum difference in the WORST grid cell before
+            a cached entry stops being reused. Lower = stricter.
+
+            The meaning changed: this was the mean absolute difference over the
+            whole frame, which let a 90x90 px object at maximum contrast hide
+            inside 409,600 pixels without ever clearing 0.01. It is now the
+            largest per-cell difference, so a local change is measured against
+            the cell it happens in. The default is still 0.01 and a given scene
+            change now registers about 8x higher, so the cache hits less often
+            and saves less -- deliberately.
+        grid: Cells per side for the fingerprint. 8 gives 80x80-pixel cells on
+            a 640 frame. Raising it shrinks the blind spot and costs hit rate.
         max_entries: Maximum cached sources before FIFO eviction.
         cache_dir: Optional directory for mmap persistence. When None
             (default), features are cached in-memory only.
@@ -64,11 +74,18 @@ class FeatureCache:
         similarity_threshold: float = 0.01,
         max_entries: int = 32,
         cache_dir: Path | None = None,
+        grid: int = DEFAULT_GRID,
     ) -> None:
         self._store = FeatureStore(max_entries=max_entries, cache_dir=cache_dir)
         self._threshold = similarity_threshold
         self._max_entries = max_entries
+        self._grid = grid
         self._last_fingerprints: dict[str, NDArray[np.float32]] = {}
+        # The shape each entry was built from. An entry only answers a query of
+        # the same shape: a 640x640 entry used to answer a 320x320 query and
+        # hand back 80x80 features for an input needing 40x40, because both
+        # fingerprinted to three numbers and the resize was invisible.
+        self._last_shapes: dict[str, tuple[int, ...]] = {}
         self._lock = threading.Lock()
         self._pending_fingerprint: NDArray[np.float32] | None = None
 
@@ -96,14 +113,19 @@ class FeatureCache:
 
         with self._lock:
             # Compute fingerprint once — reused by update() if cache miss
-            current_fp = current_tensor.mean(axis=(2, 3))  # (B, C)
+            current_fp = spatial_fingerprint(current_tensor, self._grid)
             self._pending_fingerprint = current_fp
 
             last_fp = self._last_fingerprints.get(source_id)
             if last_fp is None:
                 return None
 
-            diff = float(np.abs(current_fp - last_fp).mean())
+            # Shape first, and it short-circuits: a resize or a batch change is
+            # not a matter of degree that a small distance could rescue.
+            if self._last_shapes.get(source_id) != current_tensor.shape:
+                return None
+
+            diff = fingerprint_distance(current_fp, last_fp)
             if diff >= self._threshold:
                 return None
 
@@ -143,12 +165,18 @@ class FeatureCache:
                 while len(self._last_fingerprints) >= self._max_entries:
                     oldest = next(iter(self._last_fingerprints))
                     del self._last_fingerprints[oldest]
+                    self._last_shapes.pop(oldest, None)
             # Reuse fingerprint from check_and_load() if available
             fp = self._pending_fingerprint
             self._pending_fingerprint = None
-            if fp is None:
-                fp = input_tensor.mean(axis=(2, 3))
+            if fp is None or fp.shape[0] != input_tensor.shape[0]:
+                # `check_and_load` may have computed a fingerprint for a
+                # DIFFERENT tensor than the one being stored, or not run at
+                # all. Recompute rather than pair a fingerprint with features
+                # it does not describe.
+                fp = spatial_fingerprint(input_tensor, self._grid)
             self._last_fingerprints[source_id] = fp
+            self._last_shapes[source_id] = input_tensor.shape
             self._store.store(source_id, neck_features)
 
     def clear(self) -> None:
@@ -156,6 +184,7 @@ class FeatureCache:
         with self._lock:
             self._store.clear()
             self._last_fingerprints.clear()
+            self._last_shapes.clear()
             self._pending_fingerprint = None
 
     @property
