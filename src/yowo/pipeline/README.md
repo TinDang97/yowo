@@ -203,6 +203,8 @@ def run_pipeline(
 
 `engine.detect()` keys its feature cache on `frames[0].source_id`. Mixed-source batches corrupt this key. `run_pipeline()` automatically clears and disables the feature cache, logging a warning.
 
+The cache carries its own recall cost wherever it *is* enabled: at the default `similarity_threshold` of 0.01 it cannot see an object smaller than about **40x40 px** at realistic contrast (22x22 px at maximum contrast), and that bound rises with the threshold — 92x92 px at 0.05, 130x130 px at 0.10. Measured 2026-09-16; full grid in [docs/experiments/2026-09-16-feature-cache-recall-and-savings.md](../../../docs/experiments/2026-09-16-feature-cache-recall-and-savings.md).
+
 ---
 
 ## Usage
