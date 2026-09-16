@@ -13,6 +13,13 @@ from yowo.errors import ConfigError, DependencyError, ExportError
 from yowo.export._calibration import resolve_calibration_images
 from yowo.export._int8 import ParityReport
 from yowo.export._metadata import ExportMetadata
+from yowo.export._readback import (
+    DYNAMIC_DIM,
+    internalize_external_data,
+    produced_files,
+    read_onnx_graph_facts,
+    verify_sidecar_describes_directory,
+)
 from yowo.hardware import get_hardware_profile
 from yowo.models import resolve_weights
 from yowo.types import ExportFormat, ModelSpec, Precision
@@ -23,6 +30,13 @@ if TYPE_CHECKING:
     from yowo.models._registry import ModelMeta
 
 logger = logging.getLogger(__name__)
+
+#: The opset asked for. torch may produce a HIGHER one and say so in a log
+#: line -- measured 2026-09-16, 17 requested and ai.onnx 18 produced on every
+#: export, with the 18->17 downconversion raising `No Adapter To Version $17
+#: for Resize` and the failure swallowed. The sidecar therefore records what
+#: came out, and keeps this number only when the two disagree.
+REQUESTED_OPSET = 17
 
 
 def _registry_pin(spec: ModelSpec, meta: ModelMeta) -> str | None:
@@ -96,6 +110,10 @@ def export_model(
     weights_path = resolve_weights(spec)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # `output_dir` is a user directory that may hold anything. Claiming a file
+    # this export did not write is the mirror of leaving one nothing names.
+    preexisting = frozenset(p.name for p in output_dir.iterdir())
+
     # Build and prepare model — branch on task type
     if spec.task == "classify":
         from yowo.arch import build_classify_model
@@ -147,8 +165,13 @@ def export_model(
     )
 
     t0 = time.monotonic()
+    batch_size = 1
 
-    task_suffix = "-obb" if spec.task == "obb" else ""
+    # `classify` had no branch here, so a classify export wrote the detect
+    # export's path under the detect export's `model_name` and silently
+    # overwrote it -- with no `task` field on either sidecar to tell them
+    # apart. The suffixes match the registry's own names (`yolo11n-cls`).
+    task_suffix = {"obb": "-obb", "classify": "-cls"}.get(spec.task, "")
     int8_parity: ParityReport | None = None
     model_stem = f"{spec.family.value}{spec.size.value}{task_suffix}"
 
@@ -211,9 +234,40 @@ def export_model(
 
     elapsed = time.monotonic() - t0
 
+    # An ONNX artifact is made self-contained here rather than only when
+    # onnxslim happens to be installed. `_export_onnx_kv` has always done
+    # this; the ordinary path did not, so a `yowo[pytorch]` install produced a
+    # stub that cannot load and an onnxslim install produced a self-contained
+    # graph beside an orphaned companion file of equal size.
+    if target_format == ExportFormat.ONNX and not exported_path.is_dir():
+        internalize_external_data(exported_path)
+
     hw = get_hardware_profile()
     size_bytes = (
         _dir_size(exported_path) if exported_path.is_dir() else exported_path.stat().st_size
+    )
+
+    # Every field below that describes the graph is read off the graph. For a
+    # converted format the sidecar describes the LAST artifact in the chain,
+    # whose opset this package does not read -- so it records None rather than
+    # the ONNX intermediate's.
+    facts = read_onnx_graph_facts(exported_path)
+    if facts.input_shape:
+        input_shape = [batch_size if d == DYNAMIC_DIM else d for d in facts.input_shape]
+    else:
+        input_shape = [batch_size, 3, imgsz, imgsz]
+
+    # `imgsz` describes the produced graph too, and R:REQUEST-AS-FACT does not
+    # exempt it. A classify export ignores the argument entirely -- the model
+    # uses the registry's 224 -- so recording the 640 that was passed is the
+    # same lie `input_shape` used to tell, in a field a reader is more likely
+    # to skim.
+    recorded_imgsz = input_shape[2] if len(input_shape) >= 3 and input_shape[2] > 0 else imgsz
+
+    artifact_files = produced_files(output_dir, preexisting, exported_path)
+    total_size_bytes = sum(
+        _dir_size(output_dir / n) if (output_dir / n).is_dir() else (output_dir / n).stat().st_size
+        for n in artifact_files
     )
 
     import yowo
@@ -222,12 +276,21 @@ def export_model(
         model_name=model_stem,
         format=target_format.value,
         precision=precision.value,
-        imgsz=imgsz,
-        batch_size=1,
+        imgsz=recorded_imgsz,
+        batch_size=batch_size,
         dynamic=dynamic_batch,
-        input_shape=[1, 3, imgsz, imgsz],
+        input_shape=input_shape,
         file_path=str(exported_path.resolve()),
         file_size_bytes=size_bytes,
+        opset=facts.opset,
+        requested_opset=(
+            REQUESTED_OPSET
+            if target_format == ExportFormat.ONNX and facts.opset != REQUESTED_OPSET
+            else None
+        ),
+        task=spec.task,
+        artifact_files=artifact_files,
+        total_size_bytes=total_size_bytes,
         created_at=datetime.now(timezone.utc).isoformat(),
         export_duration_sec=round(elapsed, 2),
         source_weights=str(weights_path),
@@ -242,7 +305,11 @@ def export_model(
             **({"int8_parity": asdict(int8_parity)} if int8_parity is not None else {}),
         },
     )
-    meta.save()
+    sidecar_path = meta.save()
+    # `ExportMetadata.load()` had zero callers in `src/`, which is why a
+    # sidecar could name one file while the directory held two and nothing
+    # noticed. This is its first.
+    verify_sidecar_describes_directory(sidecar_path, output_dir, ignore=preexisting)
 
     logger.info(
         "Export complete: %s (%.1f MB, %.1fs)",
@@ -275,7 +342,7 @@ def _export_onnx(
             model,  # type: ignore[arg-type]
             dummy,  # type: ignore[arg-type]
             str(onnx_path),
-            opset_version=17,
+            opset_version=REQUESTED_OPSET,
             input_names=["images"],
             output_names=["output0"],
             dynamic_axes=dynamic_axes,
@@ -339,7 +406,7 @@ def _export_onnx_kv(
             wrapper,  # type: ignore[arg-type]
             dummy_inputs,  # type: ignore[arg-type]
             str(onnx_path),
-            opset_version=17,
+            opset_version=REQUESTED_OPSET,
             input_names=input_names,
             output_names=output_names,
             dynamic_axes=dynamic_axes,

@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 23
+delta_seq: 26
 ---
 ## Now
 
@@ -63,6 +63,9 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q26 · open · 2026-09-16] A check can be unfailable because the shipped configuration makes its property trivially true. `total_size_bytes == sum(files)` could never differ from `file_size_bytes` once an ONNX export leaves exactly one file, so reverting the field passed. Drive the check into the configuration where the two CAN differ — here, below the protobuf ceiling so the companion survives — rather than trusting the assertion as written. (evidence: /tasks/onnx-external-data.md)
+- [TDD · Q25 · open · 2026-09-16] 'no tests ran' is not a verdict. A mutation sweep classified 13 of 14 rows GREEN because a bad nodeid (`file.py::`) collected zero tests and the classifier read the absence of the word 'failed' as a pass. Same class as the zsh word-splitting run that reported success on zero tests. Every harness that judges a pytest run must assert tests were COLLECTED before reading the outcome. (evidence: /tasks/onnx-external-data.md)
+- [TDD · Q24 · open · 2026-09-16] A mutation harness that runs `git checkout -- .` MUST refuse a dirty tree. On onnx-external-data it silently discarded an uncommitted strengthening of a test, then re-ran the stale check and reported GREEN — which I nearly read as 'the mutation did not kill it' rather than 'the fix was deleted'. Guard: assert `git status --porcelain` is empty before the first mutation. (evidence: /tasks/onnx-external-data.md)
 - [TDD · Q23 · open · 2026-09-16] ast.parse(feature_version=(3,8)) is NOT a syntax gate. It reported all 163 test files parsing under 3.8 while a real CPython 3.8.20 raised 21 SyntaxErrors — feature_version does not downgrade the grammar for constructs like parenthesized context managers. To claim a Python version works, compile with THAT interpreter (py_compile) or run it; anything else measures the interpreter you already have. (evidence: /tasks/ci-matrix.md)
 - [TDD · Q22 · open · 2026-09-16] Detect behaviour by PARSING, not by matching text. A regex for importorskip(...) flagged the guard's own docstring, which quotes the call as an example — prose that executes nothing. ast.walk for a real Call node is immune. This is the same defect the task was written to remove, reappearing inside the guard against it. (evidence: /tasks/integration-tier-revival.md)
 - [TDD · Q21 · open · 2026-09-16] In zsh an unquoted $VAR holding space-separated paths does NOT word-split — it becomes ONE nonexistent path, pytest reports 'no tests ran', and a grep for FAILED finds nothing. Five mutation checks 'passed' by running zero tests on 2026-09-16. A verification that finds nothing looks exactly like a verification that found nothing wrong; always print the pass/fail COUNT, never just grep for failures. (evidence: /tasks/integration-tier-revival.md)

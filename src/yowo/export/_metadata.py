@@ -34,6 +34,27 @@ class ExportMetadata:
     platform_machine: str = field(default_factory=platform.machine)
     gpu_name: str | None = None
     calibration_data: str | None = None
+    # Read back off the produced artifact, never copied from the request.
+    # ``None`` means "this export could not read it" -- a tensorrt engine or
+    # an openvino directory has no opset this package reads -- and on a
+    # sidecar written before these fields existed it means "predates the
+    # field". Both are honest; an integer would be a claim nothing measured.
+    opset: int | None = None
+    #: Kept only when the request was NOT honoured. ``torch.onnx.export``
+    #: asked for 17 and produced 18 on every export measured 2026-09-16, with
+    #: the downconversion raising and the failure swallowed.
+    requested_opset: int | None = None
+    #: The task the artifact was exported for. Defaults to the only task that
+    #: existed when sidecars started being written.
+    task: str = "detect"
+    #: Every file this export left in the output directory, entry file first,
+    #: as names relative to it -- so a deploying reader with only the
+    #: directory knows what to copy and what is not theirs.
+    artifact_files: list[str] = field(default_factory=list)
+    #: All of ``artifact_files`` together. ``file_size_bytes`` keeps its
+    #: meaning of the entry file alone, which understated the real artifact
+    #: by 2.00x with onnxslim and 18.34x without it.
+    total_size_bytes: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: Path | None = None) -> Path:

@@ -75,6 +75,13 @@ def _run_export(spec: ModelSpec, tmp_path: Path, *patches: object) -> None:
         patch("yowo.export._exporter.resolve_weights", return_value=Path("/fake/weights.pt")),
         patch("yowo.export._exporter._export_onnx", side_effect=_write_fake_onnx),
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
         fake_meta = MagicMock()
@@ -390,6 +397,13 @@ def test_export_never_converts_before_the_pin_is_compared(tmp_path: Path) -> Non
         patch("yowo.export._exporter.resolve_weights", return_value=planted),
         patch("yowo.export._exporter._export_onnx", side_effect=_write_fake_onnx),
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.arch._weights._extract_state_dict") as extract,
         patch(
             "yowo.arch._weights.verify_digest",
