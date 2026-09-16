@@ -105,3 +105,13 @@ jobs:
           CI: "true"
         run: uv run pytest tests/integration/test_export_parity.py --parity-scope all -q --tb=short
         timeout-minutes: 60
+
+      # Same step as `parity-pr`. `test_both_entry_points_share_one_parity_
+      # implementation` fails if the two entry points ever run different
+      # files -- a split that changes what is asserted makes them two checks
+      # wearing one name.
+      - name: An export leaves exactly the files its sidecar names
+        env:
+          CI: "true"
+        run: uv run pytest tests/integration/test_export_artifact_selfcontained.py -q --tb=short
+        timeout-minutes: 30

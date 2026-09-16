@@ -50,6 +50,13 @@ def test_export_model_obb_calls_build_obb_model(tmp_path: Path) -> None:
         patch("yowo.models._registry.get_obb", return_value=mock_meta),
         patch("yowo.export._exporter._export_onnx") as mock_export_onnx,
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
         fake_onnx = tmp_path / "yolo11n-obb.onnx"
@@ -88,6 +95,13 @@ def test_export_model_obb_does_not_call_build_model(tmp_path: Path) -> None:
         patch("yowo.arch._weights.load_weights") as mock_load_weights,
         patch("yowo.export._exporter._export_onnx") as mock_export_onnx,
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
         fake_onnx = tmp_path / "yolo11n-obb.onnx"
@@ -130,6 +144,13 @@ def test_export_model_obb_stem_includes_obb_suffix(tmp_path: Path) -> None:
         patch("yowo.models._registry.get_obb", return_value=mock_meta),
         patch("yowo.export._exporter._export_onnx", side_effect=_capture_export),
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
         fake_onnx = tmp_path / "yolo11n-obb.onnx"
@@ -189,6 +210,13 @@ def test_kv_cache_guard_obb_skips_kv_export(tmp_path: Path) -> None:
         patch("yowo.export._exporter._export_onnx_kv") as mock_kv_export,
         patch("yowo.export._exporter._export_onnx") as mock_export_onnx,
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
         fake_onnx = tmp_path / "yolo11n-obb.onnx"
@@ -228,10 +256,21 @@ def test_kv_cache_guard_classify_skips_kv_export(tmp_path: Path) -> None:
         patch("yowo.export._exporter._export_onnx_kv") as mock_kv_export,
         patch("yowo.export._exporter._export_onnx") as mock_export_onnx,
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
     ):
-        # classify stem is "yolo11n" (no task suffix)
-        fake_onnx = tmp_path / "yolo11n.onnx"
+        # The classify stem WAS "yolo11n" -- the same path and the same
+        # recorded `model_name` as a detect export, so the two silently
+        # overwrote each other. `model_stem` now suffixes classify the way it
+        # already suffixed obb. This line documented the defect as intended
+        # behaviour; it now documents the fix.
+        fake_onnx = tmp_path / "yolo11n-cls.onnx"
         fake_onnx.write_bytes(b"fake")
         mock_export_onnx.side_effect = lambda *a, **kw: fake_onnx.write_bytes(b"fake")
         fake_meta = MagicMock()
@@ -289,6 +328,13 @@ def test_kv_cache_guard_detect_calls_kv_export(tmp_path: Path) -> None:
         patch("yowo.arch._weights.load_weights"),
         patch("yowo.export._exporter._export_onnx_kv") as mock_kv_export,
         patch("yowo.export._exporter.get_hardware_profile"),
+        # `export_model` now reads its own sidecar back before returning
+        # (M7 of `onnx-external-data`). These tests replace `ExportMetadata`
+        # with a mock and `_export_onnx` with a stub, so there is no real
+        # sidecar and no real graph to verify against. The readback itself is
+        # bound by `test_export_reads_its_own_sidecar_back_before_returning`;
+        # here it is one more collaborator these tests already isolate.
+        patch("yowo.export._exporter.verify_sidecar_describes_directory"),
         patch("yowo.export._exporter.ExportMetadata") as mock_export_meta_cls,
         # YOLOKVWrapper is a local import inside the kv-branch; patch at source module
         patch("yowo.export._kv_wrapper.YOLOKVWrapper"),

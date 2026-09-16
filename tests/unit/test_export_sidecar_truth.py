@@ -230,3 +230,49 @@ class TestTheseChecksRunInCI:
             f"no pull_request CI command runs {integration}; "
             f"the no-onnxslim leg would be as invisible as the defect it covers"
         )
+
+
+class TestCompanionNamesCannotEscapeTheDirectory:
+    def test_an_external_data_location_outside_the_output_dir_is_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        """Security residue, not a frozen CHECK -- found by the Verify lens.
+
+        `location` is a string carried inside the graph, and
+        ``internalize_external_data`` UNLINKS whatever ``external_companions``
+        returns. A location of ``../victim`` would resolve outside the output
+        directory and delete a file the export never wrote. The only graph
+        that reaches this today is one produced seconds earlier by this same
+        package, so no reachable exploit exists -- which is exactly when the
+        guard is cheap to add.
+        """
+        import onnx
+        from onnx import TensorProto, helper
+
+        from yowo.export._readback import external_companions
+
+        outside = tmp_path / "victim.bin"
+        outside.write_bytes(b"someone else's file")
+        work = tmp_path / "out"
+        work.mkdir()
+
+        init = TensorProto()
+        init.name = "w"
+        init.data_type = TensorProto.FLOAT
+        init.dims.extend([1])
+        init.data_location = TensorProto.EXTERNAL
+        entry = init.external_data.add()
+        entry.key, entry.value = "location", "../victim.bin"
+
+        graph = helper.make_graph(
+            [helper.make_node("Relu", ["images"], ["output0"])],
+            "escape",
+            [helper.make_tensor_value_info("images", TensorProto.FLOAT, [1])],
+            [helper.make_tensor_value_info("output0", TensorProto.FLOAT, [1])],
+            initializer=[init],
+        )
+        p = work / "escape.onnx"
+        onnx.save(helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)]), str(p))
+
+        assert external_companions(p) == []
+        assert outside.exists()

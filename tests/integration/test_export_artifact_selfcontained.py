@@ -176,6 +176,10 @@ class TestTheSidecarDescribesTheGraph:
             ]
             assert meta.input_shape[2:] == dims[2:]
             assert meta.input_shape[2:] == [224, 224]
+            # `imgsz` describes the graph too. A classify export ignores the
+            # argument -- the model uses the registry's 224 -- so a recorded
+            # 640 is the same lie in a field a reader skims sooner.
+            assert meta.imgsz == 224
 
 
 class TestTheArtifactLoadsFromWhatTheSidecarNames:
