@@ -254,8 +254,17 @@ def export_model(
     facts = read_onnx_graph_facts(exported_path)
     if facts.input_shape:
         input_shape = [batch_size if d == DYNAMIC_DIM else d for d in facts.input_shape]
+        # `dynamic` was `dynamic_batch` -- the request. It agrees with the
+        # graph on every model measured, because torch honours `dynamic_axes`,
+        # which is exactly why copying it went unnoticed. It is the graph's
+        # own answer now.
+        dynamic = DYNAMIC_DIM in facts.input_shape
     else:
+        # Nothing readable: a tensorrt engine, an openvino directory, a coreml
+        # package. The request is the only answer available, and it is the one
+        # already recorded today.
         input_shape = [batch_size, 3, imgsz, imgsz]
+        dynamic = dynamic_batch
 
     # `imgsz` describes the produced graph too, and R:REQUEST-AS-FACT does not
     # exempt it. A classify export ignores the argument entirely -- the model
@@ -278,7 +287,7 @@ def export_model(
         precision=precision.value,
         imgsz=recorded_imgsz,
         batch_size=batch_size,
-        dynamic=dynamic_batch,
+        dynamic=dynamic,
         input_shape=input_shape,
         file_path=str(exported_path.resolve()),
         file_size_bytes=size_bytes,
