@@ -24,6 +24,10 @@ verified:
   - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:236f441f35bc58de" }
   - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/1.md }
   - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/1.md, brief: "sha256:0d9b67dfae08afd6" }
+  - { by: "Tin Dang", at: 2026-09-16, act: refreeze, authority: human, direction: "sha256:61718a5fdb3ac1e7", binding: "sha256:0658a82398b736fa" }
+  - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:fb5a5a67ede2adda" }
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/2.md, brief: "sha256:fb5a5a67ede2adda" }
 advised_by: security-reviewer
 ---
 ## CARD
@@ -138,6 +142,7 @@ strategy: The shape and batch refusals first: they are unbounded holes and they 
 - test_a_first_frame_for_a_source_is_a_plain_miss · covers: A6, E5 · no entry, no warning, just a miss
 - test_no_preset_enables_the_cache_on_a_device_measured_to_lose · covers: M7, R:MEASURED_LOSS, E7 · reads the preset table and fails if a device the experiment recorded as slower still ships with the cache on
 - test_a_stated_saving_is_accompanied_by_the_blind_spot_that_buys_it · covers: M8, R:HALFTRADE · fails when a document gives a cache saving percentage without a pixel bound in the same section
+- test_no_user_facing_file_describes_the_cache_outside_the_enumeration · covers: A2, M3 · enumerates the repository for files describing the feature and fails on one that appears in neither the documented list nor the implementation list, so a surface cannot hide from every other check by being absent from their input
 
 ## EVIDENCE
 receipt: <runs/<n>.md>

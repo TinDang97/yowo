@@ -53,12 +53,40 @@ def _ascii(text: str) -> str:
 
 
 #: Every document that describes the cache to a user.
+#:
+#: A2 warned that a fifth surface would make the box "true of four and false of
+#: the feature", and there was one: `src/yowo/pipeline/README.md` has a
+#: "Feature cache safety" section. It was found by enumerating what mentions
+#: the feature across `src/` and `docs/`, not by a check -- which is why
+#: `test_the_enumeration_of_surfaces_is_complete` now does that enumeration
+#: here, so a sixth cannot appear unnoticed.
 DOC_SURFACES = (
     "README.md",
     "src/yowo/cache/README.md",
     "docs/user-guide.md",
     "src/yowo/config.py",
+    "src/yowo/pipeline/README.md",
 )
+
+#: Files that mention the cache but are not where a user meets the FEATURE:
+#: implementation modules, and the experiment doc that the others cite.
+NOT_USER_FACING = {
+    "src/yowo/arch/_attention.py",
+    "src/yowo/backends/__init__.py",
+    "src/yowo/backends/_pytorch.py",
+    "src/yowo/cache/__init__.py",
+    "src/yowo/cache/_similarity.py",
+    "src/yowo/cache/_store.py",
+    "src/yowo/classify_engine.py",
+    "src/yowo/engine.py",
+    "src/yowo/obb_engine.py",
+    "src/yowo/pipeline/__init__.py",
+    # Mentions the cache only to explain why it redacts credentials out of the
+    # cache KEY -- an RTSP password living as a dict key for the process
+    # lifetime survives log scrubbing. Implementation, not a place a user meets
+    # the feature.
+    "src/yowo/io/_redact.py",
+}
 
 
 def grey(batch: int = 1, side: int = 640, value: float = 0.5) -> np.ndarray:
@@ -365,4 +393,37 @@ class TestDefaultsFollowTheMeasurement:
         assert not offenders, (
             f"a feature-cache saving is stated with no blind spot within "
             f"{radius} characters: {offenders}"
+        )
+
+
+class TestTheEnumerationOfSurfacesIsComplete:
+    def test_no_user_facing_file_describes_the_cache_outside_the_enumeration(self) -> None:
+        """A2's own failure mode, made into a check.
+
+        A2 said: "if wrong and a fifth surface exists, the box is true of four
+        and false of the feature." One did exist --
+        `src/yowo/pipeline/README.md` -- and it was found by grepping, after
+        the node had already gated. Every other check in this file reads
+        DOC_SURFACES, so a surface missing from that tuple is invisible to all
+        of them. This is the check that reads the repository instead.
+        """
+        pattern = re.compile(r"feature[ _-]?(?:map[ _-]?)?cache|FeatureCache", re.I)
+        roots = [REPO_ROOT / "src", REPO_ROOT / "docs", REPO_ROOT / "README.md"]
+
+        found: set[str] = set()
+        for root in roots:
+            paths = [root] if root.is_file() else root.rglob("*")
+            for path in paths:
+                if path.suffix not in {".py", ".md"} or "__pycache__" in path.parts:
+                    continue
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                if rel.startswith(("docs/reviews/", "docs/experiments/")):
+                    continue
+                if pattern.search(path.read_text(encoding="utf-8")):
+                    found.add(rel)
+
+        unaccounted = found - set(DOC_SURFACES) - NOT_USER_FACING
+        assert not unaccounted, (
+            f"these describe the feature cache but appear in neither DOC_SURFACES nor "
+            f"NOT_USER_FACING, so no check in this file looks at them: {sorted(unaccounted)}"
         )
