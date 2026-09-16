@@ -18,6 +18,7 @@ def _make_result(
 ) -> BenchmarkResult:
     return BenchmarkResult(
         format=fmt,
+        requested_format=fmt,
         map_50_95=map_50_95,
         map_50=0.55 if map_50_95 is not None else None,
         fps_avg=fps,

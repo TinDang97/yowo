@@ -148,8 +148,8 @@ class TestRunSweep:
         # Only PYTORCH available; mock _measure_config to return predictable fps
         fps_by_batch: dict[int, float] = {1: 10.0, 2: 20.0, 4: 5.0}
 
-        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
-            return fps_by_batch[batch_size], "fp32"
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure, _frames=None):
+            return fps_by_batch[batch_size], "fp32", False
 
         with (
             patch(
@@ -174,8 +174,8 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
-            return 30.0, "fp32"  # same fps for all
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure, _frames=None):
+            return 30.0, "fp32", False  # same fps for all
 
         with (
             patch(
@@ -202,12 +202,12 @@ class TestRunSweep:
 
         call_count = 0
 
-        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure, _frames=None):
             nonlocal call_count
             call_count += 1
             if batch_size >= 4:
                 raise torch.cuda.OutOfMemoryError("OOM")
-            return 10.0, "fp32"
+            return 10.0, "fp32", False
 
         with (
             patch(
@@ -243,7 +243,7 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure, _frames=None):
             raise torch.cuda.OutOfMemoryError("OOM")
 
         with (
@@ -269,7 +269,7 @@ class TestRunSweep:
         hw = _make_hw()
         spec = self._make_spec()
 
-        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure):
+        def fake_measure(_spec, _hw, _backend, batch_size, _warmup, _measure, _frames=None):
             raise torch.cuda.OutOfMemoryError("OOM")
 
         # We can't directly observe engine.close() from run_sweep since

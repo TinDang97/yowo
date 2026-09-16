@@ -22,6 +22,7 @@ from yowo.benchmark._evaluator import (
 )
 from yowo.classify_engine import ClassificationEngine
 from yowo.engine import DetectionEngine
+from yowo.models import resolve_weights
 from yowo.types import BackendType, Detection, Frame, ModelSpec
 
 logger = logging.getLogger(__name__)
@@ -29,16 +30,31 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BenchmarkResult:
-    """Metrics from benchmarking a single backend."""
+    """Metrics from benchmarking a single backend.
+
+    ``format`` is the backend that EXECUTED, not the one requested. Those
+    differ whenever a backend falls back, and the fallback is common: asking
+    for onnx without an exported artifact silently runs pytorch. Reported as
+    the request, the onnx row and the pytorch row were both pytorch — a format
+    comparison in which both sides are the same format.
+
+    ``requested_format`` keeps what was asked for, so a fallback is legible
+    rather than merely absent.
+
+    ``model_size_mb`` is ``None`` when the size of the artifact that actually
+    loaded cannot be determined. It is not 0.0: a sentinel renders as
+    ``0.0 MB`` and reads as a measurement.
+    """
 
     format: str
+    requested_format: str
     map_50_95: float | None
     map_50: float | None
     fps_avg: float
     latency_p50_ms: float
     latency_p95_ms: float
     latency_p99_ms: float
-    model_size_mb: float
+    model_size_mb: float | None
     device: str
     num_images: int
 
@@ -64,20 +80,43 @@ def _check_backend_available(backend_type: BackendType) -> bool:
         return False
 
 
-def _get_model_size_mb(spec: ModelSpec) -> float:
-    """Get model file size in MB, resolving from cache if weights_path is unset."""
+def _get_model_size_mb(spec: ModelSpec) -> float | None:
+    """Size of the source checkpoint in MB, or ``None`` if it cannot be read.
+
+    ``None`` rather than 0.0 on failure: 0.0 renders as ``0.0 MB`` and reads as
+    a measured value. This reports the SOURCE checkpoint, so callers must only
+    use it for a row that actually loaded that checkpoint — see
+    :func:`_artifact_size_mb`.
+    """
     path = spec.weights_path
     if path is None:
         try:
-            from yowo.models import resolve_weights
-
             path = resolve_weights(spec)
         except Exception:
-            return 0.0
+            return None
     try:
         return Path(path).stat().st_size / (1024 * 1024)
     except OSError:
-        return 0.0
+        return None
+
+
+def _artifact_size_mb(spec: ModelSpec, executed: str) -> float | None:
+    """Size of the artifact that the executing backend actually loaded.
+
+    Only the pytorch backend loads the source checkpoint, so only there is the
+    checkpoint's size the executed artifact's size. For onnx, openvino and
+    tensorrt the loaded artifact is a different file whose path no backend
+    exposes (``selection`` carries backend, device, precision and reason;
+    ``PyTorchBackend`` holds a spec, not a path). Reporting the checkpoint for
+    those rows is how every format came to read 5.354 MB.
+
+    Returning ``None`` is the honest answer until a backend can name the file
+    it opened — owned by `backend-extension-contract`, whose scope includes the
+    backend Protocol this would extend.
+    """
+    if executed == BackendType.PYTORCH.value:
+        return _get_model_size_mb(spec)
+    return None
 
 
 def _load_image_as_frame(image_path: Path, index: int) -> Frame:
@@ -156,6 +195,10 @@ def run_single_backend(
             model_family=model_spec.family,
             model_size=model_spec.size,
             weights_path=model_spec.weights_path,
+            # Both were omitted here while `classify` and `detect` passed them,
+            # so the row was labelled with a backend it never executed.
+            num_classes=model_spec.num_classes,
+            backend=backend_type,
         )
     else:
         engine = DetectionEngine(
@@ -168,6 +211,10 @@ def run_single_backend(
 
     with engine:
         device = engine.selection.device_type.value
+        # The backend that was SELECTED, which is not always the one requested:
+        # a fallback is silent, and reporting the request as the result turns
+        # two pytorch runs into an onnx-versus-pytorch comparison.
+        executed = engine.selection.backend.value
 
         # Warmup: run N dummy inferences, discard results and timing
         warmup_frame = Frame(
@@ -212,15 +259,18 @@ def run_single_backend(
     # Compute FPS and latency percentiles
     if not latencies:
         return BenchmarkResult(
-            format=backend_type.value,
+            format=executed,
+            requested_format=backend_type.value,
             map_50_95=None,
             map_50=None,
             fps_avg=0.0,
             latency_p50_ms=0.0,
             latency_p95_ms=0.0,
             latency_p99_ms=0.0,
-            model_size_mb=_get_model_size_mb(model_spec),
-            device="unknown",
+            model_size_mb=_artifact_size_mb(model_spec, executed),
+            # `device` is bound above; "unknown" was a literal standing in for
+            # a value the code already had.
+            device=device,
             num_images=len(images),
         )
 
@@ -258,10 +308,11 @@ def run_single_backend(
         map_50_95 = obb_metrics["mAP_50_95"]
         map_50 = obb_metrics["mAP_50"]
 
-    model_size = _get_model_size_mb(model_spec)
+    model_size = _artifact_size_mb(model_spec, executed)
 
     return BenchmarkResult(
-        format=backend_type.value,
+        format=executed,
+        requested_format=backend_type.value,
         map_50_95=map_50_95,
         map_50=map_50,
         fps_avg=fps_avg,

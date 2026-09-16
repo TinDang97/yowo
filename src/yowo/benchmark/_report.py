@@ -51,10 +51,19 @@ def render_table(
         map_str = f"{r.map_50_95:.4f}" if r.map_50_95 is not None else "N/A"
         fps_str = f"{r.fps_avg:.1f}"
         lat_str = f"{r.latency_p50_ms:.1f} ms"
-        size_str = f"{r.model_size_mb:.1f} MB"
+        # `None` means the size of the artifact that ran could not be
+        # determined. A dash says that; "0.0 MB" would read as a measurement.
+        size_str = f"{r.model_size_mb:.1f} MB" if r.model_size_mb is not None else "-"
+        # Show the request only when it differs, i.e. when a fallback happened.
+        # Without it the table shows two pytorch rows and calls one of them onnx.
+        format_str = (
+            r.format
+            if r.format == r.requested_format
+            else f"{r.format} (asked: {r.requested_format})"
+        )
 
         row: list[str] = [
-            r.format,
+            format_str,
             map_str,
             str(r.num_images),
             fps_str,
@@ -100,6 +109,7 @@ def results_to_json(
     for r in results:
         rd: dict[str, Any] = {
             "format": r.format,
+            "requested_format": r.requested_format,
             "map_50_95": r.map_50_95,
             "map_50": r.map_50,
             "fps_avg": r.fps_avg,

@@ -37,6 +37,7 @@ class TestBenchmarkResult:
     def test_dataclass_fields(self) -> None:
         result = BenchmarkResult(
             format="pytorch",
+            requested_format="pytorch",
             map_50_95=0.35,
             map_50=0.55,
             fps_avg=120.5,
@@ -146,6 +147,12 @@ class TestRunnerRecordsModelSize:
         mock_engine.__enter__ = MagicMock(return_value=mock_engine)
         mock_engine.__exit__ = MagicMock(return_value=False)
         mock_engine.detect.return_value = [_make_detection()]
+        # The size reported is the size of the artifact that LOADED, and only
+        # the pytorch backend loads the source checkpoint (task benchmark-truth).
+        # Without saying which backend executed, a MagicMock reports none, and
+        # the honest answer for an unknown artifact is no size at all.
+        mock_engine.selection.backend.value = "pytorch"
+        mock_engine.selection.device_type.value = "cpu"
 
         spec = ModelSpec(
             family=ModelFamily.YOLO11,
