@@ -226,9 +226,15 @@ class TestTheseChecksRunInCI:
                     if isinstance(step.get("run"), str) and "pytest" in step["run"]:
                         commands.append(step["run"])
 
-        assert any(integration in c or "tests/integration" in c for c in commands), (
+        # Deliberately exact. This once read `integration in c or
+        # "tests/integration" in c`, and the mutation sweep showed the second
+        # clause made it unfailable: pointing the step at a different file in
+        # the same directory kept it green. A check that any integration test
+        # runs is not a check that THIS one does.
+        assert any(integration in c for c in commands), (
             f"no pull_request CI command runs {integration}; "
-            f"the no-onnxslim leg would be as invisible as the defect it covers"
+            f"the no-onnxslim leg would be as invisible as the defect it covers. "
+            f"pytest commands found: {commands}"
         )
 
 

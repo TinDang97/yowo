@@ -135,11 +135,38 @@ class TestTheSidecarAgreesWithTheDirectory:
             assert stranger.exists()
 
     def test_the_recorded_size_accounts_for_every_produced_file(
-        self, exported: tuple[Any, Path]
+        self, verified_weight: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """M4 -- `file_size_bytes` understated the artifact by 2.00x-18.34x."""
-        meta, out = exported
-        assert meta.total_size_bytes == sum(_on_disk(out).values())
+        """M4 -- `file_size_bytes` understated the artifact by 2.00x-18.34x.
+
+        Exported deliberately ABOVE the protobuf ceiling, so the companion
+        file survives and the export really does leave two files. Against a
+        one-file export this check is VACUOUS -- total and entry are the same
+        number, and reverting `total_size_bytes` to `size_bytes` passes it.
+        That is how the mutation sweep found it, and it is why the ceiling is
+        lowered here rather than the assertion being trusted as written.
+        """
+        import yowo.export._exporter as exporter
+        from yowo.export._readback import internalize_external_data
+
+        monkeypatch.setattr(
+            exporter,
+            "internalize_external_data",
+            lambda path: internalize_external_data(path, size_ceiling_bytes=1),
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            meta = _export(out)
+            on_disk = _on_disk(out)
+
+            assert len(on_disk) > 1, (
+                "the ceiling was lowered so the export would leave its companion "
+                "file; with one file this check cannot tell total from entry"
+            )
+            assert set(meta.artifact_files) == set(on_disk)
+            assert meta.total_size_bytes == sum(on_disk.values())
+            assert meta.total_size_bytes != meta.file_size_bytes
 
 
 class TestTheSidecarDescribesTheGraph:
