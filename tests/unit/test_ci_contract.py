@@ -38,6 +38,10 @@ FROZEN_JOB_IDS = {
     # both run suites that existed and that no workflow ran.
     "cli-e2e",
     "persistent-gallery",
+    # `python-claim` and `unit-newest` appended by task ci-matrix: the package
+    # claimed five Python versions and CI executed one.
+    "python-claim",
+    "unit-newest",
 }
 
 # The mAP gate's own budget. 500 images inferred in 20.8 s on local CPU

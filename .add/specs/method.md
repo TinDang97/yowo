@@ -7,7 +7,7 @@ description: how work proceeds, and what a gate costs
 tags: [add, tdd, review]
 sources: [CLAUDE.md, .add/index.md]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 23
+delta_seq: 24
 ---
 ## Now
 
@@ -45,6 +45,7 @@ another name; an ADD beat may delegate to them.
 
 ## Deltas
 - 2026-09-08 · authored at bundle init; reconciles ADD's loop with the review roster and commit
+- [ADD · M24 · open · 2026-09-16] A package's supported-Python claim and its TEST SUITE's floor are different numbers and can be four versions apart. yowo ships 3.8-compatible code (96/96 compile under 3.8.20) while its tests need 3.11 (6 modules import tomllib). Matrixing the test suite over the claim is then impossible, and the right check installs the package as a CONSUMER and exercises its documented surface — which is what the classifiers actually promise. (evidence: /tasks/ci-matrix.md)
 - [ADD · M23 · open · 2026-09-16] A guard built for ONE instance of a defect ships blind to the next. The chromadb-specific install guard from integration-tier-revival was merged, and its own first CI run logged an openvino skip it had no concept of. When the lesson is 'a dependency CI never installs turns its tests into a green skip', write the guard over EVERY dependency, resolved from the manifest — the instance-shaped guard costs a whole second task. (evidence: /tasks/conditional-dep-install.md)
 - [ADD · M22 · open · 2026-09-16] freeze does not enter the build: 'add brief <slug>' must be run to record the entry, or the gate refuses with R:UNBRIEFED after every check already passed. Hit 2026-09-16 on arch-equivalence-in-ci — three receipts recorded, all green, and the PASS was refused for a step that costs one command at the START of Build. (evidence: /tasks/arch-equivalence-in-ci.md)
 - [ADD · M21 · open · 2026-09-15] A CHECKS line binds its covers: referents ONLY when it carries a trailing ' - <why>' after the covers list. Without that third field the line parses, the test runs and passes, the receipt records 9/9 reported — but only the lines carrying the field are stored as passed, so the gate refuses naming every rule whose covering lines all lacked it. Diagnosed by reading the receipt's passed: list against the CHECKS block: exactly the three lines with a trailing field were the three recorded. (evidence: /tasks/coverage-floor.md)

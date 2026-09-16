@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 22
+delta_seq: 23
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q23 · open · 2026-09-16] ast.parse(feature_version=(3,8)) is NOT a syntax gate. It reported all 163 test files parsing under 3.8 while a real CPython 3.8.20 raised 21 SyntaxErrors — feature_version does not downgrade the grammar for constructs like parenthesized context managers. To claim a Python version works, compile with THAT interpreter (py_compile) or run it; anything else measures the interpreter you already have. (evidence: /tasks/ci-matrix.md)
 - [TDD · Q22 · open · 2026-09-16] Detect behaviour by PARSING, not by matching text. A regex for importorskip(...) flagged the guard's own docstring, which quotes the call as an example — prose that executes nothing. ast.walk for a real Call node is immune. This is the same defect the task was written to remove, reappearing inside the guard against it. (evidence: /tasks/integration-tier-revival.md)
 - [TDD · Q21 · open · 2026-09-16] In zsh an unquoted $VAR holding space-separated paths does NOT word-split — it becomes ONE nonexistent path, pytest reports 'no tests ran', and a grep for FAILED finds nothing. Five mutation checks 'passed' by running zero tests on 2026-09-16. A verification that finds nothing looks exactly like a verification that found nothing wrong; always print the pass/fail COUNT, never just grep for failures. (evidence: /tasks/integration-tier-revival.md)
 - [TDD · Q20 · open · 2026-09-16] Print the MARGIN, not just the verdict. arch-equivalence recorded a darwin/arm64 box maximum of 1.4038e-03 and claimed 3.6x headroom; adding '-s' showed ubuntu/x86-64 producing 2.2583e-03 on a different variant (yolo11x, not yolo11l) within the hour — 1.6x larger, real headroom 2.2x. A green bound tells you it held, never by how much, and the difference is whether the next platform reds the build. Q11 in its live form. (evidence: /tasks/arch-equivalence-in-ci.md)

@@ -423,6 +423,62 @@ jobs:
         run: uv run pytest tests/integration/test_chroma_gallery_persistence.py -q --tb=short
         timeout-minutes: 30
 
+  # Appended by ADD task `ci-matrix`. Every job in every workflow ran python
+  # 3.11 on ubuntu-latest (measured 2026-09-16, all 18 of them), while
+  # pyproject claimed 3.8-3.12. Four of the five claimed versions had never
+  # executed anything.
+  #
+  # This installs the package the way a CONSUMER does — no dev group — because
+  # the claim is about the shipped package. That is not a nicety: the dev group
+  # cannot resolve on 3.8 at all, since `pre-commit>=3.8.0` requires >=3.9.
+  #
+  # The matrix is quoted. Unquoted `3.10` is the YAML float 3.1.
+  python-claim:
+    name: Python Claim (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken version must not cancel the other four.
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install the package the way a consumer does
+        run: |
+          uv venv --python ${{ matrix.python-version }} .venv-claim
+          uv pip install --python .venv-claim/bin/python .
+      - name: The documented public surface works on this Python
+        run: .venv-claim/bin/python scripts/check_public_surface.py
+        timeout-minutes: 15
+
+  # Appended by ADD task `ci-matrix`. The unit tier on the newest claimed
+  # version. It is NOT matrixed over the whole claim, and the cause is
+  # recorded rather than implied: measured on real interpreters, `src/yowo`
+  # compiles 96/96 under CPython 3.8.20 but the TEST SUITE compiles 141/163
+  # (22 modules use parenthesized context managers, 3.10+), and under 3.10.20
+  # all 163 compile while 6 modules `import tomllib`, which is 3.11+ stdlib.
+  # The suite's floor is 3.11 — four versions above the package's.
+  unit-newest:
+    name: Unit Tests (3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --python 3.12 --group dev --extra chromadb --extra openvino
+      - name: The unit tier on the newest claimed Python
+        env:
+          CI: "true"
+        run: uv run --python 3.12 pytest tests/unit -q --tb=short --timeout=60
+        timeout-minutes: 30
+
   # Appended by ADD task `map-regression-gate`. A separate job rather than a
   # step on `accuracy-dataset`, for two reasons: it needs the weight store as
   # well as the image store, and branch protection binds a published check
