@@ -14,6 +14,7 @@ and missed a fourth, which is exactly what a hand-maintained list does.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import inspect
 import re
@@ -281,15 +282,28 @@ def test_the_return_type_does_not_vary_by_export_format() -> None:
 def test_this_node_invents_no_deprecation_mechanism() -> None:
     """covers A7 -- `deprecation-policy` owns that design, not this node.
 
-    Inventing this repo's first DeprecationWarning inside an unrelated task
-    would pre-empt the decision that node exists to make.
+    Originally this asserted that NO ``DeprecationWarning`` existed anywhere in
+    ``src/``, which was right while the mechanism was undesigned: inventing one
+    inside an unrelated task would have pre-empted the decision. The
+    ``deprecation-policy`` node has since built it, so the guard now states the
+    same intent against the world that exists -- there is exactly ONE
+    mechanism, and this node did not add a second.
     """
-    offenders = [
-        path.as_posix()
-        for path in Path("src/yowo").rglob("*.py")
-        if "DeprecationWarning" in path.read_text(encoding="utf-8")
-    ]
-    assert not offenders, (
-        "a deprecation mechanism appeared in src/: " + ", ".join(offenders) + " -- that design "
-        "belongs to deprecation-policy"
+    # EMISSION sites, not mentions of the word. A docstring that explains the
+    # deprecation is prose, not a second mechanism -- the string test reported
+    # types.py, whose docstring merely says the name warns.
+    emitters = set()
+    for path in Path("src/yowo").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if name == "warn" and any(
+                getattr(a, "id", None) == "DeprecationWarning" for a in node.args
+            ):
+                emitters.add(path.as_posix())
+    emitters = sorted(emitters)
+    assert emitters == ["src/yowo/_deprecation.py"], (
+        "a second deprecation mechanism appeared outside _deprecation.py: "
+        f"{emitters} -- that design belongs to deprecation-policy"
     )

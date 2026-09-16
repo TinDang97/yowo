@@ -413,6 +413,11 @@ class TestBackendSelection:
 # ---------------------------------------------------------------------------
 
 
+# ExportResult is deprecated since 2.6.0 (see docs/stability-policy.md). These
+# tests are what the policy promises: a deprecated name keeps working, with
+# every field and behaviour unchanged, and only warns. That the warning FIRES
+# is asserted in test_deprecation.py; here it is expected noise, not a finding.
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 class TestExportResult:
     def test_construction(self) -> None:
         result = ExportResult(

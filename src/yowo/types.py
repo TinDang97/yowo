@@ -476,6 +476,11 @@ class ClassificationResult:
 class ExportResult:
     """Record of a completed model export operation.
 
+    DEPRECATED since 2.6.0; may be removed in 3.0.0. Use
+    :class:`~yowo.export.ExportMetadata`. Constructing one emits a
+    ``DeprecationWarning``; the name, its fields and its behaviour are
+    otherwise unchanged.
+
     NOT RETURNED BY ANYTHING. ``export_model`` returns
     :class:`~yowo.export.ExportMetadata`, a 24-field record written beside the
     artifact as its sidecar. This 7-field class is a public name that no
@@ -504,6 +509,17 @@ class ExportResult:
     file_size_bytes: int
     export_time_s: float
     created_at: str
+
+    def __post_init__(self) -> None:
+        # Deprecation is announced on CONSTRUCTION rather than on import:
+        # nothing returns this type, so building one is the only way to use it.
+        # An import-time warning would need the class moved behind a private
+        # name for module __getattr__ to fire, and would then also fire on this
+        # repo's own test imports and on check_public_surface.py's
+        # introspection -- noise with no corresponding use.
+        from yowo._deprecation import DEPRECATIONS, warn_deprecated
+
+        warn_deprecated(DEPRECATIONS["ExportResult"])
 
 
 @dataclass(frozen=True)
