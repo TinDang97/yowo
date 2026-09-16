@@ -472,7 +472,7 @@ InferenceEngine(
     iou_threshold: float = 0.45,
 
     # Caching (PyTorch backend only)
-    cache: bool = False,           # in-memory feature map cache
+    cache: bool = False,           # in-memory feature map cache; 40x40 px blind spot
     cache_dir: Path | None = None, # mmap-backed feature map cache
     kv_cache: bool = False,        # attention KV cache for streaming
 
@@ -2467,7 +2467,9 @@ for sid, err in collector.stream_errors.items():
 - Live sources auto-use `FrameDropPolicy.LATEST` — cameras stay temporally current even when inference is slower than frame rate.
 - `max_batch_size=4` matches camera count — each batch processes one frame from each camera.
 - `timeout_ms=50` flushes partial batches if some cameras are slower — prevents stalling on one offline camera.
-- Feature cache is auto-disabled (mixed-source batches).
+- Feature cache is auto-disabled (mixed-source batches). It would otherwise also
+  carry its own recall cost: at the default threshold it cannot see an object
+  smaller than about 40x40 px at realistic contrast.
 
 ### 16.8 Traffic Counting with ByteTrack
 

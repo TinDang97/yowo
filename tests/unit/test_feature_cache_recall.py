@@ -198,8 +198,24 @@ class TestALocalChangeIsComparedLocally:
             assert np.isfinite(fp).all(), f"side={side} produced a non-finite cell"
             assert fp == pytest.approx(0.25), (
                 f"side={side}: a uniform frame must give uniform cells; a cell that "
-                f"covered no pixels or counted some twice would not"
+                f"counted some pixels twice would not"
             )
+
+            # A uniform frame cannot tell a DROPPED row from a kept one. The
+            # mutation sweep proved it: replacing the linspace edges with
+            # integer division drops the remainder on a 641-pixel side, and
+            # this check stayed green. Light exactly one corner pixel -- if an
+            # edge falls outside every cell, no cell moves.
+            probe = np.zeros((1, 3, side, side), np.float32)
+            probe[:, :, side - 1, side - 1] = 1.0
+            assert spatial_fingerprint(probe, GRID).max() > 0.0, (
+                f"side={side}: the last row and column fall outside every cell, so a "
+                f"change there is invisible to the fingerprint"
+            )
+
+            origin = np.zeros((1, 3, side, side), np.float32)
+            origin[:, :, 0, 0] = 1.0
+            assert spatial_fingerprint(origin, GRID).max() > 0.0
 
 
 class TestTheDocumentsSayWhatTheCodeDoes:
@@ -209,16 +225,23 @@ class TestTheDocumentsSayWhatTheCodeDoes:
         A threshold value in abstract units is not a statement an operator can
         act on. "An object this big may not be detected" is.
         """
+        # SECTION-scoped, not file-scoped. The first version asked only that a
+        # pixel bound appear somewhere in the file, and the mutation sweep
+        # showed that made it unfailable: removing the bound from one section
+        # left three others in the same file and the check stayed green. A user
+        # reads the section they landed on, not the file.
+        radius = 1200
         missing = []
         for rel in DOC_SURFACES:
             text = _ascii((REPO_ROOT / rel).read_text(encoding="utf-8"))
-            if not re.search(r"feature.{0,4}cache|FeatureCache", text, re.I):
-                continue
-            if not re.search(r"\b\d{1,3}\s*x\s*\d{1,3}\s*(?:px|pixel)", text, re.I):
-                missing.append(rel)
+            for m in re.finditer(r"feature[ _-]?(?:map[ _-]?)?cache|FeatureCache", text, re.I):
+                lo, hi = max(0, m.start() - radius), m.start() + radius
+                if not re.search(r"\b\d{1,3}\s*x\s*\d{1,3}\s*(?:px|pixel)", text[lo:hi], re.I):
+                    missing.append(f"{rel}@{m.start()}: {text[m.start() : m.start() + 60].strip()}")
 
         assert not missing, (
-            f"these describe the feature cache without stating the blind spot in pixels: {missing}"
+            f"these describe the feature cache with no blind spot stated in pixels "
+            f"within {radius} characters: {missing}"
         )
 
     def test_no_savings_figure_appears_without_a_dated_experiment(self) -> None:
