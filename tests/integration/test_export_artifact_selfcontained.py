@@ -298,3 +298,94 @@ class TestAFailureThatChangedTheOutputIsRecorded:
             assert meta.requested_opset == 17, (
                 "the export produced an opset it was not asked for and recorded no trace of it"
             )
+
+
+class TestTheSidecarRecordsTheDynamismTheGraphHas:
+    def test_the_recorded_dynamism_is_the_graphs_dynamism(self, verified_weight: Path) -> None:
+        """M9 · R:REQUEST_AS_FACT · E7 -- `dynamic` was the request, not the graph.
+
+        m4's box 1 names three things read back from the produced artifact:
+        opset, input shape AND DYNAMISM. The first two landed; `dynamic` kept
+        copying `dynamic_batch` straight from the caller. The information was
+        already in hand -- `read_onnx_graph_facts` marks a symbolic dimension
+        `DYNAMIC_DIM` -- and simply was not used.
+
+        THE FIRST TWO LEGS ARE NOT ENOUGH, and saying so is the point. On this
+        torch, `dynamic_axes` is honoured exactly: requesting True yields a
+        symbolic dimension and requesting False yields a static one, so a
+        sidecar that simply COPIES the request agrees with the graph and the
+        check passes without the field ever being read back. Measured -- it
+        passed green against the un-fixed exporter.
+
+        The third leg forces the divergence E7 names: `dynamic_batch=True` is
+        requested and `dynamic_axes` is dropped on the way to torch, so the
+        produced graph is static while the request said otherwise. That is the
+        only leg that can tell a read-back from a copy.
+        """
+        import onnx
+
+        from yowo.export import export_model
+
+        for requested in (True, False):
+            with tempfile.TemporaryDirectory() as td:
+                meta = export_model(
+                    ModelSpec(family=_FAMILY, size=_SIZE),
+                    ExportFormat.ONNX,
+                    Path(td),
+                    precision=Precision.FP32,
+                    dynamic_batch=requested,
+                )
+                graph = onnx.load(meta.file_path, load_external_data=False)
+                symbolic = any(
+                    not d.HasField("dim_value")
+                    for d in graph.graph.input[0].type.tensor_type.shape.dim
+                )
+                assert meta.dynamic is symbolic, (
+                    f"requested dynamic_batch={requested}; the graph "
+                    f"{'has' if symbolic else 'has no'} a symbolic dimension but the "
+                    f"sidecar says dynamic={meta.dynamic}"
+                )
+
+    def test_a_request_for_dynamism_the_graph_did_not_get_is_not_recorded(
+        self, verified_weight: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """E7 · M9 -- the leg where the request and the graph disagree.
+
+        `dynamic_axes` is dropped on the way to torch, so `dynamic_batch=True`
+        produces a STATIC graph. A sidecar that copies the request says True;
+        one that reads the graph says False. Not a frozen CHECK of its own --
+        `test_the_recorded_dynamism_is_the_graphs_dynamism` owns M9 and E7 --
+        but it is the leg that makes that check able to fail, so it is kept
+        beside it rather than folded in, where a shared `for` loop would hide
+        which leg did the work.
+        """
+        import onnx
+
+        import yowo.export._exporter as exporter
+        from yowo.export import export_model
+
+        real = exporter._export_onnx
+        monkeypatch.setattr(
+            exporter,
+            "_export_onnx",
+            lambda *a, **kw: real(*a, **{**kw, "dynamic_batch": False}),
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            meta = export_model(
+                ModelSpec(family=_FAMILY, size=_SIZE),
+                ExportFormat.ONNX,
+                Path(td),
+                precision=Precision.FP32,
+                dynamic_batch=True,
+            )
+            graph = onnx.load(meta.file_path, load_external_data=False)
+            symbolic = any(
+                not d.HasField("dim_value") for d in graph.graph.input[0].type.tensor_type.shape.dim
+            )
+
+            assert not symbolic, "the leg is only meaningful if the graph really came out static"
+            assert meta.dynamic is False, (
+                "dynamic_batch=True was requested and the graph came out static; "
+                "the sidecar recorded the request rather than the graph"
+            )

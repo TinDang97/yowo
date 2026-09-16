@@ -23,6 +23,11 @@ verified:
   - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:342f5b74169ec1ad" }
   - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/2.md }
   - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/2.md, brief: "sha256:342f5b74169ec1ad" }
+  - { by: loop, at: 2026-09-16, act: reopen, to: direction, reason: "box 1 names opset, input shape AND DYNAMISM read back from the produced artifact. opset and input shape landed in PR #70; dynamic is still dynamic_batch, the request. read_onnx_graph_facts already marks a symbolic dim DYNAMIC_DIM, so the field was simply not used. Caught by reading the box's literal words before ticking it, not by a check." }
+  - { by: "Tin Dang", at: 2026-09-16, act: refreeze, authority: human, direction: "sha256:592d6c459594a7aa", binding: "sha256:5cc6b457250c5c3b" }
+  - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:2dc876a53a8220c9" }
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/3.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/3.md, brief: "sha256:2dc876a53a8220c9" }
 advised_by: security-reviewer
 ---
 ## CARD
@@ -40,6 +45,7 @@ beat: done · next: add status
 - M6 The sidecar records the task it was exported for, and two exports of the same family and size for different tasks do not write to the same path.
 - M7 `export_model` reads its own sidecar back through `ExportMetadata.load()` before returning, and refuses to return a sidecar that does not describe the artifact on disk.
 - M8 A sidecar written before these fields existed still loads, and reads as what it was.
+- M9 The sidecar's `dynamic` is whether the produced graph actually has a symbolic dimension, read back from that graph -- not whether one was requested.
 </must>
 <reject>
 - R:ORPHAN an export never leaves a file that the sidecar does not name -> "ORPHAN"
@@ -73,6 +79,7 @@ strategy: Read-back first — make the sidecar describe the artifact — because
 - E4 a sidecar written before this node, with no `opset`, `task`, `artifact_files` or `total_size_bytes`, still loads and reads as what it was.
 - E5 the opset downconversion fails (it does, today, on both detect and classify) — the export still succeeds and records the opset it actually produced.
 - E6 an unrelated file already sitting in `output_dir` is not claimed by the sidecar and does not fail the export.
+- E7 `dynamic_batch=True` is requested and the produced graph is STATIC anyway -- the export path that ignores `dynamic_axes` must not leave the sidecar claiming a dynamism the graph does not have.
 
 ## CHECKS
 - test_the_sidecar_names_every_file_the_export_wrote · covers: M1, R:ORPHAN, E6 · exports and diffs `output_dir` against `artifact_files`, so an orphaned `.onnx.data` fails and a pre-existing unrelated file does not
@@ -91,6 +98,7 @@ strategy: Read-back first — make the sidecar describe the artifact — because
 - test_the_sidecar_does_not_claim_a_file_it_did_not_write · covers: A6, E6 · plants an unrelated file in `output_dir` before exporting and asserts the sidecar neither names nor touches it
 - test_the_intermediate_onnx_is_named_not_orphaned · covers: A11 · asserts the file set names every file the export added, not only the entry, which is what makes a tensorrt/openvino run's leftover `.onnx` named rather than orphaned
 - test_the_sidecar_describes_the_last_artifact_in_the_chain · covers: A12 · asserts the graph facts are read from the artifact `file_path` points at, not from the ONNX the conversion consumed
+- test_the_recorded_dynamism_is_the_graphs_dynamism · covers: M9, R:REQUEST_AS_FACT, E7 · exports with `dynamic_batch` both ways and compares the sidecar against whether the produced graph really carries a symbolic dimension, so copying the request fails when the two disagree
 
 ## EVIDENCE
 receipt: <runs/<n>.md>
