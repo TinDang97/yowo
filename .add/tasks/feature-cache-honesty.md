@@ -1,7 +1,7 @@
 ---
 type: Task
 title: Document the failure mode where users meet it; set the default to match
-status: direction
+status: done
 depth: standard
 milestone: m4-honest-deployment
 scope:
@@ -21,12 +21,15 @@ verified:
   - { by: "Tin Dang", at: 2026-09-16, act: freeze, authority: human, direction: "sha256:4cfd208f8ea915ac", binding: "sha256:f462ede9487468e4" }
   - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:3b1e46caf9702314" }
   - { by: "Tin Dang", at: 2026-09-16, act: refreeze, authority: human, direction: "sha256:8df0f318ce353a53", binding: "sha256:0658a82398b736fa" }
-advised_by: inference-parity-engineer
+  - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:236f441f35bc58de" }
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: process, outcome: PASS, receipt: /tasks/feature-cache-honesty.d/runs/1.md, brief: "sha256:0d9b67dfae08afd6" }
+advised_by: security-reviewer
 ---
 ## CARD
 goal: The cache's recall hole is bounded by construction and stated as a measured number wherever a user meets the feature, and the savings figure beside it is one somebody measured.
 why: Measured 2026-09-16, all on the shipped default threshold of 0.01. The fingerprint is `current_tensor.mean(axis=(2, 3))` — three numbers for a 640x640 RGB frame — so the cache decides whether a scene changed from its average brightness alone. A 90x90 px object at maximum contrast is invisible (1.98% of the frame); at a realistic 0.15 contrast the invisible object is 165x165 px (6.65%); at 0.30 it is 116x116. A frame that is black over white matches a uniform grey one EXACTLY, because both average 0.5 — nothing about that failure is small. `check_and_load` has no shape check at all, so a 640x640 entry answers a 320x320 query and hands back 80x80 features for an input needing 40x40, and a B=1 entry answers a B=4 query because `np.abs((1,3) - (4,3))` broadcasts to (4,3) rather than raising. That batch case is on a SHIPPED path: `cache=True` appears in exactly two presets and one of them, `(CUDA_HIGH, VIDEO)`, also sets `batch_size=4`, so any video whose frame count is not a multiple of 4 ends on a partial batch. The guard that would stop the shape half exists — `_similarity.py:26` returns 1.0 on a shape mismatch — and `frame_similarity` has ZERO callers in `src/`. It is not untested dead code; `tests/unit/test_cache.py:32-42` tests it, which is how a shape guard stayed green and unreachable while the live path had none. The README states "60-85% compute savings" at `README.md:345` and `src/yowo/cache/README.md:3` with no experiment doc behind it, unlike every other headline figure in this repo.
-beat: direction
+beat: done · next: add status
 
 ## RULES
 <must>

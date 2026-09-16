@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 26
+delta_seq: 29
 ---
 ## Now
 
@@ -63,6 +63,9 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q29 · open · 2026-09-16] A check over a UNIFORM input cannot detect a dropped edge. 'A uniform frame gives uniform cells' stayed green when the cell edges were changed to integer division, which drops the remainder on a 641-pixel side. Light one corner pixel instead: if an edge falls outside every cell, nothing moves. (evidence: /tasks/feature-cache-honesty.md)
+- [TDD · Q28 · open · 2026-09-16] A documentation check scoped to a FILE is satisfied by a bound stated anywhere in that file. Section-scope it by proximity: a user reads the section they landed on. Re-scoping this one immediately found three more places in the same file where the feature was described with no bound beside it. (evidence: /tasks/feature-cache-honesty.md)
+- [TDD · Q27 · open · 2026-09-16] A check can be guarded TWICE, and a single-guard mutation then proves nothing. On feature-cache-honesty, removing the shape check in check_and_load left fingerprint_distance's own shape check catching the batch case, so the mutation reported GREEN and looked like the check failing to fail. When a mutation comes back green, first ask whether a SECOND guard caught it before concluding the check is weak. (evidence: /tasks/feature-cache-honesty.md)
 - [TDD · Q26 · open · 2026-09-16] A check can be unfailable because the shipped configuration makes its property trivially true. `total_size_bytes == sum(files)` could never differ from `file_size_bytes` once an ONNX export leaves exactly one file, so reverting the field passed. Drive the check into the configuration where the two CAN differ — here, below the protobuf ceiling so the companion survives — rather than trusting the assertion as written. (evidence: /tasks/onnx-external-data.md)
 - [TDD · Q25 · open · 2026-09-16] 'no tests ran' is not a verdict. A mutation sweep classified 13 of 14 rows GREEN because a bad nodeid (`file.py::`) collected zero tests and the classifier read the absence of the word 'failed' as a pass. Same class as the zsh word-splitting run that reported success on zero tests. Every harness that judges a pytest run must assert tests were COLLECTED before reading the outcome. (evidence: /tasks/onnx-external-data.md)
 - [TDD · Q24 · open · 2026-09-16] A mutation harness that runs `git checkout -- .` MUST refuse a dirty tree. On onnx-external-data it silently discarded an uncommitted strengthening of a test, then re-ran the stale check and reported GREEN — which I nearly read as 'the mutation did not kill it' rather than 'the fix was deleted'. Guard: assert `git status --porcelain` is empty before the first mutation. (evidence: /tasks/onnx-external-data.md)
