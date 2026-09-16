@@ -7,7 +7,7 @@ description: what counts as proof
 tags: [evidence, tdd, ci, parity]
 sources: [docs/reviews/2026-09-08-production-readiness/, .github/workflows/release.yml, pyproject.toml]
 generated: { by: add/3.5.0, at: 2026-09-08 }
-delta_seq: 30
+delta_seq: 31
 ---
 ## Now
 
@@ -63,6 +63,7 @@ Tracked as milestones in this bundle; each is a gate that does not exist yet:
 
 ## Deltas
 - 2026-09-08 · authored from the six-lane production-readiness review; replaces the scaffold's
+- [TDD · Q31 · open · 2026-09-16] A latency bound is best checked by counting WORK, not by timing. A wall-clock assertion calibrated on the author's machine either flakes on a shared CI runner or gets loosened until it asserts nothing -- this repo has a live example, test_run_pipeline_overlap_stop_event asserts elapsed < 5.0 and failed twice under load during this session while passing 10/10 idle on both main and the branch. Counting the candidates that reach the NMS call, and the WIDTH of each probiou call, proves the same property deterministically and on any machine. The width mattered specifically: max_det alone bounds the NUMBER of calls, so a check counting calls passed with the pre-cap removed -- only the width ties cost to the anchor count. (evidence: /tasks/bounded-postprocess.md)
 - [TDD · Q30 · open · 2026-09-16] Every check that reads a hand-written list of files shares one blind spot: a file missing from the list is invisible to ALL of them. On feature-cache-honesty, four checks read DOC_SURFACES and a fifth user-facing surface was found by grepping AFTER the node gated -- exactly the failure A2 had written down. The fix is a check that enumerates the repository and fails on anything in neither the documented list nor the explicitly-not-user-facing one. Same defect class as the hand-maintained lists this milestone keeps finding. (evidence: /tasks/feature-cache-honesty.md)
 - [TDD · Q29 · open · 2026-09-16] A check over a UNIFORM input cannot detect a dropped edge. 'A uniform frame gives uniform cells' stayed green when the cell edges were changed to integer division, which drops the remainder on a 641-pixel side. Light one corner pixel instead: if an edge falls outside every cell, nothing moves. (evidence: /tasks/feature-cache-honesty.md)
 - [TDD · Q28 · open · 2026-09-16] A documentation check scoped to a FILE is satisfied by a bound stated anywhere in that file. Section-scope it by proximity: a user reads the section they landed on. Re-scoping this one immediately found three more places in the same file where the feature was described with no bound beside it. (evidence: /tasks/feature-cache-honesty.md)
