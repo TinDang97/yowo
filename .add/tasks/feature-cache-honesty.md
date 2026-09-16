@@ -20,6 +20,7 @@ generated: { by: add/3.5.0, at: 2026-09-08 }
 verified:
   - { by: "Tin Dang", at: 2026-09-16, act: freeze, authority: human, direction: "sha256:4cfd208f8ea915ac", binding: "sha256:f462ede9487468e4" }
   - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:3b1e46caf9702314" }
+  - { by: "Tin Dang", at: 2026-09-16, act: refreeze, authority: human, direction: "sha256:8df0f318ce353a53", binding: "sha256:0658a82398b736fa" }
 advised_by: inference-parity-engineer
 ---
 ## CARD
@@ -35,12 +36,16 @@ beat: direction
 - M4 A compute-savings figure appears in the docs only if a dated experiment doc measured it after the fingerprint this release ships.
 - M5 A test fails if the measured blind spot grows beyond the number the docs state.
 - M6 The shipped comparison path is the one with the shape guard; no guard exists in this module that the live path does not use.
+- M7 No preset enables the feature cache on a device where enabling it was measured to cost time.
+- M8 Where the docs state a saving they state, beside it, the blind spot that buys it — the two are one number seen from opposite sides.
 </must>
 <reject>
 - R:BROADCAST two differently-shaped fingerprints are never broadcast into agreement -> "BROADCAST"
 - R:DILUTE a local change is never averaged across the whole frame before being compared to the threshold -> "DILUTE"
 - R:UNBACKED no compute-savings figure appears in any document without a dated experiment behind it -> "UNBACKED"
 - R:DEADGUARD no guard in this module is reachable only from tests -> "DEADGUARD"
+- R:MEASURED_LOSS a default never turns on a feature that was measured to be slower on that device -> "MEASURED_LOSS"
+- R:HALFTRADE a saving is never stated without the cost that buys it -> "HALFTRADE"
 </reject>
 
 ## ASSUMPTIONS
@@ -75,6 +80,28 @@ previous node had to be taken in silence, and the difference matters.
   release ships, not from the one that produced the current claim, and it gets
   a dated `docs/experiments/` entry like every other headline figure here.
 
+A THIRD DECISION, asked DURING the build because the measurement contradicted
+the premise of the first. Shown the table below, the user chose to drop
+`cache=True` from the `(APPLE_SILICON, VIDEO)` preset and to leave
+`(CUDA_HIGH, VIDEO)` alone, and to replace the "60-85%" claim with the full
+grid rather than a single sentence.
+
+    device  thr     off       on        saving    blind spot at that threshold
+    cpu     0.01    34.50ms   40.22ms   -16.6%    40x40 px
+    cpu     0.05    33.17ms   18.55ms   +44.1%    92x92 px
+    cpu     0.10    36.02ms   17.14ms   +52.4%    130x130 px
+    mps     0.01     6.27ms   19.52ms  -211.3%    40x40 px
+    mps     0.05     6.27ms   12.08ms   -92.7%    92x92 px
+    mps     0.10     6.38ms   11.75ms   -84.1%    130x130 px
+
+The hit path copies roughly 6.4 MB of neck features host-to-device per hit and
+a miss copies them back, which is why a faster device loses harder. "60-85%"
+is not reachable at any threshold measured; the best is +52.4%, CPU only, at a
+130x130 px blind spot. RESIDUAL, recorded rather than assumed: `(CUDA_HIGH,
+VIDEO)` keeps `cache=True` and NOBODY HAS MEASURED IT — there is no CUDA
+device here, and changing a default on a guess is the thing this milestone
+exists to stop.
+
 ACCEPTED COST, stated plainly because the user accepted it: a per-cell maximum
 at the same 0.01 threshold registers a given scene change roughly 8x higher
 than a whole-frame average did, so the cache will hit less often and save less.
@@ -93,6 +120,7 @@ strategy: The shape and batch refusals first: they are unbounded holes and they 
 - E4 a black-over-white frame against a uniform grey one — identical global mean, nothing in common — must MISS.
 - E5 a source_id seen for the first time — a plain miss, no warning.
 - E6 a frame smaller than the grid (an 4x4 input at grid 8) — no division by zero and no silent collapse to a whole-frame average.
+- E7 the `(CUDA_HIGH, VIDEO)` preset, which keeps `cache=True` on a device nobody here can measure — it must be recorded as unmeasured, not quietly treated as measured-good.
 
 ## CHECKS
 - test_a_shape_change_is_refused_before_any_distance_is_computed · covers: M1, A5, A8 · stores a 640x640 entry and queries with 320x320, asserting a miss rather than 80x80 features for a 40x40 query
@@ -105,6 +133,8 @@ strategy: The shape and batch refusals first: they are unbounded holes and they 
 - test_every_pixel_lands_in_exactly_one_cell · covers: E1, E6 · fingerprints a 641x641 and a 4x4 input and asserts the cell partition covers the frame without empty cells or a divide by zero
 - test_an_identical_frame_still_hits · covers: E3 · the cache must remain useful; a stricter fingerprint that never hits would satisfy every other check here
 - test_a_first_frame_for_a_source_is_a_plain_miss · covers: A6, E5 · no entry, no warning, just a miss
+- test_no_preset_enables_the_cache_on_a_device_measured_to_lose · covers: M7, R:MEASURED_LOSS, E7 · reads the preset table and fails if a device the experiment recorded as slower still ships with the cache on
+- test_a_stated_saving_is_accompanied_by_the_blind_spot_that_buys_it · covers: M8, R:HALFTRADE · fails when a document gives a cache saving percentage without a pixel bound in the same section
 
 ## EVIDENCE
 receipt: <runs/<n>.md>

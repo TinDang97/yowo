@@ -274,3 +274,72 @@ class TestTheDocumentsSayWhatTheCodeDoes:
             f"{unreachable} is defined in yowo.cache but called nowhere inside it -- "
             f"a guard reachable only from tests"
         )
+
+
+class TestDefaultsFollowTheMeasurement:
+    def test_no_preset_enables_the_cache_on_a_device_measured_to_lose(self) -> None:
+        """M7 · R:MEASURED_LOSS · E7 -- a default is a claim that it helps.
+
+        Measured 2026-09-16 on Apple Silicon: 6.27 ms without the cache,
+        19.52 ms with it at the shipped threshold -- 3.1x slower, and slower at
+        every threshold tried, because a hit copies ~6.4 MB of neck features
+        host-to-device while MPS inference is only 6.3 ms.
+
+        `(CUDA_HIGH, VIDEO)` keeps `cache=True` and is deliberately NOT asserted
+        against: nobody has measured it, there was no CUDA device, and changing
+        a default on a guess is what this milestone exists to stop. It is
+        recorded as unmeasured in the experiment doc instead.
+        """
+        from yowo.config import _PRESET_TABLE
+        from yowo.types import DeviceCategory, SourceCategory
+
+        measured_slower = {DeviceCategory.APPLE_SILICON}
+
+        enabled = {
+            device
+            for (device, _source), overrides in _PRESET_TABLE.items()
+            if getattr(overrides, "cache", None) is True
+        }
+        assert not (enabled & measured_slower), (
+            f"{sorted(d.value for d in enabled & measured_slower)} enables the feature "
+            f"cache by default on a device where enabling it was measured to cost time"
+        )
+        # The premise, so this cannot pass by the preset table being empty.
+        assert (DeviceCategory.APPLE_SILICON, SourceCategory.VIDEO) in _PRESET_TABLE
+
+    def test_a_stated_saving_is_accompanied_by_the_blind_spot_that_buys_it(self) -> None:
+        """M8 · R:HALFTRADE -- hit rate and blindness are one number.
+
+        The original claim stated 60-85% savings and said nothing about what
+        the cache stops seeing to get them. Every place that quotes a saving
+        must quote the cost in the same breath.
+
+        "Same breath" is a SYMMETRIC proximity window around the percentage,
+        and getting there took two wrong versions. Splitting on blank lines put
+        a table and its own caption in different blocks. A forward-only window
+        from each cache mention ran past the bound into the next percentage.
+        The window is centred on the percentage because a bound stated BEFORE
+        it counts just as much as one after.
+
+        It earns its keep: it found a second "Feature Map Cache" section in the
+        user guide that showed users how to switch the cache on and said
+        nothing about what it costs.
+        """
+        radius = 1200
+        offenders = []
+        for rel in DOC_SURFACES:
+            text = _ascii((REPO_ROOT / rel).read_text(encoding="utf-8"))
+            for m in re.finditer(r"\d{1,3}\s*%", text):
+                lo, hi = max(0, m.start() - radius), m.start() + radius
+                chunk = text[lo:hi]
+                # KV cache is a different feature carrying its own figures.
+                chunk = re.sub(r"[^.\n]*kv[ _-]?cache[^.\n]*", "", chunk, flags=re.I)
+                if not re.search(r"feature[ _-]?(?:map[ _-]?)?cache|FeatureCache", chunk, re.I):
+                    continue
+                if not re.search(r"\b\d{1,3}\s*x\s*\d{1,3}\s*px", chunk):
+                    offenders.append(f"{rel}@{m.start()}: {text[lo : lo + 70].strip()}")
+
+        assert not offenders, (
+            f"a feature-cache saving is stated with no blind spot within "
+            f"{radius} characters: {offenders}"
+        )

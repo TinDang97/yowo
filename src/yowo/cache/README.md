@@ -1,20 +1,42 @@
 # yowo.cache — Feature Map Caching for Sequential Inference
 
-Skip backbone + neck computation when consecutive frames are similar. Only the lightweight detection head runs on cache hits, reducing per-frame compute by 60-85%.
+Skip backbone + neck on similar consecutive frames. **Measured 2026-09-16 — the
+saving and the blind spot are one number seen from two sides, so both are stated:**
+
+| device | threshold | cache off | cache on | saving | object it cannot see |
+|---|---|---|---|---|---|
+| cpu | 0.01 (default) | 34.50 ms | 40.22 ms | −16.6% | 40x40 px |
+| cpu | 0.05 | 33.17 ms | 18.55 ms | +44.1% | 92x92 px |
+| cpu | 0.10 | 36.02 ms | 17.14 ms | +52.4% | 130x130 px |
+| mps | 0.01 (default) | 6.27 ms | 19.52 ms | −211.3% | 40x40 px |
+| mps | 0.10 | 6.38 ms | 11.75 ms | −84.1% | 130x130 px |
+
+yolo11n, fixed camera, 40 frames, median. A hit copies ~6.4 MB of neck features
+host→device, so a faster device loses harder — **on Apple Silicon the cache costs
+time at every threshold**, which is why it is no longer on in that preset. The
+earlier "60–85%" claim had no experiment behind it and is not reachable at any
+threshold measured. Full grid and method:
+[feature cache recall and savings](../../../docs/experiments/2026-09-16-feature-cache-recall-and-savings.md).
+
+**What it cannot see.** The fingerprint is an 8x8 grid of per-channel means
+compared by the worst cell, so a change confined to one cell is measured against
+that cell. At the default threshold an object of up to **40x40 px** at realistic
+contrast (22x22 px at maximum contrast) can appear without the cache noticing.
+Raising the threshold to buy hit rate raises that bound in step.
 
 ## Architecture
 
 ```
 FeatureCache (coordinator)
 ├── FeatureStore (bounded cache, in-memory or mmap)
-└── frame_similarity() (L1 mean pixel diff)
+└── spatial_fingerprint() + fingerprint_distance() (8x8 grid, worst cell)
 ```
 
 ```
 src/yowo/cache/
 ├── __init__.py        # FeatureCache — public API
 ├── _store.py          # FeatureStore — in-memory / mmap dual-mode storage
-├── _similarity.py     # frame_similarity() — lightweight pixel diff
+├── _similarity.py     # spatial_fingerprint() / fingerprint_distance()
 └── README.md
 ```
 
@@ -30,7 +52,7 @@ cache = FeatureCache()  # bounded in-memory dict
 # In inference loop:
 cached = cache.check_and_load(source_id, preprocessed_tensor, device)
 if cached is not None:
-    output = model.forward_head(cached)  # head-only (~15% of total compute)
+    output = model.forward_head(cached)  # head-only; see the table above for what that saves
 else:
     output = model(preprocessed_tensor)  # full inference
     cache.update(source_id, preprocessed_tensor, neck_features)

@@ -91,6 +91,12 @@ class InferenceConfig:
         iou_threshold: NMS IoU threshold. Must be in [0.0, 1.0].
         batch_size: Number of frames per inference batch. Must be >= 1.
         cache: Enable in-memory feature map caching (PyTorch backend only).
+            Measured 2026-09-16: at the default threshold an object of up to
+            40x40 px at realistic contrast (22x22 px at maximum contrast) can
+            appear without the cache noticing, and will not be detected until
+            the next miss. On Apple Silicon enabling it cost 211% more time per
+            frame, because a hit copies ~6.4 MB of neck features host-to-device.
+            See docs/experiments/2026-09-16-feature-cache-recall-and-savings.md.
         cache_dir: Feature map mmap cache directory. When set, enables
             mmap-backed caching regardless of ``cache``.
         kv_cache: Enable attention KV cache for streaming inference
@@ -768,9 +774,18 @@ _PRESET_TABLE: dict[tuple[DeviceCategory, SourceCategory], _PresetOverrides] = {
     ),
     # -- APPLE SILICON (CoreML) --
     (_DC.APPLE_SILICON, _SC.IMAGE): _P(batch_size=1, prefetch=False),
+    # `cache=True` was here. Measured 2026-09-16 on this device class: the
+    # feature cache cost 211% MORE time per frame at the default threshold
+    # (6.27 ms -> 19.52 ms) and was slower at every threshold tried, because a
+    # hit copies ~6.4 MB of neck features host-to-device while MPS inference is
+    # only 6.3 ms. A faster device loses harder. And the saving was never free
+    # anywhere: at that threshold the cache cannot see a 40x40 px object at
+    # realistic contrast, and the CPU thresholds that do save time (+44% at
+    # 0.05, +52% at 0.10) cannot see 92x92 px and 130x130 px respectively.
+    # (CUDA_HIGH, VIDEO) below keeps it and is UNMEASURED — no CUDA device was
+    # available — and is left alone rather than changed on a guess.
     (_DC.APPLE_SILICON, _SC.VIDEO): _P(
         batch_size=2,
-        cache=True,
         prefetch=True,
     ),
     (_DC.APPLE_SILICON, _SC.LIVE_STREAM): _P(
