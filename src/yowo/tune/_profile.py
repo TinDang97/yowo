@@ -64,6 +64,17 @@ class TuneProfile:
     fps_achieved: float
     tuned_at: str
     fingerprint: str
+    postprocess_representative: bool = False
+    """Whether the sweep that chose this profile measured the postprocess cost
+    it was ranking.
+
+    Defaults to ``False``, which is the honest reading of both an older file
+    and a sweep given no representative frames: the blank frame the sweep uses
+    by default produces no detections at all, so NMS and result construction
+    cost nothing in the measurement that picked this winner. The flag lives on
+    the PROFILE rather than in a sweep-time warning because the profile is what
+    `yowo.engine` later loads and applies to production inference; a warning
+    printed at tune time is long gone by then."""
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +188,10 @@ def load_profile(
             fps_achieved=raw["fps_achieved"],
             tuned_at=raw["tuned_at"],
             fingerprint=raw["fingerprint"],
+            # `.get`, not `raw[...]`: profiles written before this field
+            # existed must still load, and they read as not representative,
+            # which is what they were.
+            postprocess_representative=bool(raw.get("postprocess_representative", False)),
         )
     except (KeyError, ValueError, yaml.YAMLError, TypeError):
         return None

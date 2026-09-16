@@ -76,6 +76,13 @@ class SweepResult:
     fps: float
     skipped: bool = False
     skip_reason: str = ""
+    postprocess_representative: bool = False
+    """Whether this row's input produced detections, so the postprocess cost
+    being ranked was inside the measurement.
+
+    The default synthetic frame produces NONE (measured 2026-09-16: 0 boxes on
+    `np.zeros((640, 640, 3))` against 5 on a real photograph), so a sweep run
+    without `sample_frames` ranks configurations by a cost it never paid."""
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +138,8 @@ def _measure_config(
     batch_size: int,
     warmup_frames: int,
     measure_frames: int,
-) -> tuple[float, str]:
+    sample_frames: list[Frame] | None = None,
+) -> tuple[float, str, bool]:
     """Measure FPS for one (backend, batch_size) configuration.
 
     Creates an engine, runs ``warmup_frames`` detections (untimed), then times
@@ -195,8 +203,24 @@ def _measure_config(
         )
         engine = DetectionEngine(config)
 
-    pixels = np.zeros((640, 640, 3), dtype=np.uint8)
-    frames = [Frame(pixels=pixels)]
+    # Representative input if the caller supplied it, otherwise a blank frame.
+    #
+    # A blank frame yields no detections, so NMS, box decoding and result
+    # construction cost nothing and the ranking excludes the very work it is
+    # ranking. Measured 2026-09-16 (yolo11n / pytorch / cpu, median of 15):
+    # `np.zeros((640, 640, 3))` gives 0 boxes at 50.31 ms, a real photograph
+    # gives 5 boxes at 63.63 ms, with inference time itself unchanged.
+    #
+    # The blank frame remains the default because the package cannot ship a
+    # photograph — the sample image this project tests with is third-party
+    # under no stated licence, which is why it is fetched and not committed.
+    # What changes is that the resulting row now SAYS it was not representative.
+    if sample_frames:
+        frames = list(sample_frames)
+        representative = True
+    else:
+        frames = [Frame(pixels=np.zeros((640, 640, 3), dtype=np.uint8))]
+        representative = False
 
     try:
         engine.load()
@@ -220,7 +244,11 @@ def _measure_config(
             infer(frames)
         elapsed = time.monotonic() - t0
 
-        return measure_frames / elapsed, engine.health_report().precision_current
+        return (
+            measure_frames / elapsed,
+            engine.health_report().precision_current,
+            representative,
+        )
     finally:
         engine.close()
 
@@ -236,6 +264,7 @@ def run_sweep(
     warmup_frames: int = 50,
     measure_frames: int = 200,
     dry_run: bool = False,
+    sample_frames: list[Frame] | None = None,
 ) -> list[SweepResult]:
     """Run calibration sweep across backend x precision x batch_size space.
 
@@ -296,13 +325,14 @@ def run_sweep(
                 continue
 
             try:
-                fps, executed = _measure_config(
+                fps, executed, representative = _measure_config(
                     spec,
                     hw,
                     backend,
                     batch_size,
                     warmup_frames,
                     measure_frames,
+                    sample_frames,
                 )
                 _log.debug(
                     "Sweep %s/bs=%d -> %.1f FPS (ran %s)",
@@ -317,6 +347,7 @@ def run_sweep(
                         batch_size=batch_size,
                         precision=executed,
                         fps=fps,
+                        postprocess_representative=representative,
                     )
                 )
 

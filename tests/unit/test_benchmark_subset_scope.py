@@ -181,6 +181,7 @@ def test_the_table_shows_the_denominator_beside_the_map(capsys: pytest.CaptureFi
         [
             BenchmarkResult(
                 format="pytorch",
+                requested_format="pytorch",
                 map_50_95=0.4158,
                 map_50=0.585,
                 fps_avg=24.0,
