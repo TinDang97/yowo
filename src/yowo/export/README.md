@@ -26,12 +26,12 @@ export_model(spec, target_format, output_dir, precision, dynamic_batch)
 .pt weights
     │
     ▼ (build native model, fuse Conv+BN, torch.onnx.export)
-  ONNX (.onnx)  ──────────────────────────────► ExportResult
+  ONNX (.onnx)  ──────────────────────────────► ExportMetadata
     │
-    ├──► TensorRT (.engine)  ────────────────► ExportResult
+    ├──► TensorRT (.engine)  ────────────────► ExportMetadata
     │      (trtexec or tensorrt Python API)
     │
-    └──► OpenVINO (_openvino_model/ directory) ► ExportResult
+    └──► OpenVINO (_openvino_model/ directory) ► ExportMetadata
            (openvino.convert_model Python API)
 ```
 
@@ -43,7 +43,7 @@ TensorRT and OpenVINO exports always go through ONNX as an intermediate.
 
 ```
 export/
-├── __init__.py       — public surface: export_model(), ExportResult
+├── __init__.py       — public surface: export_model(), ExportMetadata
 ├── _exporter.py      — native torch.onnx.export pipeline
 ├── _calibration.py   — calibration source resolution for INT8
 └── _metadata.py      — ExportMetadata dataclass, sidecar write/read
@@ -52,21 +52,19 @@ export/
 ### `__init__.py`
 
 ```python
-@dataclass(frozen=True, slots=True)
-class ExportResult:
-    file_path:   Path           # path to the exported model file or directory
-    format:      str            # "onnx" | "tensorrt" | "openvino"
-    precision:   Precision
-    metadata:    ExportMetadata
+# `export_model` returns `ExportMetadata` — the sidecar record, 24 fields,
+# defined in `_metadata.py`. There is also a 7-field `yowo.types.ExportResult`
+# in the public surface that NOTHING returns; see its docstring. Its future is
+# owned by `deprecation-policy`, and this document describes what is returned.
 
 def export_model(
     spec:          ModelSpec,
-    target_format: str,                  # "onnx" | "tensorrt" | "openvino"
-    output_dir:    Path | None = None,   # default: ~/.yowo/exports/
+    target_format: ExportFormat,
+    output_dir:    Path,
     precision:     Precision = Precision.FP16,
-    dynamic_batch: bool = False,
-    calibration_data: Path | None = None,  # required when precision == INT8
-) -> ExportResult:
+    dynamic_batch: bool = True,
+    calibration_data: str | None = None,
+) -> ExportMetadata:
     """
     Export spec to target_format at precision.
 

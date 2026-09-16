@@ -476,6 +476,17 @@ class ClassificationResult:
 class ExportResult:
     """Record of a completed model export operation.
 
+    NOT RETURNED BY ANYTHING. ``export_model`` returns
+    :class:`~yowo.export.ExportMetadata`, a 24-field record written beside the
+    artifact as its sidecar. This 7-field class is a public name that no
+    function in this package constructs, and it is kept importable only because
+    removing a name from ``yowo.__all__`` is a breaking change on a published
+    2.5.0 and this project has no deprecation mechanism yet.
+
+    If you are reading this to find out what an export gives you, you want
+    ``ExportMetadata``. Whether this class is removed, populated or aliased is
+    owned by the ``deprecation-policy`` task, not decided here.
+
     Attributes:
         model_name: Human-readable model identifier (e.g. ``"yolo26n"``).
         format: Export format that was produced.
