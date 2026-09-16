@@ -377,9 +377,12 @@ class TestDetectGpusSmi:
             assert _detect_gpus_smi() == []
 
 
-# nvidia-smi with the compute_cap column (real output on driver 540+, incl. Jetson).
-_SMI_JETSON_CC = "0, Orin (nvgpu), [N/A], [N/A], 8.7"
-_SMI_DISCRETE_CC = "0, NVIDIA L4, 23034, 22800, 8.9"
+# nvidia-smi with the optional columns (real output on driver 540+, incl.
+# Jetson). The column ORDER here must match `_SMI_OPTIONAL_FIELDS`, which is
+# what the production query asks for -- `test_the_full_query_row_has_a_column_
+# per_field_asked_for` below fails if these two ever drift apart.
+_SMI_JETSON_CC = "0, Orin (nvgpu), [N/A], [N/A], 540.2.0, 8.7"
+_SMI_DISCRETE_CC = "0, NVIDIA L4, 23034, 22800, 535.129.03, 8.9"
 
 
 class TestParseComputeCap:
@@ -398,6 +401,21 @@ class TestParseComputeCap:
     )
     def test_parse(self, value, expected) -> None:
         assert _parse_compute_cap(value) == expected
+
+
+def test_the_full_query_row_has_a_column_per_field_asked_for() -> None:
+    """The fixtures above stub output for a query this module also builds.
+
+    When a field is added to `_SMI_OPTIONAL_FIELDS`, every fixture row gains a
+    column. Nothing forced that before: the rows were hand-written and the
+    parser read fixed offsets, so adding `driver_version` silently shifted
+    `compute_cap` and four architecture checks read UNKNOWN.
+    """
+    from yowo.hardware._detect import _SMI_BASE_FIELDS, _SMI_OPTIONAL_FIELDS
+
+    expected = len(_SMI_BASE_FIELDS.split(",")) + len(_SMI_OPTIONAL_FIELDS)
+    for row in (_SMI_JETSON_CC, _SMI_DISCRETE_CC):
+        assert len(row.split(",")) == expected, f"{row!r} has the wrong column count"
 
 
 class TestComputeCapFromSmi:
@@ -449,7 +467,7 @@ class TestComputeCapFromSmi:
 
     def test_placeholder_compute_cap_falls_back_to_torch(self) -> None:
         """An old driver prints [N/A] for compute_cap; torch fills the gap."""
-        line = "0, Orin (nvgpu), [N/A], [N/A], [N/A]"
+        line = "0, Orin (nvgpu), [N/A], [N/A], 540.2.0, [N/A]"
         with (
             patch("yowo.hardware._detect.subprocess.run", return_value=_smi_result(line)),
             patch("yowo.hardware._detect.detect_is_jetson", return_value=True),

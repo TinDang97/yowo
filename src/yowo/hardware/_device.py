@@ -44,6 +44,10 @@ class Device:
         memory_total_mb: VRAM (GPU) or system RAM (CPU) in mebibytes.
         memory_available_mb: Free VRAM or available system RAM in mebibytes.
         is_jetson: True when running on an NVIDIA Jetson SoC.
+        driver_version: NVIDIA driver version string, or ``None`` when the
+            driver could not report one. ``None`` means unprobed -- it is
+            not the same as a driver reporting an empty version, and the two
+            must not share a cache key.
     """
 
     type: DeviceType
@@ -54,6 +58,7 @@ class Device:
     memory_total_mb: int
     memory_available_mb: int
     is_jetson: bool = False
+    driver_version: str | None = None
 
     # ------------------------------------------------------------------
     # Convenience predicates
