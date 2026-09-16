@@ -10,6 +10,7 @@ PR passed can be satisfied by a push-to-main run instead.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -35,9 +36,33 @@ def required_contexts() -> tuple[str, ...]:
 
 
 def _effective_names(path: Path) -> dict[str, str]:
-    """Check-run name per job. GitHub falls back to the job id when `name:` is absent (E1)."""
+    """Check-run name per published check. Keys are unique; only values matter.
+
+    GitHub falls back to the job id when `name:` is absent (E1), and a MATRIX
+    job publishes one check per leg with `${{ matrix.<k> }}` expanded. Reading
+    a matrix job as a single literal name misses every context it actually
+    publishes — `Python Claim (3.8)` through `(3.12)` are five separate
+    required contexts produced by one `name:` template (task ci-matrix).
+    """
     wf = yaml.safe_load(path.read_text())
-    return {jid: job.get("name", jid) for jid, job in wf["jobs"].items()}
+    names: dict[str, str] = {}
+    for jid, job in wf["jobs"].items():
+        template = job.get("name", jid)
+        matrix = (job.get("strategy") or {}).get("matrix") or {}
+        axes = {k: v for k, v in matrix.items() if isinstance(v, list) and k != "include"}
+        placeholders = [k for k in axes if "matrix." + k in str(template)]
+        if len(placeholders) != 1:
+            # No matrix, or a shape this resolver does not model: fall back to
+            # the literal, which is what GitHub publishes when nothing expands.
+            names[jid] = template
+            continue
+        axis = placeholders[0]
+        for value in axes[axis]:
+            rendered = re.sub(
+                r"\$\{\{\s*matrix\." + re.escape(axis) + r"\s*\}\}", str(value), template
+            )
+            names[f"{jid} ({value})"] = rendered
+    return names
 
 
 def test_no_check_run_name_is_published_by_two_workflows() -> None:

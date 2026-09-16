@@ -12,6 +12,12 @@
       "mAP Gate",
       "Arch Equivalence",
       "Persistent Gallery",
+      "Python Claim (3.8)",
+      "Python Claim (3.9)",
+      "Python Claim (3.10)",
+      "Python Claim (3.11)",
+      "Python Claim (3.12)",
+      "Unit Tests (3.12)",
       "CLI End-to-End",
       "Export Parity"
     ]

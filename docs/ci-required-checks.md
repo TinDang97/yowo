@@ -13,7 +13,7 @@ Frozen by ADD task `pr-ci-gate`. Change this file and
 | Setting | Value | Why |
 |---|---|---|
 | Branch | `main` | the only protected branch; releases cut from it |
-| Required status checks | **all eleven `ci.yml` jobs, plus `Export Parity`** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all eleven") |
+| Required status checks | **all thirteen `ci.yml` jobs (one of which is a five-leg matrix), plus `Export Parity`** — see the table below | GitHub exposes the job *name*, not its id. Every job `ci.yml` publishes is required; there is no advisory job, deliberately (see "Why all of them") |
 | Strict (require branches up to date) | `false` | a solo maintainer rebasing every PR before merge is friction without a corresponding risk here |
 | `enforce_admins` | **`true`** | decided 2026-09-08. Nobody bypasses a failing check, repository owner included — an advisory gate is the state this task exists to change |
 | Required approving reviews | none | single maintainer; the gate is automated, not social |
@@ -42,6 +42,12 @@ run passed.
 | `Arch Equivalence` | `ci.yml` | `arch-equivalence` | **yes** |
 | `CLI End-to-End` | `ci.yml` | `cli-e2e` | **yes** |
 | `Persistent Gallery` | `ci.yml` | `persistent-gallery` | **yes** |
+| `Python Claim (3.8)` | `ci.yml` | `python-claim` | **yes** |
+| `Python Claim (3.9)` | `ci.yml` | `python-claim` | **yes** |
+| `Python Claim (3.10)` | `ci.yml` | `python-claim` | **yes** |
+| `Python Claim (3.11)` | `ci.yml` | `python-claim` | **yes** |
+| `Python Claim (3.12)` | `ci.yml` | `python-claim` | **yes** |
+| `Unit Tests (3.12)` | `ci.yml` | `unit-newest` | **yes** |
 | `Export Parity` | `parity.yml` | `parity-pr` | **yes** |
 | `Export Parity (all variants)` | `parity.yml` | `parity-all` | no — see below |
 | `Quality Gate (release)` | `release.yml` | `quality` | no |
@@ -72,7 +78,34 @@ nothing — and was scoped to `ci.yml`, so `parity.yml` escaped it within the
 hour, publishing `Export Parity` on every pull request while appearing in no
 table. It now covers every workflow with a `pull_request` trigger.
 
-## Why all eleven, not just `Quality Gate`
+## What CI does NOT cover, and why
+
+Recorded 2026-09-16 by ADD task `ci-matrix`. These are decisions, not
+oversights, and `tests/unit/test_claimed_python_versions_run_in_ci.py` fails if
+either disappears from this file — a limitation kept only in a comment stops
+being read.
+
+**The unit tier runs on 3.11 and 3.12 only, not on the whole claimed range.**
+Not laziness: measured on real interpreters, `src/yowo` compiles 96/96 under
+CPython 3.8.20, but the TEST SUITE compiles only 141/163 there — 22 modules use
+parenthesized context managers, which are 3.10+. Under CPython 3.10.20 all 163
+compile, yet 6 modules `import tomllib`, and that is 3.11+ stdlib. The test
+suite's floor is therefore **3.11**, four versions above the package's. Raising
+the package's floor to match would be a breaking change for users; lowering the
+suite's would mean rewriting 22 test files. Instead, `Python Claim (3.8)`
+through `(3.12)` install the package the way a consumer does and exercise its
+documented public surface, which is what the classifiers actually promise.
+
+**CI runs ubuntu-latest only.** The package declares no OS classifiers, so it
+implicitly claims every operating system, and nothing here tests macOS or
+Windows. Human decision 2026-09-16: record the gap, add no OS job.
+`Backend Conformance` already carries a strict xfail scoped to macOS arm64 for
+an unexplained PyTorch-vs-ONNX divergence of 0.33 px against a 1e-3 bound,
+owned by `pytorch-onnx-numeric-divergence` in m4-honest-deployment. Adding
+macOS to the integration tier today would go red on arrival, which is what
+m3's own wording warns against — "do not multiply a red suite by eight".
+
+## Why all of them, not just `Quality Gate`
 
 Amended 2026-09-15 by human decision. `Real Backend Smoke`, `Backend Conformance`
 and `Accuracy Dataset` had each been running on every pull request while blocking
@@ -90,7 +123,7 @@ read the payload rather than a copy of it: `REQUIRED_CONTEXTS` was a hardcoded
 `("Quality Gate",)` while protection had required four since 2026-09-10, so the
 guard against silently un-gating the branch was itself checking a stale list.
 
-The cost is real and was accepted: a flake in any of the eleven now blocks a merge,
+The cost is real and was accepted: a flake in any of the 18 contexts now blocks a merge,
 and with `enforce_admins: true` there is no bypass short of the emergency path
 below. The two slowest are `Backend Conformance` (~3m) and `mAP Gate` (~1m30s).
 `Arch Equivalence` joined them on 2026-09-16: it compares all ten variants
