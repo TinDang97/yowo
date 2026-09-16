@@ -1,7 +1,7 @@
 ---
 type: Task
 title: A self-contained artifact, and a recorded opset that is the produced opset
-status: direction
+status: done
 depth: standard
 milestone: m4-honest-deployment
 scope:
@@ -17,12 +17,18 @@ verified:
   - { by: "Tin Dang", at: 2026-09-16, act: interview, authority: human, interview: "sha256:491e2862fdcbdd7f", receipt: /tasks/onnx-external-data.d/interviews/1.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|R:ORPHAN=confirm|R:COLLIDE=confirm" }
   - { by: "Tin Dang", at: 2026-09-16, act: freeze, authority: human, direction: "sha256:c823f13450f82593", binding: "sha256:3fe32d0ce13601f2" }
   - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:c7d77090157c2883" }
-advised_by: artifact-integrity-steward
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/1.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: interview, authority: human, interview: "sha256:c85bb5469835342a", receipt: /tasks/onnx-external-data.d/interviews/2.md, answers: "A1=confirm|A2=confirm|A3=confirm|A4=confirm|A5=confirm|A6=confirm|A7=confirm|A8=confirm|A9=confirm|A10=confirm|A11=confirm|A12=confirm|R:ORPHAN=confirm|R:REQUEST_AS_FACT=confirm|R:COLLIDE=confirm|R:SILENT_DEGRADE=confirm" }
+  - { by: "Tin Dang", at: 2026-09-16, act: refreeze, authority: human, direction: "sha256:ebe37f1273a44d7e", binding: "sha256:3fe32d0ce13601f2" }
+  - { by: "cli", at: 2026-09-16, act: brief, authority: process, brief: "sha256:342f5b74169ec1ad" }
+  - { by: "process:run", at: 2026-09-16, act: run, authority: process, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/2.md }
+  - { by: "Tin Dang", at: 2026-09-16, act: gate, authority: human, outcome: PASS, receipt: /tasks/onnx-external-data.d/runs/2.md, brief: "sha256:342f5b74169ec1ad" }
+advised_by: security-reviewer
 ---
 ## CARD
 goal: An ONNX export leaves exactly the files its sidecar names, and every field describing the graph is read back from the graph rather than copied from the request.
 why: Measured 2026-09-16 on yolo11n/fp32. On a `yowo[pytorch]` install — the one `_exporter.py:94`'s own DependencyError names — the export writes a 612,255 B stub plus a 10,616,832 B `.onnx.data`, records `file_size_bytes: 612255`, names only the stub, and the artifact fails to load from a directory holding what the sidecar names. With onnxslim the `.onnx` is self-contained and the 10,616,832 B `.onnx.data` is simply orphaned — 2.00x the recorded size sitting on disk, named by nothing, deleted by nobody. `opset_version=17` is requested and `ai.onnx 18` is produced, with the downconversion raising and the failure swallowed; `ExportMetadata` has no opset field so neither number is recorded. `yolo11n-cls` records `input_shape: [1,3,640,640]` for a `[batch,3,224,224]` graph. `model_stem` has an `obb` branch and no `classify` branch, so a classify export overwrites the detect artifact at `yolo11n.onnx` under the identical `model_name`. And `ExportMetadata.load()` has zero callers in `src/`, so the sidecar is write-only and none of it is caught.
-beat: direction
+beat: done · next: add status
 
 ## RULES
 <must>
@@ -37,9 +43,9 @@ beat: direction
 </must>
 <reject>
 - R:ORPHAN an export never leaves a file that the sidecar does not name -> "ORPHAN"
-- R:REQUEST-AS-FACT no sidecar field describing the produced graph is taken from the request when it can be read from the graph -> "REQUEST-AS-FACT"
+- R:REQUEST_AS_FACT no sidecar field describing the produced graph is taken from the request when it can be read from the graph -> "REQUEST_AS_FACT"
 - R:COLLIDE two exports differing only in task never write the same artifact path -> "COLLIDE"
-- R:SILENT-DEGRADE an export never returns success having swallowed a failure that changed what it produced -> "SILENT-DEGRADE"
+- R:SILENT_DEGRADE an export never returns success having swallowed a failure that changed what it produced -> "SILENT_DEGRADE"
 </reject>
 
 ## ASSUMPTIONS
@@ -70,18 +76,21 @@ strategy: Read-back first — make the sidecar describe the artifact — because
 
 ## CHECKS
 - test_the_sidecar_names_every_file_the_export_wrote · covers: M1, R:ORPHAN, E6 · exports and diffs `output_dir` against `artifact_files`, so an orphaned `.onnx.data` fails and a pre-existing unrelated file does not
-- test_the_recorded_opset_is_the_graphs_opset · covers: M2, R:REQUEST-AS-FACT, A9 · reads `opset_import` off the produced graph and compares it to the sidecar, so recording the requested 17 for a produced 18 fails
-- test_the_recorded_input_shape_is_the_graphs_input_shape · covers: M3, R:REQUEST-AS-FACT, E2 · compares the sidecar against the graph's declared input for a classify export, where request and graph disagree 640 vs 224
+- test_the_recorded_opset_is_the_graphs_opset · covers: M2, R:REQUEST_AS_FACT, A9 · reads `opset_import` off the produced graph and compares it to the sidecar, so recording the requested 17 for a produced 18 fails
+- test_the_recorded_input_shape_is_the_graphs_input_shape · covers: M3, R:REQUEST_AS_FACT, E2 · compares the sidecar against the graph's declared input for a classify export, where request and graph disagree 640 vs 224
 - test_the_recorded_size_accounts_for_every_produced_file · covers: M4 · sums the files on disk against `total_size_bytes`, so counting only the entry file fails
 - test_an_export_loads_from_only_the_files_the_sidecar_names · covers: M5, E1 · copies the sidecar-named files into an empty directory and loads, with onnxslim importable and with its import blocked
 - test_a_classify_export_does_not_overwrite_a_detect_export · covers: M6, R:COLLIDE, E3 · exports detect then classify into one directory and asserts two artifacts, two sidecars, and two recorded tasks
 - test_export_reads_its_own_sidecar_back_before_returning · covers: M7 · asserts `ExportMetadata.load()` is called on the written sidecar and that a sidecar disagreeing with the directory raises
 - test_a_sidecar_without_the_new_fields_still_loads · covers: M8, E4, A5 · loads a captured pre-change sidecar and asserts the defaults, not an exception
-- test_a_swallowed_opset_conversion_failure_is_recorded_not_hidden · covers: R:SILENT-DEGRADE, E5, A8 · asserts the export succeeds and the sidecar shows the produced opset when the 18->17 downconversion raises
+- test_a_swallowed_opset_conversion_failure_is_recorded_not_hidden · covers: R:SILENT_DEGRADE, E5, A8 · asserts the export succeeds and the sidecar shows the produced opset when the 18->17 downconversion raises
 - test_an_export_without_onnxslim_produces_a_loadable_artifact · covers: A2, E1 · blocks the `onnxslim` import and asserts the artifact is self-contained
 - test_the_large_model_branch_names_its_companion_file · covers: A4 · drives the above-ceiling path and asserts the companion file is named rather than deleted
 - test_a_non_onnx_format_records_no_opset_rather_than_a_wrong_one · covers: A3 · asserts `opset is None` for a format whose graph this node does not read
 - test_export_sidecar_truth_runs_in_ci · covers: A1 · asserts the new modules are reachable from a CI command, so the no-onnxslim leg is not invisible the way it is today
+- test_the_sidecar_does_not_claim_a_file_it_did_not_write · covers: A6, E6 · plants an unrelated file in `output_dir` before exporting and asserts the sidecar neither names nor touches it
+- test_the_intermediate_onnx_is_named_not_orphaned · covers: A11 · asserts the file set names every file the export added, not only the entry, which is what makes a tensorrt/openvino run's leftover `.onnx` named rather than orphaned
+- test_the_sidecar_describes_the_last_artifact_in_the_chain · covers: A12 · asserts the graph facts are read from the artifact `file_path` points at, not from the ONNX the conversion consumed
 
 ## EVIDENCE
 receipt: <runs/<n>.md>

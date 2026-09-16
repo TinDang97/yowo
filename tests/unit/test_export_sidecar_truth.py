@@ -282,3 +282,55 @@ class TestCompanionNamesCannotEscapeTheDirectory:
 
         assert external_companions(p) == []
         assert outside.exists()
+
+
+class TestTheFileSetAndTheArtifactItDescribes:
+    def test_the_intermediate_onnx_is_named_not_orphaned(self, tmp_path: Path) -> None:
+        """A11 -- a tensorrt/openvino run leaves its ONNX intermediate behind.
+
+        `_convert_tensorrt` and `_convert_openvino` both consume an `.onnx`
+        that `export_model` wrote into `output_dir` and neither removes it, so
+        the directory ends up holding an artifact the sidecar's `file_path`
+        does not point at. A11 took the reading that the sidecar NAMES it --
+        a reader who deletes it cannot re-run the conversion.
+
+        Bound here at `produced_files`, which is where the decision is made.
+        HONEST LIMIT: this does not run a real tensorrt or openvino export.
+        Neither package is in the dev group, so no test in this tier can. The
+        residual is recorded on the node.
+        """
+        from yowo.export._readback import produced_files
+
+        before = frozenset({"someone-elses.txt"})
+        (tmp_path / "someone-elses.txt").write_text("x", encoding="utf-8")
+        entry = tmp_path / "yolo26n.engine"
+        entry.write_bytes(b"engine")
+        (tmp_path / "yolo26n.onnx").write_bytes(b"the intermediate")
+
+        names = produced_files(tmp_path, before, entry)
+
+        assert names[0] == "yolo26n.engine", "the entry file comes first"
+        assert "yolo26n.onnx" in names, "the intermediate the conversion left is named"
+        assert "someone-elses.txt" not in names
+
+    def test_the_sidecar_describes_the_last_artifact_in_the_chain(self, tmp_path: Path) -> None:
+        """A12 -- for a converted format, the sidecar describes the OUTPUT.
+
+        `export_model` reads its graph facts from `exported_path`, which for
+        tensorrt and openvino is the converted artifact rather than the ONNX
+        the conversion consumed. Reading the intermediate instead would record
+        the shape and opset of a file `file_path` does not point at.
+
+        Asserted on the primitive: handed the converted artifact, the reader
+        reports unknowns rather than reaching for a neighbouring `.onnx`.
+        """
+        from yowo.export._readback import read_onnx_graph_facts
+
+        _tiny_onnx(tmp_path / "yolo26n.onnx", opset=18, shape=[1, 3, 640, 640])
+        engine = tmp_path / "yolo26n.engine"
+        engine.write_bytes(b"not a graph")
+
+        facts = read_onnx_graph_facts(engine)
+
+        assert facts.opset is None, "the intermediate's opset must not leak onto the engine"
+        assert facts.input_shape is None
