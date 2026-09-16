@@ -163,6 +163,14 @@ def _warn_output_unreachable(kind: str) -> None:
 )
 @click.option("--confidence", default=0.25, type=float)
 @click.option("--iou", default=0.45, type=float)
+@click.option(
+    "--max-nms",
+    default=None,
+    type=int,
+    help="Cap candidates entering NMS, highest score first. This is the bound that "
+    "makes postprocess latency independent of scene content.",
+)
+@click.option("--max-det", default=None, type=int, help="Cap detections returned per image.")
 @click.option("--batch", default=1, type=int)
 @click.option("--output", "-o", default=None, type=click.Path())
 @click.option(
@@ -209,6 +217,8 @@ def detect_command(
     precision: str,
     confidence: float,
     iou: float,
+    max_nms: int | None,
+    max_det: int | None,
     batch: int,
     output: str | None,
     output_format: str,
@@ -257,6 +267,10 @@ def detect_command(
             cli_overrides["confidence_threshold"] = confidence
         if _is_explicit("iou"):
             cli_overrides["iou_threshold"] = iou
+        if _is_explicit("max_nms"):
+            cli_overrides["max_nms"] = max_nms
+        if _is_explicit("max_det"):
+            cli_overrides["max_det"] = max_det
 
         if auto_letterbox:
             cli_overrides["auto_letterbox"] = True
@@ -280,6 +294,11 @@ def detect_command(
             precision=Precision(precision) if precision != "auto" else None,
             metrics_enabled=not no_metrics,
             auto_letterbox=auto_letterbox,
+            # `None` from the CLI means "not given", so fall back to the
+            # dataclass default rather than to unbounded -- passing None
+            # through would turn an omitted flag into an explicit opt-out.
+            max_nms=max_nms if max_nms is not None else InferenceConfig.max_nms,
+            max_det=max_det if max_det is not None else InferenceConfig.max_det,
         )
 
     detections: list = []
@@ -372,6 +391,14 @@ def detect_command(
 )
 @click.option("--confidence", default=0.25, type=float)
 @click.option("--iou", default=0.45, type=float)
+@click.option(
+    "--max-nms",
+    default=None,
+    type=int,
+    help="Cap candidates entering rotated NMS, highest score first. This is the bound "
+    "that makes oriented postprocess latency independent of the anchor count.",
+)
+@click.option("--max-det", default=None, type=int, help="Cap detections returned per image.")
 @click.option("--batch", default=1, type=int)
 @click.option("--output", "-o", default=None, type=click.Path())
 @click.option(
@@ -392,6 +419,8 @@ def detect_obb_command(
     precision: str,
     confidence: float,
     iou: float,
+    max_nms: int | None,
+    max_det: int | None,
     batch: int,
     output: str | None,
     json_output: bool,
@@ -415,6 +444,8 @@ def detect_obb_command(
         device=device,
         precision=Precision(precision) if precision != "auto" else None,
         metrics_enabled=not no_metrics,
+        max_nms=max_nms if max_nms is not None else OBBConfig.max_nms,
+        max_det=max_det if max_det is not None else OBBConfig.max_det,
     )
 
     detections: list = []

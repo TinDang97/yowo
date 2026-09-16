@@ -15,6 +15,7 @@ scope moved the number by 10x.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import pytest
 
 from yowo.benchmark._baseline import (
     BaselineError,
+    MapBaseline,
     MapRegression,
     check_against_baseline,
     load_baseline,
@@ -34,6 +36,8 @@ _RECORD = {
     "device": "cpu",
     "confidence_threshold": 0.001,
     "iou_threshold": 0.45,
+    "max_nms": 1000,
+    "max_det": 300,
     "images": 500,
     "subset_manifest_sha256": "872ac411cf65f03234a725df9711e9ced36d1c8156161ab0b7ae63bd23336aad",
     "map_50_95": 0.4158,
@@ -64,6 +68,8 @@ def _observed(**overrides: object) -> dict[str, object]:
         "device": "cpu",
         "confidence_threshold": 0.001,
         "iou_threshold": 0.45,
+        "max_nms": 1000,
+        "max_det": 300,
         "images_evaluated": 500,
         "subset_manifest_sha256": _RECORD["subset_manifest_sha256"],
         "map_50_95": 0.4158,
@@ -77,22 +83,12 @@ def _observed(**overrides: object) -> dict[str, object]:
 # --- M2: what makes a record a baseline ----------------------------------
 
 
+# Derived from the dataclass, not hand-listed. A hand-written copy of the
+# required fields is a list inside the thing meant to notice a missing one: add
+# a field to MapBaseline and it would go unchecked until someone remembered.
 @pytest.mark.parametrize(
     "field",
-    [
-        "model",
-        "weights_sha256",
-        "backend",
-        "device",
-        "confidence_threshold",
-        "iou_threshold",
-        "images",
-        "subset_manifest_sha256",
-        "map_50_95",
-        "tolerance",
-        "measured_on",
-        "measured_at",
-    ],
+    [f.name for f in dataclasses.fields(MapBaseline)],
 )
 def test_the_baseline_records_every_input_that_determines_the_number(
     tmp_path: Path, field: str

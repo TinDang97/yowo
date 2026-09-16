@@ -12,6 +12,13 @@ Environment variable mapping (all uppercase, prefix YOWO_)::
     YOWO_PRECISION           -> InferenceConfig.precision
     YOWO_CONFIDENCE          -> InferenceConfig.confidence_threshold
     YOWO_IOU                 -> InferenceConfig.iou_threshold
+    YOWO_MAX_NMS             -> InferenceConfig.max_nms
+    YOWO_MAX_DET             -> InferenceConfig.max_det
+
+There is deliberately no OBB equivalent: ``OBBConfig`` has no environment
+override function at all -- only detection and classification do -- so adding
+one for these two fields alone would make them the only env-reachable OBB
+settings. Named as a residual on `bounded-postprocess` rather than half-built.
     YOWO_BATCH_SIZE          -> InferenceConfig.batch_size
     YOWO_CACHE               -> InferenceConfig.cache
     YOWO_CACHE_DIR           -> InferenceConfig.cache_dir
@@ -137,6 +144,8 @@ class InferenceConfig:
     precision: Precision | None = None
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.45
+    max_nms: int | None = 1000
+    max_det: int | None = 300
     batch_size: int = 1
     cache: bool = False
     cache_dir: Path | None = None
@@ -176,6 +185,9 @@ class InferenceConfig:
             )
         if not (0.0 <= self.iou_threshold <= 1.0):
             raise ConfigError(f"iou_threshold must be in [0.0, 1.0], got {self.iou_threshold}")
+        for _name, _value in (("max_nms", self.max_nms), ("max_det", self.max_det)):
+            if _value is not None and _value < 1:
+                raise ConfigError(f"{_name} must be >= 1 or None, got {_value}")
         if self.batch_size < 1:
             raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.max_queue_size < 1:
@@ -322,6 +334,8 @@ class OBBConfig:
     precision: Precision | None = None
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.45
+    max_nms: int | None = 2048
+    max_det: int | None = 1000
     batch_size: int = 1
     frame_drop_policy: FrameDropPolicy = FrameDropPolicy.LATEST
     max_queue_size: int = 2
@@ -346,6 +360,9 @@ class OBBConfig:
             )
         if not 0.0 <= self.iou_threshold <= 1.0:
             raise ConfigError(f"iou_threshold must be in [0.0, 1.0], got {self.iou_threshold}")
+        for _name, _value in (("max_nms", self.max_nms), ("max_det", self.max_det)):
+            if _value is not None and _value < 1:
+                raise ConfigError(f"{_name} must be >= 1 or None, got {_value}")
         if self.batch_size < 1:
             raise ConfigError(f"batch_size must be >= 1, got {self.batch_size}")
         if self.max_queue_size < 1:
@@ -434,6 +451,12 @@ def _apply_env_overrides(cfg: InferenceConfig) -> None:
         cfg.weights_path = Path(v)
     if (v := env.get("YOWO_NUM_CLASSES")) is not None:
         cfg.num_classes = int(v)
+    if (v := env.get("YOWO_MAX_NMS")) is not None:
+        # "none" spelled out: the unbounded case must stay reachable from an
+        # environment that can only carry strings.
+        cfg.max_nms = None if v.lower() == "none" else int(v)
+    if (v := env.get("YOWO_MAX_DET")) is not None:
+        cfg.max_det = None if v.lower() == "none" else int(v)
     if (v := env.get("YOWO_BACKEND")) is not None:
         cfg.backend = BackendType(v)
     if (v := env.get("YOWO_DEVICE")) is not None:
@@ -498,6 +521,8 @@ def _dict_to_inference_config(data: dict[str, Any]) -> InferenceConfig:
         "max_queue_size",
         "pipeline_workers",
         "error_threshold",
+        "max_nms",
+        "max_det",
     ):
         if int_field in data and data[int_field] is not None:
             kwargs[int_field] = int(data[int_field])
